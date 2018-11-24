@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"crypto/tls"
 	"net"
 
 	"github.com/golang/glog"
@@ -9,7 +10,7 @@ import (
 
 func StartClient(server string) {
 	connCh := listenLocal([]string{":80", ":443"})
-	sess, err := quic.DialAddr(server, nil, nil)
+	sess, err := quic.DialAddr(server, &tls.Config{InsecureSkipVerify: true}, nil)
 	if err != nil {
 		glog.Fatalf("connect to remote(%s) fail:%s\n", server, err)
 	}

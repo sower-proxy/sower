@@ -9,7 +9,7 @@ import (
 )
 
 func StartServer(port string) {
-	ln, err := quic.ListenAddr(":"+port, nil, nil)
+	ln, err := quic.ListenAddr(":"+port, mockTlsPem(), nil)
 	if err != nil {
 		glog.Fatalln(err)
 	}
