@@ -1,0 +1,9 @@
+server_port="5533"
+server_addr="127.0.0.1:5533"
+dns_server="114.114.114.114"
+blocklist=[
+    "*.google.com",
+    "*.youtube.com",
+    "zh.wikipedia.org",
+]
+debug=true
