@@ -1,9 +1,9 @@
 package proxy
 
 import (
-	"log"
 	"net"
 
+	"github.com/golang/glog"
 	"github.com/lucas-clemente/quic-go"
 )
 
@@ -11,18 +11,18 @@ func StartClient(server string) {
 	connCh := listenLocal([]string{":80", ":443"})
 	sess, err := quic.DialAddr(server, nil, nil)
 	if err != nil {
-		log.Printf("connect to remote(%s) fail:%s\n", server, err)
-		return
+		glog.Fatalf("connect to remote(%s) fail:%s\n", server, err)
 	}
 
 	for {
 		go func(conn net.Conn) {
+			glog.V(1).Infoln("new request to", conn.RemoteAddr())
 			defer conn.Close()
 			conn.(*net.TCPConn).SetKeepAlive(true)
 
 			stream, err := sess.OpenStream()
 			if err != nil {
-				log.Printf("connect to remote(%s) fail:%s\n", server, err)
+				glog.Warningf("connect to remote(%s) fail:%s\n", server, err)
 				return
 			}
 			defer stream.Close()
@@ -38,13 +38,13 @@ func listenLocal(ports []string) <-chan net.Conn {
 		go func(port string) {
 			ln, err := net.Listen("tcp", port)
 			if err != nil {
-				log.Fatalln(err)
+				glog.Fatalln(err)
 			}
 
 			for {
 				conn, err := ln.Accept()
 				if err != nil {
-					log.Println("accept", port, "fail:", err)
+					glog.Errorln("accept", port, "fail:", err)
 				}
 
 				connCh <- conn
@@ -52,5 +52,6 @@ func listenLocal(ports []string) <-chan net.Conn {
 		}(ports[i])
 	}
 
+	glog.Infoln("listening ports:", ports)
 	return connCh
 }

@@ -1,13 +1,12 @@
 package dns
 
 import (
-	"log"
 	"net"
 	"strings"
 	"time"
 
+	"github.com/golang/glog"
 	"github.com/miekg/dns"
-	"github.com/wweir/sower/conf"
 )
 
 func StartDNS(dnsServer string, blocklist []string) {
@@ -35,7 +34,7 @@ func StartDNS(dnsServer string, blocklist []string) {
 
 	server := &dns.Server{Addr: ":53", Net: "udp"}
 	server.TsigSecret = map[string]string{"axfr.": "so6ZGir4GPAqINNh9U5c3A=="}
-	log.Fatalln(server.ListenAndServe())
+	glog.Fatalln(server.ListenAndServe())
 }
 
 // TODO: delete me
@@ -59,7 +58,7 @@ func bestTry(w dns.ResponseWriter, r *dns.Msg, name, dnsServer string) {
 	}
 
 	if _, err := net.DialTimeout("tcp", ip+":http", time.Second); err != nil {
-		log.Println(ip+":80", err)
+		glog.V(2).Infoln(ip+":80", err)
 		rr, _ := dns.NewRR(name + " A 127.0.0.1")
 		r.Answer = []dns.RR{rr}
 		w.WriteMsg(r)
@@ -76,26 +75,19 @@ func initRule(blocklist []string) {
 	for i := range blocklist {
 		rule.Add(strings.Split(blocklist[i], "."))
 	}
-
-	if conf.Conf.Debug {
-		log.Printf("block rule:\n%s", rule)
-	}
+	glog.V(1).Infof("block rule:\n%s", rule)
 }
 
 func manual(w dns.ResponseWriter, r *dns.Msg, name, dnsServer string) {
 	if rule.Match(strings.TrimSuffix(name, ".")) {
-		if conf.Conf.Debug {
-			log.Printf("match %s suss", name)
-		}
+		glog.V(2).Infof("match %s suss", name)
 
 		rr, _ := dns.NewRR(name + " A 127.0.0.1")
 		r.Answer = []dns.RR{rr}
 		w.WriteMsg(r)
 		return
 	}
-	if conf.Conf.Debug {
-		log.Printf("match %s fail", name)
-	}
+	glog.V(2).Infof("match %s fail", name)
 
 	msg, err := dns.Exchange(r, dnsServer+":53")
 	if err != nil || len(msg.Answer) == 0 {

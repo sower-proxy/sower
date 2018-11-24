@@ -1,9 +1,9 @@
 package proxy
 
 import (
-	"log"
 	"net"
 
+	"github.com/golang/glog"
 	"github.com/lucas-clemente/quic-go"
 	"github.com/wweir/sower/parser"
 )
@@ -11,13 +11,13 @@ import (
 func StartServer(port string) {
 	ln, err := quic.ListenAddr(":"+port, nil, nil)
 	if err != nil {
-		log.Fatalln(err)
+		glog.Fatalln(err)
 	}
 
 	for {
 		sess, err := ln.Accept()
 		if err != nil {
-			log.Println(err)
+			glog.Errorln(err)
 		}
 		go acceptSession(sess)
 	}
@@ -27,7 +27,7 @@ func acceptSession(sess quic.Session) {
 	for {
 		stream, err := sess.AcceptStream()
 		if err != nil {
-			log.Println(err)
+			glog.Errorln(err)
 		}
 		go acceptStream(stream, sess)
 	}
@@ -38,14 +38,14 @@ func acceptStream(stream quic.Stream, sess quic.Session) {
 
 	conn, addr, err := parser.ParseAddr(&streamConn{stream, sess})
 	if err != nil {
-		log.Panicln(err)
+		glog.Warningln(err)
 		return
 	}
-	log.Println(addr)
+	glog.V(1).Infoln(addr)
 
 	rc, err := net.Dial("tcp", addr)
 	if err != nil {
-		log.Println(err)
+		glog.Warningln(err)
 		return
 	}
 	defer rc.Close()

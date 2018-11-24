@@ -6,4 +6,4 @@ blocklist=[
     "*.youtube.com",
     "zh.wikipedia.org",
 ]
-debug=true
+verbose=1

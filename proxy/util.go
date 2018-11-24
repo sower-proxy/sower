@@ -2,12 +2,12 @@ package proxy
 
 import (
 	"io"
-	"log"
 	"net"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/golang/glog"
 	"github.com/lucas-clemente/quic-go"
 )
 
@@ -35,7 +35,7 @@ func relay(conn1, conn2 net.Conn) {
 
 func redirect(conn1, conn2 net.Conn, wg *sync.WaitGroup, exitFlag *int32) {
 	if _, err := io.Copy(conn2, conn1); err != nil && (atomic.LoadInt32(exitFlag) == 0) {
-		log.Printf("%s<>%s -> %s<>%s: %s", conn1.RemoteAddr(), conn1.LocalAddr(), conn2.LocalAddr(), conn2.RemoteAddr(), err)
+		glog.V(1).Infof("%s<>%s -> %s<>%s: %s", conn1.RemoteAddr(), conn1.LocalAddr(), conn2.LocalAddr(), conn2.RemoteAddr(), err)
 	}
 
 	// wakeup all conn goroutine
