@@ -50,7 +50,7 @@ func acceptStream(stream quic.Stream, sess quic.Session) {
 	}
 	glog.V(1).Infoln(addr)
 
-	rc, err := net.Dial("tcp", "www.baidu.com:80")
+	rc, err := net.Dial("tcp", addr)
 	if err != nil {
 		glog.Warningln(err)
 		return
