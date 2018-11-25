@@ -10,7 +10,7 @@ import (
 )
 
 func StartDNS(dnsServer string, blocklist []string) {
-	var handle func(w dns.ResponseWriter, r *dns.Msg, name, dnsServer string)
+	var handle func(w dns.ResponseWriter, r *dns.Msg, domain, dnsServer string)
 	if len(blocklist) == 0 {
 		handle = bestTry
 	} else {
@@ -21,7 +21,7 @@ func StartDNS(dnsServer string, blocklist []string) {
 	dns.HandleFunc(".", func(w dns.ResponseWriter, r *dns.Msg) {
 		// *Msg r has an TSIG record and it was validated
 		if r.IsTsig() != nil && w.TsigStatus() == nil {
-			r.SetTsig("axfr.", dns.HmacMD5, 300, time.Now().Unix())
+			r.SetTsig(r.Extra[len(r.Extra)-1].(*dns.TSIG).Hdr.Name, dns.HmacMD5, 300, time.Now().Unix())
 		}
 
 		//https://stackoverflow.com/questions/4082081/requesting-a-and-aaaa-records-in-single-dns-query/4083071#4083071
@@ -38,12 +38,10 @@ func StartDNS(dnsServer string, blocklist []string) {
 }
 
 // TODO: delete me
-func bestTry(w dns.ResponseWriter, r *dns.Msg, name, dnsServer string) {
+func bestTry(w dns.ResponseWriter, r *dns.Msg, domain, dnsServer string) {
 	msg, err := dns.Exchange(r, dnsServer+":53")
 	if err != nil || len(msg.Answer) == 0 {
-		rr, _ := dns.NewRR(name + " A 127.0.0.1")
-		r.Answer = []dns.RR{rr}
-		w.WriteMsg(r)
+		w.WriteMsg(localA(r, domain))
 		return
 	}
 
@@ -59,9 +57,7 @@ func bestTry(w dns.ResponseWriter, r *dns.Msg, name, dnsServer string) {
 
 	if _, err := net.DialTimeout("tcp", ip+":http", time.Second); err != nil {
 		glog.V(2).Infoln(ip+":80", err)
-		rr, _ := dns.NewRR(name + " A 127.0.0.1")
-		r.Answer = []dns.RR{rr}
-		w.WriteMsg(r)
+		w.WriteMsg(localA(r, domain))
 		return
 	}
 	w.WriteMsg(msg)
@@ -78,23 +74,28 @@ func initRule(blocklist []string) {
 	glog.V(2).Infof("block rule:\n%s", rule)
 }
 
-func manual(w dns.ResponseWriter, r *dns.Msg, name, dnsServer string) {
-	if rule.Match(strings.TrimSuffix(name, ".")) {
-		glog.V(2).Infof("match %s suss", name)
-
-		rr, _ := dns.NewRR(name + " A 127.0.0.1")
-		r.Answer = []dns.RR{rr}
-		w.WriteMsg(r)
+func manual(w dns.ResponseWriter, r *dns.Msg, domain, dnsServer string) {
+	if rule.Match(strings.TrimSuffix(domain, ".")) {
+		glog.V(2).Infof("match %s suss", domain)
+		w.WriteMsg(localA(r, domain))
 		return
 	}
-	glog.V(2).Infof("match %s fail", name)
+	glog.V(2).Infof("match %s fail", domain)
 
 	msg, err := dns.Exchange(r, dnsServer+":53")
 	if err != nil || len(msg.Answer) == 0 {
-		rr, _ := dns.NewRR(name + " A 127.0.0.1")
-		r.Answer = []dns.RR{rr}
-		w.WriteMsg(r)
+		w.WriteMsg(localA(r, domain))
 		return
 	}
 	w.WriteMsg(msg)
+}
+
+func localA(r *dns.Msg, domain string) *dns.Msg {
+	m := new(dns.Msg)
+	m.SetReply(r)
+	m.Answer = []dns.RR{&dns.A{
+		Hdr: dns.RR_Header{Name: domain, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 0},
+		A:   net.IPv4(127, 0, 0, 1),
+	}}
+	return m
 }
