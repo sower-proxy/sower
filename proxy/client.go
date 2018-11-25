@@ -11,18 +11,20 @@ import (
 func StartClient(server string) {
 	connCh := listenLocal([]string{":80", ":443"})
 
-	for {
+	for conn := range connCh {
 		sess, err := quic.DialAddr(server, &tls.Config{InsecureSkipVerify: true}, nil)
 		if err != nil {
-			glog.Fatalf("connect to remote(%s) fail:%s\n", server, err)
+			glog.Errorf("connect to remote(%s) fail:%s\n", server, err)
+			continue
 		}
 		glog.Infoln("new session to", sess.RemoteAddr())
 
-		for conn := range connCh {
-			if err := openStream(conn, sess); err != nil {
-				break
-			}
+		reDial := false // no cas action, no need add lock
+		for !reDial {
+			go openStream(conn, sess, &reDial)
+			conn = <-connCh
 		}
+
 		sess.Close()
 	}
 }
@@ -51,7 +53,7 @@ func listenLocal(ports []string) <-chan net.Conn {
 	return connCh
 }
 
-func openStream(conn net.Conn, sess quic.Session) error {
+func openStream(conn net.Conn, sess quic.Session, reDial *bool) {
 	defer conn.Close()
 	conn.(*net.TCPConn).SetKeepAlive(true)
 
@@ -59,10 +61,10 @@ func openStream(conn net.Conn, sess quic.Session) error {
 	stream, err := sess.OpenStream()
 	if err != nil {
 		glog.Warningf("connect to remote(%s) fail:%s\n", sess.RemoteAddr(), err)
-		return err
+		*reDial = true
+		return
 	}
 	defer stream.Close()
 
 	relay(&streamConn{stream, sess}, conn)
-	return nil
 }
