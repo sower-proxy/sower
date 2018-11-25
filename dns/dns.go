@@ -33,11 +33,9 @@ func StartDNS(dnsServer string, blocklist []string) {
 	})
 
 	server := &dns.Server{Addr: ":53", Net: "udp"}
-	server.TsigSecret = map[string]string{"axfr.": "so6ZGir4GPAqINNh9U5c3A=="}
 	glog.Fatalln(server.ListenAndServe())
 }
 
-// TODO: delete me
 func bestTry(w dns.ResponseWriter, r *dns.Msg, domain, dnsServer string) {
 	msg, err := dns.Exchange(r, dnsServer+":53")
 	if err != nil || len(msg.Answer) == 0 {
