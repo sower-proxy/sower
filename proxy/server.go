@@ -18,22 +18,29 @@ func StartServer(port string) {
 		sess, err := ln.Accept()
 		if err != nil {
 			glog.Errorln(err)
+			continue
 		}
 		go acceptSession(sess)
 	}
 }
 
 func acceptSession(sess quic.Session) {
+	glog.V(1).Infoln("new session from ", sess.RemoteAddr())
+	defer sess.Close()
+
 	for {
 		stream, err := sess.AcceptStream()
 		if err != nil {
 			glog.Errorln(err)
+			return
 		}
+
 		go acceptStream(stream, sess)
 	}
 }
 
 func acceptStream(stream quic.Stream, sess quic.Session) {
+	glog.V(1).Infoln("new stream from ", sess.RemoteAddr())
 	defer stream.Close()
 
 	conn, addr, err := parser.ParseAddr(&streamConn{stream, sess})
@@ -43,7 +50,7 @@ func acceptStream(stream quic.Stream, sess quic.Session) {
 	}
 	glog.V(1).Infoln(addr)
 
-	rc, err := net.Dial("tcp", addr)
+	rc, err := net.Dial("tcp", "www.baidu.com:80")
 	if err != nil {
 		glog.Warningln(err)
 		return

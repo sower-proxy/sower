@@ -75,7 +75,7 @@ func initRule(blocklist []string) {
 	for i := range blocklist {
 		rule.Add(strings.Split(blocklist[i], "."))
 	}
-	glog.V(1).Infof("block rule:\n%s", rule)
+	glog.V(2).Infof("block rule:\n%s", rule)
 }
 
 func manual(w dns.ResponseWriter, r *dns.Msg, name, dnsServer string) {
