@@ -14,8 +14,10 @@ func StartClient(server string) {
 	for conn := range connCh {
 		sess, err := quic.DialAddr(server, &tls.Config{InsecureSkipVerify: true}, nil)
 		if err != nil {
-			glog.Errorf("connect to remote(%s) fail:%s\n", server, err)
-			continue
+			if sess, err = quic.DialAddr(server, &tls.Config{InsecureSkipVerify: true}, nil); err != nil {
+				glog.Errorf("connect to remote(%s) fail:%s\n", server, err)
+				continue
+			}
 		}
 		glog.Infoln("new session to", sess.RemoteAddr())
 
