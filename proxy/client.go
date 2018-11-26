@@ -20,6 +20,7 @@ func StartClient(server string) {
 		if err != nil {
 			if sess, err = quic.DialAddr(server, &tls.Config{InsecureSkipVerify: true}, nil); err != nil {
 				glog.Errorf("connect to remote(%s) fail:%s\n", server, err)
+				time.Sleep(2 * time.Second)
 				continue
 			}
 		}
@@ -85,6 +86,7 @@ func listenLocal(ports []string) <-chan net.Conn {
 				conn, err := ln.Accept()
 				if err != nil {
 					glog.Errorln("accept", port, "fail:", err)
+					continue
 				}
 
 				connCh <- conn
