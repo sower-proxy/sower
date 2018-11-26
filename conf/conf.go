@@ -5,6 +5,8 @@ import (
 	"strconv"
 
 	"github.com/BurntSushi/toml"
+	"github.com/fsnotify/fsnotify"
+	"github.com/golang/glog"
 )
 
 var Conf = struct {
@@ -29,12 +31,46 @@ func init() {
 	if Conf.ConfigFile == "" {
 		return
 	}
-	if _, err := toml.DecodeFile(Conf.ConfigFile, &Conf); err != nil {
+	if err := OnRefreash[0](); err != nil {
 		panic(err)
+	}
+	watchConfigFile()
+}
+
+var OnRefreash = []func() error{func() error {
+	if _, err := toml.DecodeFile(Conf.ConfigFile, &Conf); err != nil {
+		return err
 	}
 
 	// for glog
 	if err := flag.Set("v", strconv.Itoa(Conf.Verbose)); err != nil {
-		panic(err)
+		return err
 	}
+	return nil
+}}
+
+func watchConfigFile() {
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		glog.Fatalln(err)
+	}
+	if err := watcher.Add(Conf.ConfigFile); err != nil {
+		glog.Fatalln(err)
+	}
+
+	go func() {
+		for {
+			select {
+			case event := <-watcher.Events:
+				glog.Infof("watch %s event: %v", Conf.ConfigFile, event)
+				for i := range OnRefreash {
+					if err := OnRefreash[i](); err != nil {
+						glog.Errorln(err)
+					}
+				}
+			case err := <-watcher.Errors:
+				glog.Fatalln(err)
+			}
+		}
+	}()
 }

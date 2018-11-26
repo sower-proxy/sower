@@ -7,17 +7,10 @@ import (
 
 	"github.com/golang/glog"
 	"github.com/miekg/dns"
+	"github.com/wweir/sower/conf"
 )
 
-func StartDNS(dnsServer string, blocklist []string) {
-	var handle func(w dns.ResponseWriter, r *dns.Msg, domain, dnsServer string)
-	if len(blocklist) == 0 {
-		handle = bestTry
-	} else {
-		initRule(blocklist)
-		handle = manual
-	}
-
+func StartDNS(dnsServer string) {
 	dns.HandleFunc(".", func(w dns.ResponseWriter, r *dns.Msg) {
 		// *Msg r has an TSIG record and it was validated
 		if r.IsTsig() != nil && w.TsigStatus() == nil {
@@ -29,7 +22,11 @@ func StartDNS(dnsServer string, blocklist []string) {
 			return
 		}
 
-		handle(w, r, r.Question[0].Name, dnsServer)
+		if len(conf.Conf.BlockList) == 0 {
+			bestTry(w, r, r.Question[0].Name, dnsServer)
+		} else {
+			manual(w, r, r.Question[0].Name, dnsServer)
+		}
 	})
 
 	server := &dns.Server{Addr: ":53", Net: "udp"}
@@ -59,17 +56,6 @@ func bestTry(w dns.ResponseWriter, r *dns.Msg, domain, dnsServer string) {
 		return
 	}
 	w.WriteMsg(msg)
-}
-
-var rule *Node
-
-func initRule(blocklist []string) {
-	rule = NewNode()
-
-	for i := range blocklist {
-		rule.Add(strings.Split(blocklist[i], "."))
-	}
-	glog.V(2).Infof("block rule:\n%s", rule)
 }
 
 func manual(w dns.ResponseWriter, r *dns.Msg, domain, dnsServer string) {

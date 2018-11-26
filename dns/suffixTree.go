@@ -11,6 +11,14 @@ type Node struct {
 func NewNode() *Node {
 	return &Node{Node: map[string]*Node{}}
 }
+func NewNodeFromRule(rules ...string) *Node {
+	node := NewNode()
+	for i := range rules {
+		node.Add(strings.Split(rules[i], "."))
+	}
+	return node
+}
+
 func (n *Node) String() string {
 	return n.string("")
 }

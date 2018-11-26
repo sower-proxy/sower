@@ -13,7 +13,7 @@ func main() {
 	if conf.Conf.ServerAddr == "" {
 		proxy.StartServer(conf.Conf.ServerPort)
 	} else {
-		go dns.StartDNS(conf.Conf.DnsServer, conf.Conf.BlockList)
+		go dns.StartDNS(conf.Conf.DnsServer)
 		proxy.StartClient(conf.Conf.ServerAddr)
 	}
 }
