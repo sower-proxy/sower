@@ -6,8 +6,8 @@ import (
 	"strconv"
 
 	"github.com/BurntSushi/toml"
-	"github.com/wweir/fsnotify"
 	"github.com/golang/glog"
+	"github.com/wweir/fsnotify"
 )
 
 var Conf = struct {
