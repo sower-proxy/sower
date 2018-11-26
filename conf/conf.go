@@ -2,6 +2,7 @@ package conf
 
 import (
 	"flag"
+	"net"
 	"strconv"
 
 	"github.com/BurntSushi/toml"
@@ -10,12 +11,14 @@ import (
 )
 
 var Conf = struct {
-	ConfigFile string
-	ServerPort string   `toml:"server_port"`
-	ServerAddr string   `toml:"server_addr"`
-	DnsServer  string   `toml:"dns_server"`
-	BlockList  []string `toml:"blocklist"`
-	Verbose    int      `toml:"verbose"`
+	ConfigFile  string
+	ServerPort  string   `toml:"server_port"`
+	ServerAddr  string   `toml:"server_addr"`
+	DnsServer   string   `toml:"dns_server"`
+	ClientIP    string   `toml:"client_ip"`
+	ClientIPNet net.IP   `toml:"-"`
+	BlockList   []string `toml:"blocklist"`
+	Verbose     int      `toml:"verbose"`
 }{}
 
 func init() {
@@ -23,6 +26,7 @@ func init() {
 	flag.StringVar(&Conf.ServerPort, "P", "5533", "server mode listen port")
 	flag.StringVar(&Conf.ServerAddr, "s", "", "server IP (run in client mode if set)")
 	flag.StringVar(&Conf.DnsServer, "d", "114.114.114.114", "client dns server")
+	flag.StringVar(&Conf.ClientIP, "c", "127.0.0.1", "client dns service redirect IP")
 
 	if !flag.Parsed() {
 		flag.Parse()
@@ -41,7 +45,7 @@ var OnRefreash = []func() error{func() error {
 	if _, err := toml.DecodeFile(Conf.ConfigFile, &Conf); err != nil {
 		return err
 	}
-
+	Conf.ClientIPNet = net.ParseIP(Conf.ClientIP)
 	// for glog
 	if err := flag.Set("v", strconv.Itoa(Conf.Verbose)); err != nil {
 		return err

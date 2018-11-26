@@ -78,8 +78,8 @@ func localA(r *dns.Msg, domain string) *dns.Msg {
 	m := new(dns.Msg)
 	m.SetReply(r)
 	m.Answer = []dns.RR{&dns.A{
-		Hdr: dns.RR_Header{Name: domain, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 0},
-		A:   net.IPv4(127, 0, 0, 1),
+		Hdr: dns.RR_Header{Name: domain, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 720},
+		A:   conf.Conf.ClientIPNet,
 	}}
 	return m
 }
