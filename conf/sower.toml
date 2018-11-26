@@ -2,8 +2,16 @@ server_port="5533"
 server_addr="127.0.0.1:5533"
 dns_server="114.114.114.114"
 blocklist=[
-    "*.google.com",
-    "*.youtube.com",
-    "zh.wikipedia.org",
+    "*.google.com", # google
+    "*.youtube.com", # youtube
+    "*.ytimg.com",
+    "*.ggpht.com",
+    "*.googlevideo.com",
+    "golang.org", # golang
+    "*.googlesource.com",
+    "zh.wikipedia.org", # wikipeida
+    "*.facebook.com", # facebook
+	"static.xx.fbcdn.net",
+    "*.web.telegram.org", # telegram
 ]
 verbose=1
