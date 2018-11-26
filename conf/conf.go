@@ -6,7 +6,7 @@ import (
 	"strconv"
 
 	"github.com/BurntSushi/toml"
-	"github.com/fsnotify/fsnotify"
+	"github.com/wweir/fsnotify"
 	"github.com/golang/glog"
 )
 
@@ -53,6 +53,7 @@ var OnRefreash = []func() error{func() error {
 	return nil
 }}
 
+// watchConfigFile changes, fsnotify take too much cpu time, DIY
 func watchConfigFile() {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
