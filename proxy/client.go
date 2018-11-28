@@ -65,7 +65,7 @@ func openStream(conn net.Conn, sess quic.Session, reDialCh chan<- net.Conn) bool
 	}()
 
 	select {
-	case _, ok := <-okCh: // true means close on error
+	case _, ok := <-okCh: // false means close on error
 		return ok
 	case <-time.After(time.Second):
 		return false
