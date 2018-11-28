@@ -57,11 +57,14 @@ func openStream(conn net.Conn, sess quic.Session, reDialCh chan<- net.Conn) bool
 		select {
 		case okCh <- struct{}{}:
 		default:
+			close(okCh)
+			return
 		}
 		close(okCh)
 
 		conn.(*net.TCPConn).SetKeepAlive(true)
 		relay(&streamConn{stream, sess}, conn)
+		conn.Close()
 	}()
 
 	select {

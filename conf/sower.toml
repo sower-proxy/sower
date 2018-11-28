@@ -20,6 +20,7 @@ blocklist=[
     "img1.blogblog.com",
     "*.golang.org", # golang
     "go.googlesource.com",
+	"gist.github.com",
     "*.wikipedia.org", # wikipeida
 	"*.wikimedia.org",
 	"*.wikisource.org",
