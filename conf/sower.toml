@@ -28,5 +28,7 @@ blocklist=[
 	"e16991.b.akamaiedge.net",
     "*.web.telegram.org", # telegram
 	"cloud.feedly.com", # feedly
+    "*.nytimes.com", # New York times
+    "*.nyt.com",
 ]
 verbose=0

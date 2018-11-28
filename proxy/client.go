@@ -3,7 +3,6 @@ package proxy
 import (
 	"crypto/tls"
 	"net"
-	"sync/atomic"
 	"time"
 
 	"github.com/golang/glog"
@@ -32,6 +31,7 @@ func StartClient(server string) {
 			case conn = <-reDialCh:
 			}
 
+			// sync action to reuse sigle sess
 			if !openStream(conn, sess, reDialCh) {
 				sess.Close()
 				break
@@ -43,34 +43,33 @@ func StartClient(server string) {
 func openStream(conn net.Conn, sess quic.Session, reDialCh chan<- net.Conn) bool {
 	glog.V(1).Infoln("new request from", conn.RemoteAddr())
 
-	sessStat := new(int32) // 0:waiting 1:ok 2:timeout
+	okCh := make(chan struct{})
 	go func() {
 		stream, err := sess.OpenStream()
 		if err != nil {
 			glog.Warningf("connect to remote(%s) fail:%s\n", sess.RemoteAddr(), err)
 			reDialCh <- conn
+			close(okCh)
 			return
 		}
 		defer stream.Close()
 
-		if !atomic.CompareAndSwapInt32(sessStat, 0, 1) {
-			reDialCh <- conn // timeout
+		select {
+		case okCh <- struct{}{}:
+		default:
 		}
+		close(okCh)
 
 		conn.(*net.TCPConn).SetKeepAlive(true)
 		relay(&streamConn{stream, sess}, conn)
-		conn.Close()
 	}()
 
-	// wait timeout: 10ms * 100 => 1s
-	for i := 0; i < 100; i++ {
-		if atomic.LoadInt32(sessStat) == 1 {
-			return true
-		}
-		time.Sleep(10 * time.Millisecond)
+	select {
+	case _, ok := <-okCh: // true means close on error
+		return ok
+	case <-time.After(time.Second):
+		return false
 	}
-
-	return !atomic.CompareAndSwapInt32(sessStat, 0, 2)
 }
 
 func listenLocal(ports []string) <-chan net.Conn {
