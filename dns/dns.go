@@ -34,9 +34,9 @@ func StartDNS(dnsServer string) {
 }
 
 func bestTry(w dns.ResponseWriter, r *dns.Msg, domain, dnsServer string) {
-	msg, err := dns.Exchange(r, dnsServer+":53")
-	if err != nil || len(msg.Answer) == 0 {
-		w.WriteMsg(localA(r, domain))
+	msg, _ := dns.Exchange(r, dnsServer+":53")
+	if len(msg.Answer) == 0 { // expose any response
+		w.WriteMsg(msg)
 		return
 	}
 
@@ -66,11 +66,8 @@ func manual(w dns.ResponseWriter, r *dns.Msg, domain, dnsServer string) {
 	}
 	glog.V(2).Infof("match %s fail", domain)
 
-	msg, err := dns.Exchange(r, dnsServer+":53")
-	if err != nil || len(msg.Answer) == 0 {
-		w.WriteMsg(localA(r, domain))
-		return
-	}
+	// expose any response
+	msg, _ := dns.Exchange(r, dnsServer+":53")
 	w.WriteMsg(msg)
 }
 
