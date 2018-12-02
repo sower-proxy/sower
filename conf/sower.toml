@@ -28,10 +28,10 @@ blocklist=[
     "*.atlassian.net", # atlassian
     "*.atlassian.com",
     "*.prod.public.atl-paas.net",
-	"*.cloudfront.net",
+    "*.cloudfront.net",
     "*.golang.org", # golang
     "go.googlesource.com",
-	"gist.github.com",
+    "gist.github.com",
     "*.k8s.io",
     "*.wikipedia.org", # wikipeida
     "*.wikimedia.org",

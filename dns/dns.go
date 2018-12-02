@@ -48,6 +48,7 @@ func bestTry(w dns.ResponseWriter, r *dns.Msg, domain, dnsServer string) {
 		ip = "[" + msg.Answer[0].(*dns.AAAA).AAAA.String() + "]"
 	default:
 		w.WriteMsg(msg)
+		return
 	}
 
 	if _, err := net.DialTimeout("tcp", ip+":http", time.Second); err != nil {
