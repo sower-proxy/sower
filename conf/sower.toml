@@ -5,7 +5,9 @@ dns_server="114.114.114.114"
 # client_ip="192.168.0.1"
 blocklist=[
     "*.*.google.com", # google
+    "g.co",
     "*.googleusercontent.com",
+    "*.googleapis.com",
     "gmail.com",
     "*.youtube.com", # youtube
     "*.ytimg.com",
@@ -14,7 +16,9 @@ blocklist=[
     "*.vimeo.com",
     "*.facebook.com", # facebook
     "*.xx.fbcdn.net",
+    "connect.facebook.net",
     "*.twitter.com", # twitter
+    "t.co",
     "*.twimg.com",
     "www.reddit.com", # reddit
     "www.redditmedia.com",
@@ -25,13 +29,14 @@ blocklist=[
     "*.*.aws.amazon.com", # amazon
     "m.media-amazon.com",
     "*.awsstatic.com",
-    "*.atlassian.net", # atlassian
-    "*.atlassian.com",
-    "*.prod.public.atl-paas.net",
+    "*.*.*.atl-paas.net", # atlassian
+    "*.atlassian.net",
     "*.cloudfront.net",
+    "gira.com",
+    "*.medium.com",
     "*.golang.org", # golang
     "go.googlesource.com",
-    "gist.github.com",
+    "gist.github.com", # github
     "*.k8s.io",
     "*.wikipedia.org", # wikipeida
     "*.wikimedia.org",
