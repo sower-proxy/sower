@@ -6,6 +6,7 @@ dns_server="114.114.114.114"
 blocklist=[
     "*.*.google.com", # google
     "g.co",
+    "*.*.goo.gl",
     "*.googleusercontent.com",
     "*.googleapis.com",
     "gmail.com",
@@ -20,6 +21,7 @@ blocklist=[
     "*.twitter.com", # twitter
     "t.co",
     "*.twimg.com",
+    "www.linkedin.com",
     "www.reddit.com", # reddit
     "www.redditmedia.com",
     "*.*.blogspot.com", # blogspot
@@ -29,15 +31,15 @@ blocklist=[
     "*.*.aws.amazon.com", # amazon
     "m.media-amazon.com",
     "*.awsstatic.com",
-    "*.*.*.atl-paas.net", # atlassian
-    "*.atlassian.net",
-    "*.cloudfront.net",
-    "gira.com",
+	"*.*.*.cloudfront.net", # atlassian
     "*.medium.com",
+    "accounts-static.cdn.mozilla.net", # firefox
+    "pocket-image-cache.com", # pocket
     "*.golang.org", # golang
     "go.googlesource.com",
     "gist.github.com", # github
-    "*.k8s.io",
+    "*.k8s.io", # k8s
+    "k8s.gcr.io",
     "*.wikipedia.org", # wikipeida
     "*.wikimedia.org",
     "*.wikisource.org",
@@ -45,12 +47,19 @@ blocklist=[
     "lookup-api.apple.com.edgekey.net",
     "e16991.b.akamaiedge.net",
     "*.web.telegram.org", # telegram
+    "core.telegram.org",
+    "telegram.me",
     "t.me",
     "*.slack.com", #slack
     "*.slack-edge.com",
     "js.driftt.com",
     "cloud.feedly.com", # feedly
+    "static.grammarly.com", # grammarly
+    "apkpure.com", # apkpure
+    "download.apkpure.com",
     "*.nytimes.com", # New York times
     "*.nyt.com",
+    "bandwagonhost.com", # bandwagonhost
+    "www.bwh1.net",
 ]
-verbose=0
+verbose=1
