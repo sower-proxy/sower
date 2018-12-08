@@ -10,6 +10,8 @@ import (
 	"github.com/wweir/sower/conf"
 )
 
+const colon = byte(':')
+
 func StartDNS(dnsServer string) {
 	dns.HandleFunc(".", func(w dns.ResponseWriter, r *dns.Msg) {
 		// *Msg r has an TSIG record and it was validated
@@ -22,10 +24,15 @@ func StartDNS(dnsServer string) {
 			return
 		}
 
+		domain := r.Question[0].Name
+		if idx := strings.IndexByte(domain, colon); idx > 0 {
+			domain = domain[:idx]
+		}
+
 		if len(conf.Conf.BlockList) == 0 {
-			bestTry(w, r, r.Question[0].Name, dnsServer)
+			bestTry(w, r, domain, dnsServer)
 		} else {
-			manual(w, r, r.Question[0].Name, dnsServer)
+			manual(w, r, domain, dnsServer)
 		}
 	})
 
@@ -69,9 +76,9 @@ func manual(w dns.ResponseWriter, r *dns.Msg, domain, dnsServer string) {
 		return
 	}
 
-	msg, _ := dns.Exchange(r, dnsServer+":53") // expose any response
+	msg, err := dns.Exchange(r, dnsServer+":53") // expose any response
 	if msg == nil {
-		glog.V(1).Infof("get dns of %s fail", domain)
+		glog.V(1).Infof("get dns of %s fail: %s", domain, err)
 		return
 	}
 	w.WriteMsg(msg)

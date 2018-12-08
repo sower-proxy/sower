@@ -53,7 +53,15 @@ func (n *Node) Match(addr string) bool {
 func (n *Node) matchSecs(secs []string) bool {
 	length := len(secs)
 	if length == 0 {
-		return len(n.Node) == 0
+		switch len(n.Node) {
+		case 0:
+			return true
+		case 1:
+			_, ok := n.Node["*"]
+			return ok
+		default:
+			return false
+		}
 	}
 
 	if n, ok := n.Node[secs[length-1]]; ok {
