@@ -17,6 +17,13 @@ import (
 	"github.com/lucas-clemente/quic-go"
 )
 
+var dialConf = &quic.Config{
+	HandshakeTimeout:   5 * time.Second,
+	IdleTimeout:        time.Hour,
+	MaxIncomingStreams: 1024,
+	KeepAlive:          true,
+}
+
 type streamConn struct {
 	quic.Stream
 	sess quic.Session

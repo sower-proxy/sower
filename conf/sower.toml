@@ -1,5 +1,4 @@
 server_port="5533"
-server_addr="127.0.0.1:5533" # replce it to server "IP"
 server_addr="remote-server:5533" # replce it to remote server
 dns_server="114.114.114.114"
 # client_ip="192.168.0.1"
@@ -33,6 +32,8 @@ blocklist=[
     "m.media-amazon.com",
     "*.awsstatic.com",
 	"*.cloudfront.net", # atlassian
+    "synchrony-cdn.atlassian.com",
+    "avatar-cdn.atlassian.com",
     "*.medium.com",
     "accounts-static.cdn.mozilla.net", # firefox
     "*.services.mozilla.com",
@@ -66,5 +67,11 @@ blocklist=[
     "www.bwh1.net",
     "*.akadns.net", # suggestions
     "*.haxx.se",
+    "shadowsocks.org",
+    "t66y.com",
+    "ocsp.godaddy.com",
+    "*.qualtrics.com",
+    "*.starfieldtech.com",
+    "*.typekit.net",
 ]
-verbose=1
+verbose=0

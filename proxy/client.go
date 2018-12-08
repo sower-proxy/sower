@@ -15,9 +15,9 @@ func StartClient(server string) {
 	var conn net.Conn
 
 	for {
-		sess, err := quic.DialAddr(server, &tls.Config{InsecureSkipVerify: true}, nil)
+		sess, err := quic.DialAddr(server, &tls.Config{InsecureSkipVerify: true}, dialConf)
 		if err != nil {
-			if sess, err = quic.DialAddr(server, &tls.Config{InsecureSkipVerify: true}, nil); err != nil {
+			if sess, err = quic.DialAddr(server, &tls.Config{InsecureSkipVerify: true}, dialConf); err != nil {
 				glog.Errorf("connect to remote(%s) fail:%s\n", server, err)
 				time.Sleep(2 * time.Second)
 				continue
