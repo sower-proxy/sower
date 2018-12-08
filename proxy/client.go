@@ -23,7 +23,7 @@ func StartClient(server string) {
 				continue
 			}
 		}
-		glog.Infoln("new session to", sess.RemoteAddr())
+		glog.Infof("new session from (%s) to (%s)", sess.LocalAddr(), sess.RemoteAddr())
 
 		for { // session rotate logic
 			select {
@@ -41,13 +41,13 @@ func StartClient(server string) {
 }
 
 func openStream(conn net.Conn, sess quic.Session, reDialCh chan<- net.Conn) bool {
-	glog.V(1).Infoln("new request from", conn.RemoteAddr())
+	glog.V(2).Infoln("new request from", conn.RemoteAddr())
 
 	okCh := make(chan struct{})
 	go func() {
 		stream, err := sess.OpenStream()
 		if err != nil {
-			glog.Warningf("connect to remote(%s) fail:%s\n", sess.RemoteAddr(), err)
+			glog.Warningf("start stream to (%s) fail:%s\n", sess.RemoteAddr(), err)
 			reDialCh <- conn
 			close(okCh)
 			return
@@ -62,7 +62,9 @@ func openStream(conn net.Conn, sess quic.Session, reDialCh chan<- net.Conn) bool
 		}
 		close(okCh)
 
-		conn.(*net.TCPConn).SetKeepAlive(true)
+		if err := conn.(*net.TCPConn).SetKeepAlive(true); err != nil {
+			glog.Warningln(err)
+		}
 		relay(&streamConn{stream, sess}, conn)
 		conn.Close()
 	}()
@@ -70,7 +72,7 @@ func openStream(conn net.Conn, sess quic.Session, reDialCh chan<- net.Conn) bool
 	select {
 	case _, ok := <-okCh: // false means close on error
 		return ok
-	case <-time.After(time.Second):
+	case <-time.After(500 * time.Millisecond):
 		return false
 	}
 }

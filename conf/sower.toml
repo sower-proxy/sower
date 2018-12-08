@@ -4,9 +4,10 @@ server_addr="remote-server:5533" # replce it to remote server
 dns_server="114.114.114.114"
 # client_ip="192.168.0.1"
 blocklist=[
-    "*.*.google.com", # google
+    "*.google.com", # google
+    "ocsp.pki.goog",
     "g.co",
-    "*.*.goo.gl",
+    "*.goo.gl",
     "*.googleusercontent.com",
     "*.googleapis.com",
     "gmail.com",
@@ -24,19 +25,21 @@ blocklist=[
     "www.linkedin.com",
     "www.reddit.com", # reddit
     "www.redditmedia.com",
-    "*.*.blogspot.com", # blogspot
+    "*.blogspot.com", # blogspot
     "www.blogger.com",
     "www.feedburner.com",
     "img1.blogblog.com",
-    "*.*.aws.amazon.com", # amazon
+    "*.aws.amazon.com", # amazon
     "m.media-amazon.com",
     "*.awsstatic.com",
-	"*.*.*.cloudfront.net", # atlassian
+	"*.cloudfront.net", # atlassian
     "*.medium.com",
     "accounts-static.cdn.mozilla.net", # firefox
+    "*.services.mozilla.com",
     "pocket-image-cache.com", # pocket
     "*.golang.org", # golang
     "go.googlesource.com",
+    "godoc.org",
     "gist.github.com", # github
     "*.k8s.io", # k8s
     "k8s.gcr.io",
@@ -61,5 +64,7 @@ blocklist=[
     "*.nyt.com",
     "bandwagonhost.com", # bandwagonhost
     "www.bwh1.net",
+    "*.akadns.net", # suggestions
+    "*.haxx.se",
 ]
 verbose=1

@@ -35,6 +35,9 @@ func StartDNS(dnsServer string) {
 
 func bestTry(w dns.ResponseWriter, r *dns.Msg, domain, dnsServer string) {
 	msg, _ := dns.Exchange(r, dnsServer+":53")
+	if msg == nil {
+		return
+	}
 	if len(msg.Answer) == 0 { // expose any response
 		w.WriteMsg(msg)
 		return
@@ -65,18 +68,29 @@ func manual(w dns.ResponseWriter, r *dns.Msg, domain, dnsServer string) {
 		w.WriteMsg(localA(r, domain))
 		return
 	}
-	glog.V(2).Infof("match %s fail", domain)
 
-	// expose any response
-	msg, _ := dns.Exchange(r, dnsServer+":53")
+	msg, _ := dns.Exchange(r, dnsServer+":53") // expose any response
+	if msg == nil {
+		glog.V(1).Infof("get dns of %s fail", domain)
+		return
+	}
 	w.WriteMsg(msg)
+
+	if conf.Conf.Verbose != 0 && len(msg.Answer) != 0 {
+		go func() {
+			_, err := net.DialTimeout("tcp", domain+":http", 3*time.Second)
+			if err != nil && strings.Contains(err.Error(), "timeout") {
+				glog.V(1).Infof("SUGGEST check (%s) http(s) service: %s", domain, err)
+			}
+		}()
+	}
 }
 
 func localA(r *dns.Msg, domain string) *dns.Msg {
 	m := new(dns.Msg)
 	m.SetReply(r)
 	m.Answer = []dns.RR{&dns.A{
-		Hdr: dns.RR_Header{Name: domain, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 720},
+		Hdr: dns.RR_Header{Name: domain, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 20},
 		A:   conf.Conf.ClientIPNet,
 	}}
 	return m

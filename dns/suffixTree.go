@@ -60,9 +60,6 @@ func (n *Node) matchSecs(secs []string) bool {
 		return n.matchSecs(secs[:length-1])
 	}
 
-	if n, ok := n.Node["*"]; ok {
-		return n.matchSecs(secs[:length-1])
-	}
-
-	return false
+	_, ok := n.Node["*"]
+	return ok
 }
