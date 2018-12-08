@@ -78,10 +78,17 @@ func manual(w dns.ResponseWriter, r *dns.Msg, domain, dnsServer string) {
 
 	if conf.Conf.Verbose != 0 && len(msg.Answer) != 0 {
 		go func() {
-			_, err := net.DialTimeout("tcp", domain+":http", 3*time.Second)
-			if err != nil && strings.Contains(err.Error(), "timeout") {
-				glog.V(1).Infof("SUGGEST check (%s) http(s) service: %s", domain, err)
+			_, err := net.DialTimeout("tcp", domain+":http", 2*time.Second)
+			if err == nil || !strings.Contains(err.Error(), "timeout") {
+				return
 			}
+
+			_, err = net.DialTimeout("tcp", domain+":https", 3*time.Second)
+			if err == nil || !strings.Contains(err.Error(), "timeout") {
+				return
+			}
+
+			glog.V(1).Infof("SUGGEST check (%s) http(s) service: %s", domain, err)
 		}()
 	}
 }
