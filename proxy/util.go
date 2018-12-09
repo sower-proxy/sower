@@ -19,7 +19,6 @@ import (
 
 var dialConf = &quic.Config{
 	HandshakeTimeout:   5 * time.Second,
-	IdleTimeout:        time.Hour,
 	MaxIncomingStreams: 1024,
 	KeepAlive:          true,
 }
