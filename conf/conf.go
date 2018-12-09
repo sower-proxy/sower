@@ -1,9 +1,13 @@
 package conf
 
 import (
+	"context"
 	"flag"
 	"net"
+	"os/exec"
+	"path/filepath"
 	"strconv"
+	"time"
 
 	"github.com/BurntSushi/toml"
 	"github.com/golang/glog"
@@ -11,14 +15,16 @@ import (
 )
 
 var Conf = struct {
-	ConfigFile  string
-	ServerPort  string   `toml:"server_port"`
-	ServerAddr  string   `toml:"server_addr"`
-	DnsServer   string   `toml:"dns_server"`
-	ClientIP    string   `toml:"client_ip"`
-	ClientIPNet net.IP   `toml:"-"`
-	BlockList   []string `toml:"blocklist"`
-	Verbose     int      `toml:"verbose"`
+	ConfigFile    string
+	ServerPort    string   `toml:"server_port"`
+	ServerAddr    string   `toml:"server_addr"`
+	DnsServer     string   `toml:"dns_server"`
+	ClientIP      string   `toml:"client_ip"`
+	ClientIPNet   net.IP   `toml:"-"`
+	ClearDnsCache string   `toml:"clear_dns_cache"`
+	BlockList     []string `toml:"blocklist"`
+	Suggestions   []string `toml:"suggestions"`
+	Verbose       int      `toml:"verbose"`
 }{}
 
 func init() {
@@ -46,6 +52,15 @@ var OnRefreash = []func() error{func() error {
 		return err
 	}
 	Conf.ClientIPNet = net.ParseIP(Conf.ClientIP)
+
+	// clear dns cache
+	if Conf.ClearDnsCache != "" {
+		ctx, _ := context.WithTimeout(context.TODO(), 5*time.Second)
+		if err := exec.CommandContext(ctx, "sh", "-c", Conf.ClearDnsCache).Run(); err != nil {
+			glog.Errorln(err)
+		}
+	}
+
 	// for glog
 	if err := flag.Set("v", strconv.Itoa(Conf.Verbose)); err != nil {
 		return err
@@ -53,13 +68,12 @@ var OnRefreash = []func() error{func() error {
 	return nil
 }}
 
-// watchConfigFile changes, fsnotify take too much cpu time, DIY
 func watchConfigFile() {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		glog.Fatalln(err)
 	}
-	if err := watcher.Add(Conf.ConfigFile); err != nil {
+	if err := watcher.Add(filepath.Dir(Conf.ConfigFile)); err != nil {
 		glog.Fatalln(err)
 	}
 
@@ -67,6 +81,12 @@ func watchConfigFile() {
 		for {
 			select {
 			case event := <-watcher.Events:
+				if event.Op == fsnotify.Rename {
+					if err := watcher.Add(Conf.ConfigFile); err != nil {
+						glog.Errorln(err)
+					}
+				}
+
 				glog.Infof("watch %s event: %v", Conf.ConfigFile, event)
 				for i := range OnRefreash {
 					if err := OnRefreash[i](); err != nil {

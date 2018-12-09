@@ -2,6 +2,7 @@ server_port="5533"
 server_addr="remote-server:5533" # replce it to remote server
 dns_server="114.114.114.114"
 # client_ip="192.168.0.1"
+# clear_dns_cache="sudo killall -HUP mDNSResponder"
 blocklist=[
     "*.google.com", # google
     "ocsp.pki.goog",
