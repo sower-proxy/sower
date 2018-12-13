@@ -59,5 +59,5 @@ func acceptStream(stream quic.Stream, sess quic.Session) {
 	if err := rc.(*net.TCPConn).SetKeepAlive(true); err != nil {
 		glog.Warningln(err)
 	}
-	relay(rc, conn)
+	relay(sess, rc, conn)
 }

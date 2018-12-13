@@ -32,6 +32,7 @@ blocklist=[
     "*.aws.amazon.com", # amazon
     "m.media-amazon.com",
     "*.awsstatic.com",
+    "*.s3.amazonaws.com",
 	"*.cloudfront.net", # atlassian
     "synchrony-cdn.atlassian.com",
     "avatar-cdn.atlassian.com",

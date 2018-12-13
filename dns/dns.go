@@ -76,8 +76,8 @@ func manual(w dns.ResponseWriter, r *dns.Msg, domain, dnsServer string) {
 		return
 	}
 
-	msg, err := dns.Exchange(r, dnsServer+":53") // expose any response
-	if msg == nil {
+	msg, err := dns.Exchange(r, dnsServer+":53")
+	if msg == nil { // expose any response except nil
 		glog.V(1).Infof("get dns of %s fail: %s", domain, err)
 		return
 	}

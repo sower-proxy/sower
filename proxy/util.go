@@ -9,6 +9,7 @@ import (
 	"io"
 	"math/big"
 	"net"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -36,18 +37,22 @@ func (s *streamConn) RemoteAddr() net.Addr {
 	return s.sess.RemoteAddr()
 }
 
-func relay(conn1, conn2 net.Conn) {
+func relay(sess quic.Session, conn1, conn2 net.Conn) {
 	wg := &sync.WaitGroup{}
 	exitFlag := new(int32)
 	wg.Add(2)
-	go redirect(conn1, conn2, wg, exitFlag)
-	redirect(conn2, conn1, wg, exitFlag)
+	go redirect(sess, conn1, conn2, wg, exitFlag)
+	redirect(sess, conn2, conn1, wg, exitFlag)
 	wg.Wait()
 }
 
-func redirect(conn1, conn2 net.Conn, wg *sync.WaitGroup, exitFlag *int32) {
+func redirect(sess quic.Session, conn1, conn2 net.Conn, wg *sync.WaitGroup, exitFlag *int32) {
 	if _, err := io.Copy(conn2, conn1); err != nil && (atomic.LoadInt32(exitFlag) == 0) {
 		glog.V(1).Infof("%s<>%s -> %s<>%s: %s", conn1.RemoteAddr(), conn1.LocalAddr(), conn2.LocalAddr(), conn2.RemoteAddr(), err)
+
+		if strings.Contains(err.Error(), "PeerGoingAway") { //for internal package, hard code here
+			sess.Close()
+		}
 	}
 
 	// wakeup all conn goroutine
