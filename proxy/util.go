@@ -10,7 +10,7 @@ import (
 	"github.com/golang/glog"
 )
 
-//go:generate stringer -type=netType
+//go:generate stringer -type=netType $GOFILE
 type netType int
 
 const (
