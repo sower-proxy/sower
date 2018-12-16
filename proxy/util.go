@@ -16,6 +16,7 @@ type netType int
 const (
 	QUIC netType = iota
 	KCP
+	TCP
 )
 
 func relay(conn1, conn2 net.Conn) {

@@ -34,7 +34,7 @@ var Conf = struct {
 
 func init() {
 	flag.StringVar(&Conf.ConfigFile, "f", "", "config file location")
-	flag.StringVar(&Conf.NetType, "n", "QUIC", "proxy net type (QUIC|KCP)")
+	flag.StringVar(&Conf.NetType, "n", "QUIC", "proxy net type (QUIC|KCP|TCP)")
 	flag.StringVar(&Conf.Password, "p", "12345678", "password")
 	flag.StringVar(&Conf.ServerPort, "P", "5533", "server mode listen port")
 	flag.StringVar(&Conf.ServerAddr, "s", "", "server IP (run in client mode if set)")

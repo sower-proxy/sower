@@ -6,6 +6,7 @@ import (
 	"github.com/golang/glog"
 	"github.com/wweir/sower/proxy/kcp"
 	"github.com/wweir/sower/proxy/quic"
+	"github.com/wweir/sower/proxy/tcp"
 )
 
 type Client interface {
@@ -20,6 +21,8 @@ func StartClient(netType, server, password string) {
 		client = quic.NewClient()
 	case KCP.String():
 		client = kcp.NewClient(password)
+	case TCP.String():
+		client = tcp.NewClient()
 	}
 
 	for {

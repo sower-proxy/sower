@@ -8,19 +8,22 @@ import (
 	"github.com/wweir/sower/parse"
 	"github.com/wweir/sower/proxy/kcp"
 	"github.com/wweir/sower/proxy/quic"
+	"github.com/wweir/sower/proxy/tcp"
 )
 
 type Server interface {
 	Listen(port string) (<-chan net.Conn, error)
 }
 
-func StartServer(netType, port,password string) {
+func StartServer(netType, port, password string) {
 	var server Server
 	switch netType {
 	case QUIC.String():
 		server = quic.NewServer()
 	case KCP.String():
 		server = kcp.NewServer(password)
+	case TCP.String():
+		server = tcp.NewServer()
 	}
 
 	if port == "" {
@@ -43,7 +46,7 @@ func StartServer(netType, port,password string) {
 func handle(conn net.Conn) {
 	defer conn.Close()
 
-	conn, addr, err := parser.ParseAddr(conn)
+	conn, addr, err := parse.ParseAddr(conn)
 	if err != nil {
 		glog.Warningln(err)
 		return
