@@ -8,12 +8,13 @@ import (
 )
 
 func main() {
-	glog.Infoln("Starting:", conf.Conf)
+	conf := conf.Conf
+	glog.Infoln("Starting:", conf)
 
-	if conf.Conf.ServerAddr == "" {
-		proxy.StartServer(conf.Conf.NetType, conf.Conf.ServerPort)
+	if conf.ServerAddr == "" {
+		proxy.StartServer(conf.NetType, conf.ServerPort, conf.Password)
 	} else {
-		go dns.StartDNS(conf.Conf.DnsServer)
-		proxy.StartClient(conf.Conf.NetType, conf.Conf.ServerAddr)
+		go dns.StartDNS(conf.DnsServer)
+		proxy.StartClient(conf.NetType, conf.ServerAddr, conf.Password)
 	}
 }

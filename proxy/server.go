@@ -6,6 +6,7 @@ import (
 
 	"github.com/golang/glog"
 	"github.com/wweir/sower/parse"
+	"github.com/wweir/sower/proxy/kcp"
 	"github.com/wweir/sower/proxy/quic"
 )
 
@@ -13,12 +14,13 @@ type Server interface {
 	Listen(port string) (<-chan net.Conn, error)
 }
 
-func StartServer(netType, port string) {
+func StartServer(netType, port,password string) {
 	var server Server
 	switch netType {
 	case QUIC.String():
 		server = quic.NewServer()
 	case KCP.String():
+		server = kcp.NewServer(password)
 	}
 
 	if port == "" {

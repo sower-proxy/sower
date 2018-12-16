@@ -1,4 +1,5 @@
-net_type="QUIC"
+net_type="KCP"
+password="12345678"
 server_port="5533"
 server_addr="remote-server:5533" # replce it to remote server
 dns_server="114.114.114.114"

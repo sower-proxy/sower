@@ -17,6 +17,7 @@ import (
 var Conf = struct {
 	ConfigFile string
 	NetType    string `toml:"net_type"`
+	Password   string `toml:"password"`
 
 	ServerPort string `toml:"server_port"`
 	ServerAddr string `toml:"server_addr"`

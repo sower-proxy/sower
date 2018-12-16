@@ -4,6 +4,7 @@ import (
 	"net"
 
 	"github.com/golang/glog"
+	"github.com/wweir/sower/proxy/kcp"
 	"github.com/wweir/sower/proxy/quic"
 )
 
@@ -11,13 +12,14 @@ type Client interface {
 	Dial(server string) (net.Conn, error)
 }
 
-func StartClient(netType, server string) {
+func StartClient(netType, server, password string) {
 	var connCh = listenLocal([]string{":80", ":443"})
 	var client Client
 	switch netType {
 	case QUIC.String():
 		client = quic.NewClient()
 	case KCP.String():
+		client = kcp.NewClient(password)
 	}
 
 	for {
