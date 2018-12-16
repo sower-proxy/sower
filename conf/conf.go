@@ -15,20 +15,25 @@ import (
 )
 
 var Conf = struct {
-	ConfigFile    string
-	ServerPort    string   `toml:"server_port"`
-	ServerAddr    string   `toml:"server_addr"`
-	DnsServer     string   `toml:"dns_server"`
-	ClientIP      string   `toml:"client_ip"`
-	ClientIPNet   net.IP   `toml:"-"`
-	ClearDnsCache string   `toml:"clear_dns_cache"`
-	BlockList     []string `toml:"blocklist"`
-	Suggestions   []string `toml:"suggestions"`
-	Verbose       int      `toml:"verbose"`
+	ConfigFile string
+	NetType    string `toml:"net_type"`
+
+	ServerPort string `toml:"server_port"`
+	ServerAddr string `toml:"server_addr"`
+
+	DnsServer     string `toml:"dns_server"`
+	ClientIP      string `toml:"client_ip"`
+	ClientIPNet   net.IP `toml:"-"`
+	ClearDnsCache string `toml:"clear_dns_cache"`
+
+	BlockList   []string `toml:"blocklist"`
+	Suggestions []string `toml:"suggestions"`
+	Verbose     int      `toml:"verbose"`
 }{}
 
 func init() {
 	flag.StringVar(&Conf.ConfigFile, "f", "", "config file location")
+	flag.StringVar(&Conf.NetType, "n", "QUIC", "proxy net type (QUIC)")
 	flag.StringVar(&Conf.ServerPort, "P", "5533", "server mode listen port")
 	flag.StringVar(&Conf.ServerAddr, "s", "", "server IP (run in client mode if set)")
 	flag.StringVar(&Conf.DnsServer, "d", "114.114.114.114", "client dns server")

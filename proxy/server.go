@@ -2,53 +2,51 @@ package proxy
 
 import (
 	"net"
+	"strings"
 
 	"github.com/golang/glog"
-	"github.com/lucas-clemente/quic-go"
-	"github.com/wweir/sower/parser"
+	"github.com/wweir/sower/parse"
+	"github.com/wweir/sower/proxy/quic"
 )
 
-func StartServer(port string) {
-	ln, err := quic.ListenAddr(":"+port, mockTlsPem(), dialConf)
+type Server interface {
+	Listen(port string) (<-chan net.Conn, error)
+}
+
+func StartServer(netType, port string) {
+	var server Server
+	switch netType {
+	case QUIC.String():
+		server = quic.NewServer()
+	case KCP.String():
+	}
+
+	if port == "" {
+		glog.Fatalln("port must set")
+	}
+	if !strings.Contains(port, ":") {
+		port = ":" + port
+	}
+	connCh, err := server.Listen(port)
 	if err != nil {
-		glog.Fatalln(err)
+		glog.Fatalf("listen %v fail: %s", port, err)
 	}
 
 	for {
-		sess, err := ln.Accept()
-		if err != nil {
-			glog.Errorln(err)
-			continue
-		}
-		go acceptSession(sess)
+		conn := <-connCh
+		go handle(conn)
 	}
 }
 
-func acceptSession(sess quic.Session) {
-	glog.V(1).Infoln("new session from ", sess.RemoteAddr())
-	defer sess.Close()
+func handle(conn net.Conn) {
+	defer conn.Close()
 
-	for {
-		stream, err := sess.AcceptStream()
-		if err != nil {
-			glog.Errorln(err)
-			return
-		}
-
-		go acceptStream(stream, sess)
-	}
-}
-
-func acceptStream(stream quic.Stream, sess quic.Session) {
-	glog.V(1).Infoln("new stream from ", sess.RemoteAddr())
-	defer stream.Close()
-
-	conn, addr, err := parser.ParseAddr(&streamConn{stream, sess})
+	conn, addr, err := parser.ParseAddr(conn)
 	if err != nil {
 		glog.Warningln(err)
 		return
 	}
-	glog.V(1).Infoln(addr)
+	glog.V(1).Infof("new conn from %s to %s", conn.RemoteAddr(), addr)
 
 	rc, err := net.Dial("tcp", addr)
 	if err != nil {
@@ -59,5 +57,5 @@ func acceptStream(stream quic.Stream, sess quic.Session) {
 	if err := rc.(*net.TCPConn).SetKeepAlive(true); err != nil {
 		glog.Warningln(err)
 	}
-	relay(sess, rc, conn)
+	relay(rc, conn)
 }

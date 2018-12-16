@@ -1,85 +1,37 @@
 package proxy
 
 import (
-	"crypto/tls"
 	"net"
-	"time"
 
 	"github.com/golang/glog"
-	"github.com/lucas-clemente/quic-go"
+	"github.com/wweir/sower/proxy/quic"
 )
 
-func StartClient(server string) {
-	connCh := listenLocal([]string{":80", ":443"})
-	reDialCh := make(chan net.Conn, 10)
-	var conn net.Conn
-	var count int
-
-	for {
-		sess, err := quic.DialAddr(server, &tls.Config{InsecureSkipVerify: true}, dialConf)
-		if err != nil {
-			if sess, err = quic.DialAddr(server, &tls.Config{InsecureSkipVerify: true}, dialConf); err != nil {
-				glog.Errorf("connect to remote(%s) fail:%s\n", server, err)
-				time.Sleep(2 * time.Second)
-				continue
-			}
-		}
-		glog.Infof("new session from (%s) to (%s)", sess.LocalAddr(), sess.RemoteAddr())
-
-		count = 0
-		for { // session rotate logic
-			select {
-			case conn = <-connCh:
-			case conn = <-reDialCh:
-			}
-			count++
-
-			// sync action to reuse sigle sess
-			if !openStream(conn, sess, count, reDialCh) {
-				sess.Close()
-				break
-			}
-		}
-	}
+type Client interface {
+	Dial(server string) (net.Conn, error)
 }
 
-func openStream(conn net.Conn, sess quic.Session, count int, reDialCh chan<- net.Conn) bool {
-	glog.V(2).Infoln("new request from", conn.RemoteAddr())
+func StartClient(netType, server string) {
+	var connCh = listenLocal([]string{":80", ":443"})
+	var client Client
+	switch netType {
+	case QUIC.String():
+		client = quic.NewClient()
+	case KCP.String():
+	}
 
-	okCh := make(chan struct{})
-	go func() {
-		stream, err := sess.OpenStream()
+	for {
+		conn := <-connCh
+		glog.V(1).Infof("new conn from (%s)", conn.RemoteAddr())
+
+		rc, err := client.Dial(server)
 		if err != nil {
-			glog.Warningf("start stream to (%s) fail:%s\n", sess.RemoteAddr(), err)
-			reDialCh <- conn
-			close(okCh)
-			return
+			conn.Close()
+			glog.Errorln(err)
+			continue
 		}
-		defer stream.Close()
 
-		glog.V(2).Infof("START stream\t%d", count)
-		defer glog.V(2).Infof("CLOSE stream\t%d", count)
-
-		select {
-		case okCh <- struct{}{}:
-		default:
-			close(okCh)
-			return
-		}
-		close(okCh)
-
-		if err := conn.(*net.TCPConn).SetKeepAlive(true); err != nil {
-			glog.Warningln(err)
-		}
-		relay(sess, &streamConn{stream, sess}, conn)
-		conn.Close()
-	}()
-
-	select {
-	case _, ok := <-okCh: // false means close on error
-		return ok
-	case <-time.After(500 * time.Millisecond):
-		return false
+		go relay(conn, rc)
 	}
 }
 

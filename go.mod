@@ -13,6 +13,7 @@ require (
 	github.com/miekg/dns v1.1.1
 	github.com/onsi/ginkgo v1.7.0 // indirect
 	github.com/onsi/gomega v1.4.3 // indirect
+	github.com/pkg/errors v0.8.0
 	github.com/wweir/fsnotify v1.4.8
 	golang.org/x/crypto v0.0.0-20181203042331-505ab145d0a9 // indirect
 	golang.org/x/net v0.0.0-20181201002055-351d144fa1fc // indirect

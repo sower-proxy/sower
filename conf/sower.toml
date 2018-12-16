@@ -1,3 +1,4 @@
+net_type="QUIC"
 server_port="5533"
 server_addr="remote-server:5533" # replce it to remote server
 dns_server="114.114.114.114"
@@ -54,6 +55,7 @@ blocklist=[
     "e16991.b.akamaiedge.net",
     "*.web.telegram.org", # telegram
     "core.telegram.org",
+    "telegram.org",
     "telegram.me",
     "t.me",
     "*.slack.com", #slack
@@ -75,5 +77,6 @@ blocklist=[
     "*.qualtrics.com",
     "*.starfieldtech.com",
     "*.typekit.net",
+    "www.v2ray.com",
 ]
 verbose=0
