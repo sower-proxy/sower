@@ -28,15 +28,16 @@ func NewCrypto(password string) (*Crypto, error) {
 }
 
 func (c *Crypto) Crypto() (encrypt, decrypt func(src []byte) []byte) {
-	nonce := newNonce(c.password, c.AEAD.NonceSize())
+	nonceEncrypt := newNonce(c.password, c.AEAD.NonceSize())
+	nonceDecrypt := newNonce(c.password, c.AEAD.NonceSize())
 
 	return func(src []byte) []byte {
-			return c.AEAD.Seal(nil, nonce(), src, nil)
+			return c.AEAD.Seal(nil, nonceEncrypt(), src, nil)
 		},
 		func(src []byte) []byte {
-			dst, err := c.AEAD.Open(nil, nonce(), src, nil)
+			dst, err := c.AEAD.Open(nil, nonceDecrypt(), src, nil)
 			if err != nil {
-				glog.Fatalln(err)
+				glog.Fatalf("%+v", errors.Wrap(err, "decrypt"))
 			}
 
 			return dst

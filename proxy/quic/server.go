@@ -34,8 +34,7 @@ func (s *server) Listen(port string) (<-chan net.Conn, error) {
 		for {
 			sess, err := ln.Accept()
 			if err != nil {
-				glog.Errorln(err)
-				continue
+				glog.Fatalln(err)
 			}
 			go accept(sess, connCh)
 		}
@@ -50,7 +49,8 @@ func accept(sess quic.Session, connCh chan<- net.Conn) {
 	for {
 		stream, err := sess.AcceptStream()
 		if err != nil {
-			glog.Fatalln("QUIC listen:", err)
+			glog.Errorln(err)
+			return
 		}
 
 		connCh <- &streamConn{stream, sess}

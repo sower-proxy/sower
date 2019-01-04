@@ -23,8 +23,8 @@ func relay(transparentConn, cryptoConn net.Conn, encrypt, decrypt func([]byte) [
 	wg := &sync.WaitGroup{}
 	exitFlag := new(int32)
 	wg.Add(2)
-	go redirect(transparentConn, cryptoConn, encrypt, wg, exitFlag)
-	redirect(cryptoConn, transparentConn, decrypt, wg, exitFlag)
+	go redirect(cryptoConn, transparentConn, encrypt, wg, exitFlag)
+	redirect(transparentConn, cryptoConn, decrypt, wg, exitFlag)
 	wg.Wait()
 }
 
