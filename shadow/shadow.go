@@ -28,6 +28,10 @@ func (c *conn) Read(b []byte) (n int, err error) {
 	c.readBuf, err = c.aead.Open(b[:0], c.decryptNonce(), b[:n], nil)
 	return len(c.readBuf), err
 }
+func (c *conn) Write(b []byte) (n int, err error) {
+	c.writeBuf = c.aead.Seal(nil, c.encryptNonce(), b, nil)
+	return c.Conn.Write(c.writeBuf)
+}
 
 func Shadow(c net.Conn, password string) (net.Conn, error) {
 	aead, err := newAEAD(password)
@@ -41,11 +45,6 @@ func Shadow(c net.Conn, password string) (net.Conn, error) {
 		decryptNonce: newNonce(password, aead.NonceSize()),
 		Conn:         c,
 	}, nil
-}
-
-func (c *conn) Write(b []byte) (n int, err error) {
-	c.writeBuf = c.aead.Seal(nil, c.encryptNonce(), b, nil)
-	return c.Conn.Write(c.writeBuf)
 }
 
 func newAEAD(password string) (cipher.AEAD, error) {

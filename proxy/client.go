@@ -7,7 +7,6 @@ import (
 	"github.com/wweir/sower/proxy/kcp"
 	"github.com/wweir/sower/proxy/quic"
 	"github.com/wweir/sower/proxy/tcp"
-	"github.com/wweir/sower/shadow"
 )
 
 type Client interface {
@@ -37,9 +36,9 @@ func StartClient(netType, server, password string) {
 			continue
 		}
 
-		if rc, err = shadow.Shadow(rc, password); err != nil {
-			glog.Fatalln(err)
-		}
+		// if rc, err = shadow.Shadow(rc, password); err != nil {
+		// 	glog.Fatalln(err)
+		// }
 
 		go relay(conn, rc)
 	}

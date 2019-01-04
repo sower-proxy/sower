@@ -9,7 +9,6 @@ import (
 	"github.com/wweir/sower/proxy/kcp"
 	"github.com/wweir/sower/proxy/quic"
 	"github.com/wweir/sower/proxy/tcp"
-	"github.com/wweir/sower/shadow"
 )
 
 type Server interface {
@@ -40,18 +39,16 @@ func StartServer(netType, port, password string) {
 
 	for {
 		conn := <-connCh
-		conn, err := shadow.Shadow(conn, password)
-		if err != nil {
-			glog.Fatalln(err)
-		}
+		// conn, err := shadow.Shadow(conn, password)
+		// if err != nil {
+		// 	glog.Fatalln(err)
+		// }
 
 		go handle(conn)
 	}
 }
 
 func handle(conn net.Conn) {
-	defer conn.Close()
-
 	conn, addr, err := parse.ParseAddr(conn)
 	if err != nil {
 		glog.Warningln(err)
@@ -64,7 +61,7 @@ func handle(conn net.Conn) {
 		glog.Warningln(err)
 		return
 	}
-	defer rc.Close()
+
 	if err := rc.(*net.TCPConn).SetKeepAlive(true); err != nil {
 		glog.Warningln(err)
 	}

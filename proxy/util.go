@@ -5,7 +5,6 @@ import (
 	"net"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/golang/glog"
 )
@@ -22,10 +21,10 @@ const (
 func relay(conn1, conn2 net.Conn) {
 	wg := &sync.WaitGroup{}
 	exitFlag := new(int32)
-	wg.Add(2)
+
 	go redirect(conn2, conn1, wg, exitFlag)
 	redirect(conn1, conn2, wg, exitFlag)
-	wg.Wait()
+
 }
 
 func redirect(dst, src net.Conn, wg *sync.WaitGroup, exitFlag *int32) {
@@ -34,9 +33,6 @@ func redirect(dst, src net.Conn, wg *sync.WaitGroup, exitFlag *int32) {
 	}
 	atomic.AddInt32(exitFlag, 1)
 
-	// wakeup all conn goroutine
-	now := time.Now()
-	dst.SetDeadline(now)
-	src.SetDeadline(now)
-	wg.Done()
+	src.Close()
+	dst.Close()
 }
