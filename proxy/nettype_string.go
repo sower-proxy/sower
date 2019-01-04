@@ -4,9 +4,9 @@ package proxy
 
 import "strconv"
 
-const _netType_name = "QUICKCP"
+const _netType_name = "QUICKCPTCP"
 
-var _netType_index = [...]uint8{0, 4, 7}
+var _netType_index = [...]uint8{0, 4, 7, 10}
 
 func (i netType) String() string {
 	if i < 0 || i >= netType(len(_netType_index)-1) {

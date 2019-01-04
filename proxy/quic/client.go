@@ -10,9 +10,8 @@ import (
 )
 
 type client struct {
-	server string
-	conf   *quic.Config
-	sess   quic.Session
+	conf *quic.Config
+	sess quic.Session
 }
 
 func NewClient() *client {
@@ -27,7 +26,7 @@ func NewClient() *client {
 
 func (c *client) Dial(server string) (net.Conn, error) {
 	if c.sess == nil {
-		if sess, err := quic.DialAddr(c.server, &tls.Config{InsecureSkipVerify: true}, c.conf); err != nil {
+		if sess, err := quic.DialAddr(server, &tls.Config{InsecureSkipVerify: true}, c.conf); err != nil {
 			return nil, errors.Wrap(err, "session")
 		} else {
 			c.sess = sess

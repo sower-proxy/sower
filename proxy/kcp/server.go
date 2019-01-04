@@ -9,7 +9,6 @@ import (
 )
 
 type server struct {
-	Password    []byte
 	DataShard   int
 	ParityShard int
 	DSCP        int
@@ -18,7 +17,6 @@ type server struct {
 
 func NewServer(password string) *server {
 	return &server{
-		Password:    fillPassword(password),
 		DataShard:   10,
 		ParityShard: 3,
 		DSCP:        0,
@@ -27,8 +25,7 @@ func NewServer(password string) *server {
 }
 
 func (s *server) Listen(port string) (<-chan net.Conn, error) {
-	block, _ := kcp.NewAESBlockCrypt(s.Password)
-	ln, err := kcp.ListenWithOptions(port, block, s.DataShard, s.ParityShard)
+	ln, err := kcp.ListenWithOptions(port, nil, s.DataShard, s.ParityShard)
 	if err != nil {
 		return nil, err
 	}
@@ -48,8 +45,7 @@ func (s *server) Listen(port string) (<-chan net.Conn, error) {
 		for {
 			conn, err := ln.AcceptKCP()
 			if err != nil {
-				glog.Errorln(err)
-				continue
+				glog.Fatalln("KCP listen:", err)
 			}
 
 			connCh <- conn

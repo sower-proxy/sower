@@ -4,6 +4,7 @@ import (
 	"net"
 
 	"github.com/golang/glog"
+	"github.com/wweir/sower/crypto"
 	"github.com/wweir/sower/proxy/kcp"
 	"github.com/wweir/sower/proxy/quic"
 	"github.com/wweir/sower/proxy/tcp"
@@ -20,9 +21,14 @@ func StartClient(netType, server, password string) {
 	case QUIC.String():
 		client = quic.NewClient()
 	case KCP.String():
-		client = kcp.NewClient(password)
+		client = kcp.NewClient()
 	case TCP.String():
 		client = tcp.NewClient()
+	}
+
+	cryptor, err := crypto.NewCrypto(password)
+	if err != nil {
+		glog.Fatalln(err)
 	}
 
 	for {
@@ -36,7 +42,9 @@ func StartClient(netType, server, password string) {
 			continue
 		}
 
-		go relay(conn, rc)
+		encrypt, decrypt := cryptor.Crypto()
+
+		go relay(conn, rc, encrypt, decrypt)
 	}
 }
 

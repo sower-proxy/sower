@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/golang/glog"
+	"github.com/wweir/sower/crypto"
 	"github.com/wweir/sower/parse"
 	"github.com/wweir/sower/proxy/kcp"
 	"github.com/wweir/sower/proxy/quic"
@@ -37,13 +38,18 @@ func StartServer(netType, port, password string) {
 		glog.Fatalf("listen %v fail: %s", port, err)
 	}
 
+	cryptor, err := crypto.NewCrypto(password)
+	if err != nil {
+		glog.Fatalln(err)
+	}
+
 	for {
 		conn := <-connCh
-		go handle(conn)
+		go handle(conn, cryptor)
 	}
 }
 
-func handle(conn net.Conn) {
+func handle(conn net.Conn, cryptor *crypto.Crypto) {
 	defer conn.Close()
 
 	conn, addr, err := parse.ParseAddr(conn)
@@ -62,5 +68,7 @@ func handle(conn net.Conn) {
 	if err := rc.(*net.TCPConn).SetKeepAlive(true); err != nil {
 		glog.Warningln(err)
 	}
-	relay(rc, conn)
+
+	encrypt, decrypt := cryptor.Crypto()
+	relay(rc, conn, encrypt, decrypt)
 }

@@ -19,24 +19,36 @@ const (
 	TCP
 )
 
-func relay(conn1, conn2 net.Conn) {
+func relay(transparentConn, cryptoConn net.Conn, encrypt, decrypt func([]byte) []byte) {
 	wg := &sync.WaitGroup{}
 	exitFlag := new(int32)
 	wg.Add(2)
-	go redirect(conn1, conn2, wg, exitFlag)
-	redirect(conn2, conn1, wg, exitFlag)
+	go redirect(transparentConn, cryptoConn, encrypt, wg, exitFlag)
+	redirect(cryptoConn, transparentConn, decrypt, wg, exitFlag)
 	wg.Wait()
 }
 
-func redirect(conn1, conn2 net.Conn, wg *sync.WaitGroup, exitFlag *int32) {
-	if _, err := io.Copy(conn2, conn1); err != nil && (atomic.LoadInt32(exitFlag) == 0) {
-		glog.V(1).Infof("%s<>%s -> %s<>%s: %s", conn1.RemoteAddr(), conn1.LocalAddr(), conn2.LocalAddr(), conn2.RemoteAddr(), err)
+func redirect(dst, src net.Conn, fn func([]byte) []byte, wg *sync.WaitGroup, exitFlag *int32) {
+	var buf = make([]byte, 4<<20 /*4M*/)
+	var n int
+	var err error
+	for {
+		if n, err = src.Read(buf); err != nil {
+			break
+		}
+		if _, err = dst.Write(fn(buf[:n])); err != nil {
+			break
+		}
 	}
 
-	// wakeup all conn goroutine
+	if err != io.EOF && (atomic.LoadInt32(exitFlag) == 0) {
+		glog.V(1).Infof("%s<>%s -> %s<>%s: %s", src.RemoteAddr(), src.LocalAddr(), dst.LocalAddr(), dst.RemoteAddr(), err)
+	}
 	atomic.AddInt32(exitFlag, 1)
+
+	// wakeup all conn goroutine
 	now := time.Now()
-	conn1.SetDeadline(now)
-	conn2.SetDeadline(now)
+	dst.SetDeadline(now)
+	src.SetDeadline(now)
 	wg.Done()
 }

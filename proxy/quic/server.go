@@ -50,8 +50,7 @@ func accept(sess quic.Session, connCh chan<- net.Conn) {
 	for {
 		stream, err := sess.AcceptStream()
 		if err != nil {
-			glog.Errorln(err)
-			return
+			glog.Fatalln("QUIC listen:", err)
 		}
 
 		connCh <- &streamConn{stream, sess}

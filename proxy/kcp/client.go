@@ -8,7 +8,6 @@ import (
 )
 
 type client struct {
-	Password     []byte
 	DataShard    int
 	ParityShard  int
 	DSCP         int
@@ -23,9 +22,8 @@ type client struct {
 	MTU          int
 }
 
-func NewClient(password string) *client {
+func NewClient() *client {
 	return &client{
-		Password:     fillPassword(password),
 		DataShard:    10,
 		ParityShard:  3,
 		DSCP:         0,
@@ -41,10 +39,9 @@ func NewClient(password string) *client {
 }
 
 func (c *client) Dial(server string) (net.Conn, error) {
-	block, _ := kcp.NewAESBlockCrypt(c.Password)
-	conn, err := kcp.DialWithOptions(server, block, c.DataShard, c.ParityShard)
+	conn, err := kcp.DialWithOptions(server, nil, c.DataShard, c.ParityShard)
 	if err != nil {
-		return nil, errors.Wrap(err, "createConn()")
+		return nil, errors.Wrap(err, "dial")
 	}
 
 	conn.SetStreamMode(true)
