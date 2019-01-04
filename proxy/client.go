@@ -4,10 +4,10 @@ import (
 	"net"
 
 	"github.com/golang/glog"
-	"github.com/wweir/sower/crypto"
 	"github.com/wweir/sower/proxy/kcp"
 	"github.com/wweir/sower/proxy/quic"
 	"github.com/wweir/sower/proxy/tcp"
+	"github.com/wweir/sower/shadow"
 )
 
 type Client interface {
@@ -26,11 +26,6 @@ func StartClient(netType, server, password string) {
 		client = tcp.NewClient()
 	}
 
-	cryptor, err := crypto.NewCrypto(password)
-	if err != nil {
-		glog.Fatalln(err)
-	}
-
 	for {
 		conn := <-connCh
 		glog.V(1).Infof("new conn from (%s)", conn.RemoteAddr())
@@ -42,9 +37,11 @@ func StartClient(netType, server, password string) {
 			continue
 		}
 
-		encrypt, decrypt := cryptor.Crypto()
+		if rc, err = shadow.Shadow(rc, password); err != nil {
+			glog.Fatalln(err)
+		}
 
-		go relay(conn, rc, encrypt, decrypt)
+		go relay(conn, rc)
 	}
 }
 
