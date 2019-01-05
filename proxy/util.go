@@ -28,7 +28,7 @@ func relay(conn1, conn2 net.Conn) {
 }
 
 func redirect(dst, src net.Conn, wg *sync.WaitGroup, exitFlag *int32) {
-	if _, err := io.Copy(dst, src); err != io.EOF && (atomic.LoadInt32(exitFlag) == 0) {
+	if _, err := io.Copy(dst, src); err != nil && (atomic.LoadInt32(exitFlag) == 0) {
 		glog.V(1).Infof("%s<>%s -> %s<>%s: %s", src.RemoteAddr(), src.LocalAddr(), dst.LocalAddr(), dst.RemoteAddr(), err)
 	}
 	atomic.AddInt32(exitFlag, 1)

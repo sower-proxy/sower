@@ -4,6 +4,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"encoding/binary"
+	"io"
 	"math/rand"
 	"net"
 
@@ -25,12 +26,18 @@ func (c *conn) Read(b []byte) (n int, err error) {
 		return n, err
 	}
 
-	c.readBuf, err = c.aead.Open(b[:0], c.decryptNonce(), b[:n], nil)
-	return len(c.readBuf), err
+	_, err = c.aead.Open(b[:0], c.decryptNonce(), b[:n], nil)
+	return n - c.aead.Overhead(), err
 }
 func (c *conn) Write(b []byte) (n int, err error) {
 	c.writeBuf = c.aead.Seal(nil, c.encryptNonce(), b, nil)
-	return c.Conn.Write(c.writeBuf)
+	for n < len(c.writeBuf) {
+		n, err = c.Conn.Write(c.writeBuf)
+		if err != nil && err != io.EOF {
+			return 0, err
+		}
+	}
+	return len(b), err
 }
 
 func Shadow(c net.Conn, password string) (net.Conn, error) {
