@@ -14,7 +14,7 @@ func ParseAddr(conn net.Conn) (teeConn *TeeConn, addr string, err error) {
 	teeConn.StartOrReset()
 	defer teeConn.Stop()
 
-	buf := make([]byte, 1)
+	buf := make([]byte, 1<<10)
 	if n, err := teeConn.Read(buf); err != nil || n != 1 {
 		return teeConn, "", fmt.Errorf("Read conn fail: %v, readed: %d %v", err, n, buf)
 	}

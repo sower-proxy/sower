@@ -28,7 +28,7 @@ func StartClient(netType, server, password string) {
 
 	for {
 		conn := <-connCh
-		glog.V(1).Infof("new conn from (%s)", conn.RemoteAddr())
+		glog.V(1).Infof("new conn from (%s) to (%s)", conn.RemoteAddr(), server)
 
 		rc, err := client.Dial(server)
 		if err != nil {

@@ -1,6 +1,8 @@
 package parse
 
-import "net"
+import (
+	"net"
+)
 
 type TeeConn struct {
 	net.Conn
