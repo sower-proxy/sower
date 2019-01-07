@@ -16,11 +16,11 @@ type client struct {
 
 func NewClient() *client {
 	return &client{
-		conf: &quic.Config{
-			HandshakeTimeout:   5 * time.Second,
-			MaxIncomingStreams: 1024,
-			KeepAlive:          true,
-		},
+		// conf: &quic.Config{
+		// 	HandshakeTimeout:   5 * time.Second,
+		// 	MaxIncomingStreams: 1024,
+		// 	KeepAlive:          true,
+		// },
 	}
 }
 
