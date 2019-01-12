@@ -37,6 +37,7 @@ func StartServer(netType, port, password string) {
 	if err != nil {
 		glog.Fatalf("listen %v fail: %s", port, err)
 	}
+	glog.Infoln("Server started.")
 
 	for {
 		conn := <-connCh
