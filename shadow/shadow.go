@@ -11,70 +11,77 @@ import (
 	"github.com/pkg/errors"
 )
 
-var MTU = 1350 //MTU must little than 0xFFFF
+const MAX_SIZE = 0xFFFF
 
 type conn struct {
-	dataSize     int
+	maxSize      int
 	aead         cipher.AEAD
 	encryptNonce func() []byte
 	decryptNonce func() []byte
 	writeBuf     []byte
 	readBuf      []byte
 	readOffset   int
-	readLast     int
 	net.Conn
 }
 
 func (c *conn) Read(b []byte) (n int, err error) {
 	// read from buffer
 	if c.readOffset != 0 {
-		offset := copy(b, c.readBuf[c.readOffset:c.readLast])
-		if offset+c.readOffset < c.readLast {
-			c.readOffset += offset
-		} else {
+		dataSize := len(c.readBuf) - c.aead.Overhead()
+		n = copy(b, c.readBuf[c.readOffset:dataSize])
+		c.readOffset += n
+
+		if c.readOffset == dataSize {
 			c.readOffset = 0
 		}
-		return offset, nil
+		return
 	}
 
 	// read from conn
-	if _, err := io.ReadFull(c.Conn, c.readBuf); err != nil {
-		return 0, err
+	dataSize := 0
+	{ //read data size
+		c.readBuf = make([]byte, 2+c.aead.Overhead())
+		if _, err = io.ReadFull(c.Conn, c.readBuf); err != nil {
+			return
+		}
+		if _, err = c.aead.Open(c.readBuf[:0], c.decryptNonce(), c.readBuf, nil); err != nil {
+			return
+		}
+		dataSize = int(c.readBuf[0])<<8 + int(c.readBuf[1])
+	}
+	{ // read data
+		c.readBuf = make([]byte, dataSize+c.aead.Overhead())
+		if _, err = io.ReadFull(c.Conn, c.readBuf); err != nil {
+			return
+		}
+		if _, err = c.aead.Open(c.readBuf[:0], c.decryptNonce(), c.readBuf, nil); err != nil {
+			return
+		}
 	}
 
-	if _, err := c.aead.Open(c.readBuf[:0], c.decryptNonce(), c.readBuf, nil); err != nil {
-		return 0, err
+	// buffer extra data
+	if n = copy(b, c.readBuf[:dataSize]); n < dataSize {
+		c.readOffset = n
 	}
-
-	// BigEndian
-	c.readLast = 2 + int(c.readBuf[0])<<8 + int(c.readBuf[1])
-	c.readOffset = 2 + copy(b, c.readBuf[2:c.readLast])
-	if c.readOffset < c.readLast {
-		return len(b), nil
-	}
-	return c.readOffset - 2, nil
+	return
 }
 
 func (c *conn) Write(b []byte) (n int, err error) {
-	bLength := len(b)
-	size := 0
+	bLen := len(b)
+	dataSize := MAX_SIZE - (2 + c.aead.Overhead()) - c.aead.Overhead()
+	if bLen < c.maxSize {
+		dataSize = bLen
+	}
 
-	for offset := 0; offset < bLength; offset += size {
-		if offset+c.dataSize <= bLength {
-			size = c.dataSize
-		} else {
-			size = bLength - offset
-		}
+	// BigEndian
+	c.writeBuf[0], c.writeBuf[1] = byte((dataSize&0xFF00)>>8), byte(dataSize&0xFF)
 
-		// BigEndian
-		c.writeBuf[0], c.writeBuf[1] = byte((size&0xFF00)>>8), byte(size&0xFF)
-		copy(c.writeBuf[2:size+2], b[offset:offset+size])
-		c.aead.Seal(c.writeBuf[:0], c.encryptNonce(), c.writeBuf[:c.dataSize+2], nil)
+	c.aead.Seal(c.writeBuf[:0], c.encryptNonce(), c.writeBuf[:2], nil)
+	c.aead.Seal(c.writeBuf[:2+c.aead.Overhead()], c.encryptNonce(), b[:dataSize], nil)
 
-		_, err = c.Conn.Write(c.writeBuf)
-		if err != nil {
-			return offset, err
-		}
+	_, err = c.Conn.Write(c.writeBuf[:dataSize+(2+c.aead.Overhead())+c.aead.Overhead()])
+	if err != nil {
+		return 0, err
 	}
 	return len(b), err
 }
@@ -91,12 +98,11 @@ func Shadow(c net.Conn, password string) (net.Conn, error) {
 	}
 
 	return &conn{
-		dataSize:     MTU - aead.Overhead() - 2,
+		maxSize:      MAX_SIZE - (2 - aead.Overhead()) - aead.Overhead(),
 		aead:         aead,
 		encryptNonce: newNonce(password, aead.NonceSize()),
 		decryptNonce: newNonce(password, aead.NonceSize()),
-		writeBuf:     make([]byte, MTU),
-		readBuf:      make([]byte, MTU),
+		writeBuf:     make([]byte, 0xFFFF),
 		Conn:         c,
 	}, nil
 }
