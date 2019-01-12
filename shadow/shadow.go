@@ -31,52 +31,33 @@ type conn struct {
 }
 
 func (c *conn) Read(b []byte) (n int, err error) {
-	bLength := len(b)
-	offset := 0
-	switch c.readOffset {
-	case -1:
-		return 0, io.EOF
-	case 0: // read from conn
-	default: // read from buffer
-		offset = copy(b, c.readBuf[c.readOffset:c.readLast])
+	// read from buffer
+	if c.readOffset != 0 {
+		offset := copy(b, c.readBuf[c.readOffset:c.readLast])
 		if offset+c.readOffset < c.readLast {
 			c.readOffset += offset
-			return offset, nil
+		} else {
+			c.readOffset = 0
 		}
-
-		if c.readLast < c.dataSize {
-			c.readOffset = -1
-			return offset, io.EOF
-		}
-		c.readOffset = 0
+		return offset, nil
 	}
 
 	// read from conn
-	for ; offset < bLength; offset += c.readOffset {
-		_, err = io.ReadFull(c.Conn, c.readBuf)
-		if err != nil && err != io.EOF {
-			c.readOffset = 0
-			return offset, err
-		}
-
-		_, e := c.aead.Open(c.readBuf[:0], c.decryptNonce(), c.readBuf, nil)
-		if e != nil {
-			c.readOffset = 0
-			return offset, e
-		}
-
-		c.readLast = int(c.readBuf[0])<<8 + int(c.readBuf[1]) + 2
-		c.readOffset = copy(b[offset:], c.readBuf[2:2+c.readLast])
-		if c.readOffset < c.readLast {
-			c.readOffset += 2
-			return len(b), nil
-		} else if err == io.EOF {
-			readOffset := c.readOffset
-			c.readOffset = 0
-			return readOffset, err
-		}
+	if _, err := io.ReadFull(c.Conn, c.readBuf); err != nil {
+		return 0, err
 	}
-	return len(b), err
+
+	if _, err := c.aead.Open(c.readBuf[:0], c.decryptNonce(), c.readBuf, nil); err != nil {
+		return 0, err
+	}
+
+	// BigEndian
+	c.readLast = 2 + int(c.readBuf[0])<<8 + int(c.readBuf[1])
+	c.readOffset = 2 + copy(b, c.readBuf[2:c.readLast])
+	if c.readOffset < c.readLast {
+		return len(b), nil
+	}
+	return c.readOffset - 2, nil
 }
 
 func (c *conn) Write(b []byte) (n int, err error) {

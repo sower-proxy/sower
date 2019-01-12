@@ -25,6 +25,7 @@ func StartClient(netType, server, password string) {
 	case TCP.String():
 		client = tcp.NewClient()
 	}
+	glog.Infoln("Client started.")
 
 	for {
 		conn := <-connCh
