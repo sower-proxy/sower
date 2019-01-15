@@ -16,6 +16,7 @@ type Client interface {
 
 func StartClient(netType, server, cipher, password string) {
 	var connCh = listenLocal([]string{":80", ":443"})
+
 	var client Client
 	switch netType {
 	case QUIC.String():
@@ -24,9 +25,11 @@ func StartClient(netType, server, cipher, password string) {
 		client = kcp.NewClient()
 	case TCP.String():
 		client = tcp.NewClient()
+	default:
+		glog.Fatalln("invalid net type: " + netType)
 	}
-	glog.Infoln("Client started.")
 
+	glog.Infoln("Client started.")
 	for {
 		conn := <-connCh
 		glog.V(1).Infof("new conn from (%s) to (%s)", conn.RemoteAddr(), server)

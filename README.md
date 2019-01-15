@@ -11,7 +11,7 @@ Yet another cross platform transparent proxy tool
       |       | relay service|        |
       | +-----+---------------------+ |
       | |                           | |
-      | | parsr http(s) target url  | |
+      | | parse http(s) target url  | |
       | |                           | |
       | +---------------------------+ |
       |     shadow service            |
@@ -23,7 +23,7 @@ Yet another cross platform transparent proxy tool
       |                  |            |
       |  shadow service  |            |
       |  relay service   |     dns    |
-      |                  |    server  |
+      |                  |   service  |
       |                  |            |
       |       127.0.0.1 or other      |
       |                  |            |
@@ -41,7 +41,7 @@ Yet another cross platform transparent proxy tool
 1. install server on `server node` by `make server`
 2. write config file, example: [conf/sower.toml](https://github.com/wweir/sower/blob/master/conf/sower.toml)
 3. install client on `client node` by `make client`
-4. add `127.0.0.1` as you first domain server
+4. add `127.0.0.1` as you first domain name server
 
 ## todo
 - [x] authenticate

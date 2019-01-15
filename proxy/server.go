@@ -25,6 +25,8 @@ func StartServer(netType, port, cipher, password string) {
 		server = kcp.NewServer(password)
 	case TCP.String():
 		server = tcp.NewServer()
+	default:
+		glog.Fatalln("invalid net type: " + netType)
 	}
 
 	if port == "" {
@@ -37,8 +39,8 @@ func StartServer(netType, port, cipher, password string) {
 	if err != nil {
 		glog.Fatalf("listen %v fail: %s", port, err)
 	}
-	glog.Infoln("Server started.")
 
+	glog.Infoln("Server started.")
 	for {
 		conn := <-connCh
 		conn = shadow.Shadow(conn, cipher, password)
@@ -57,6 +59,7 @@ func handle(conn net.Conn) {
 
 	rc, err := net.Dial("tcp", addr)
 	if err != nil {
+		conn.Close()
 		glog.Warningln(err)
 		return
 	}
