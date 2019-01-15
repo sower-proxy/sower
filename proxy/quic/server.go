@@ -2,6 +2,7 @@ package quic
 
 import (
 	"net"
+	"time"
 
 	"github.com/golang/glog"
 	quic "github.com/lucas-clemente/quic-go"
@@ -14,11 +15,12 @@ type server struct {
 
 func NewServer() *server {
 	return &server{
-		// conf: &quic.Config{
-		// 	HandshakeTimeout:   5 * time.Second,
-		// 	MaxIncomingStreams: 1024,
-		// 	KeepAlive:          true,
-		// },
+		conf: &quic.Config{
+			HandshakeTimeout:   5 * time.Second,
+			MaxIncomingStreams: 1024,
+			KeepAlive:          true,
+			IdleTimeout:        30 * time.Second,
+		},
 	}
 }
 
