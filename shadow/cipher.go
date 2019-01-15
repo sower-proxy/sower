@@ -59,8 +59,8 @@ func genKey(filler string, size int) []byte {
 
 	fillerByte := []byte(filler)
 	length := len(fillerByte)
-	for {
-		if copy(res, fillerByte) != length {
+	for i := 0; ; i++ {
+		if copy(res[i*length:], fillerByte) != length {
 			return res
 		}
 	}
