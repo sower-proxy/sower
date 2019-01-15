@@ -14,14 +14,14 @@ Yet another cross platform transparent proxy tool
       | | parsr http(s) target url  | |
       | |                           | |
       | +---------------------------+ |
-      |                               |
+      |     shadow service            |
       +--------^----------------------+
                |           request domain server
-       quic connection          +---------->
+       quic / KCP / TCP         +---------->
                |                |
       +--------+---client+------+-----+
       |                  |            |
-      |                  |            |
+      |  shadow service  |            |
       |  relay service   |     dns    |
       |                  |    server  |
       |                  |            |
@@ -33,7 +33,7 @@ Yet another cross platform transparent proxy tool
               |   +----------+    |   |
               2   1               1   2
               +   +               +   +
-          block request       normal request
+         blocked request      normal request
 
 ```
 
@@ -44,5 +44,5 @@ Yet another cross platform transparent proxy tool
 4. add `127.0.0.1` as you first domain server
 
 ## todo
-- [ ] authenticate
+- [x] authenticate
 - [ ] broker
