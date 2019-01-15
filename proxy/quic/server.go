@@ -19,7 +19,7 @@ func NewServer() *server {
 			HandshakeTimeout:   5 * time.Second,
 			MaxIncomingStreams: 1024,
 			KeepAlive:          true,
-			IdleTimeout:        30 * time.Second,
+			IdleTimeout:        5 * time.Minute,
 		},
 	}
 }

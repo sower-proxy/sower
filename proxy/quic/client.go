@@ -20,7 +20,7 @@ func NewClient() *client {
 			HandshakeTimeout:   5 * time.Second,
 			MaxIncomingStreams: 1024,
 			KeepAlive:          true,
-			IdleTimeout:        30 * time.Second,
+			IdleTimeout:        5 * time.Minute,
 		},
 	}
 }
@@ -33,6 +33,7 @@ func (c *client) Dial(server string) (net.Conn, error) {
 			c.sess = sess
 		}
 	}
+	c.sess.ConnectionState()
 
 	var stream quic.Stream
 	if err := WithTimeout(func() (err error) {
