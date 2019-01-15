@@ -30,10 +30,14 @@ func (c *client) Dial(server string) (net.Conn, error) {
 		if sess, err := quic.DialAddr(server, &tls.Config{InsecureSkipVerify: true}, c.conf); err != nil {
 			return nil, errors.Wrap(err, "session")
 		} else {
+			go func() {
+				<-sess.Context().Done()
+				sess.Close()
+				c.sess = nil
+			}()
 			c.sess = sess
 		}
 	}
-	c.sess.ConnectionState()
 
 	var stream quic.Stream
 	if err := WithTimeout(func() (err error) {
