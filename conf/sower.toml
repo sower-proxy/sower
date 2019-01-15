@@ -1,4 +1,4 @@
-net_type="KCP"
+net_type="QUIC"
 password="12345678"
 server_port="5533"
 server_addr="remote-server:5533" # replce it to remote server
@@ -7,6 +7,10 @@ dns_server="114.114.114.114"
 # clear_dns_cache="sudo killall -HUP mDNSResponder"
 blocklist=[
     "*.google.com", # google
+    "*.google.com.hk",
+    "*.google.ca",
+    "*.google.jp",
+    "*.google.tw",
     "ocsp.pki.goog",
     "g.co",
     "*.goo.gl",
@@ -79,5 +83,6 @@ blocklist=[
     "*.starfieldtech.com",
     "*.typekit.net",
     "www.v2ray.com",
+    "homebrew.bintray.com",
 ]
 verbose=0

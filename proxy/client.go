@@ -14,7 +14,7 @@ type Client interface {
 	Dial(server string) (net.Conn, error)
 }
 
-func StartClient(netType, server, password string) {
+func StartClient(netType, server, cipher, password string) {
 	var connCh = listenLocal([]string{":80", ":443"})
 	var client Client
 	switch netType {
@@ -38,9 +38,7 @@ func StartClient(netType, server, password string) {
 			continue
 		}
 
-		if rc, err = shadow.Shadow(rc, password); err != nil {
-			glog.Fatalln(err)
-		}
+		rc = shadow.Shadow(rc, cipher, password)
 
 		go relay(conn, rc)
 	}

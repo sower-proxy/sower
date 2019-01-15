@@ -12,9 +12,9 @@ func main() {
 	glog.Infoln("Starting:", conf)
 
 	if conf.ServerAddr == "" {
-		proxy.StartServer(conf.NetType, conf.ServerPort, conf.Password)
+		proxy.StartServer(conf.NetType, conf.ServerPort, conf.Cipher, conf.Password)
 	} else {
 		go dns.StartDNS(conf.DnsServer)
-		proxy.StartClient(conf.NetType, conf.ServerAddr, conf.Password)
+		proxy.StartClient(conf.NetType, conf.ServerAddr, conf.Cipher, conf.Password)
 	}
 }

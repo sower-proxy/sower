@@ -20,7 +20,7 @@ server: build kill
 run: build kill
 	$(PWD)/sower -n QUIC -logtostderr -v 1  &
 	sudo $(PWD)/sower -f conf/sower.toml -logtostderr &
-	sleep 1
-	@curl 127.0.0.1
-	sleep 1
-	sudo pkill -9 sower || true
+	@sleep 1
+	curl 127.0.0.1
+	@sleep 1
+	@sudo pkill -9 sower || true

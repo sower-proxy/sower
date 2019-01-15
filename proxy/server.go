@@ -16,7 +16,7 @@ type Server interface {
 	Listen(port string) (<-chan net.Conn, error)
 }
 
-func StartServer(netType, port, password string) {
+func StartServer(netType, port, cipher, password string) {
 	var server Server
 	switch netType {
 	case QUIC.String():
@@ -41,10 +41,7 @@ func StartServer(netType, port, password string) {
 
 	for {
 		conn := <-connCh
-		conn, err := shadow.Shadow(conn, password)
-		if err != nil {
-			glog.Fatalln(err)
-		}
+		conn = shadow.Shadow(conn, cipher, password)
 
 		go handle(conn)
 	}

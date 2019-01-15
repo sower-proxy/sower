@@ -1,14 +1,11 @@
 package shadow
 
 import (
-	"crypto/aes"
 	"crypto/cipher"
 	"encoding/binary"
 	"io"
 	"math/rand"
 	"net"
-
-	"github.com/pkg/errors"
 )
 
 const MAX_SIZE = 0xFFFF
@@ -83,18 +80,13 @@ func (c *conn) Write(b []byte) (n int, err error) {
 	if err != nil {
 		return 0, err
 	}
-	return len(b), err
+	return dataSize, err
 }
 
-func Shadow(c net.Conn, password string) (net.Conn, error) {
-	block, err := aes.NewCipher([]byte(password + password)[:16])
+func Shadow(c net.Conn, cipher, password string) net.Conn {
+	aead, err := pickCipher(cipher, password)
 	if err != nil {
-		return nil, errors.Wrap(err, "password too short")
-	}
-
-	aead, err := cipher.NewGCM(block)
-	if err != nil {
-		return nil, errors.Wrap(err, "GCM")
+		panic(err)
 	}
 
 	return &conn{
@@ -104,7 +96,7 @@ func Shadow(c net.Conn, password string) (net.Conn, error) {
 		decryptNonce: newNonce(password, aead.NonceSize()),
 		writeBuf:     make([]byte, 0xFFFF),
 		Conn:         c,
-	}, nil
+	}
 }
 
 func newNonce(password string, size int) func() []byte {
