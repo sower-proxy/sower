@@ -15,9 +15,9 @@ func main() {
 		proxy.StartServer(conf.NetType, conf.ServerPort, conf.Cipher, conf.Password)
 
 	} else {
-		if conf.HTTPProxyPort != "" {
+		if conf.HTTPProxy != "" {
 			go proxy.StartHttpProxy(conf.NetType, conf.ServerAddr,
-				conf.Cipher, conf.Password, conf.ClientIP, conf.HTTPProxyPort)
+				conf.Cipher, conf.Password, conf.HTTPProxy)
 		}
 
 		go dns.StartDNS(conf.DNSServer, conf.ClientIP, conf.ClientIPNet)

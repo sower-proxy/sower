@@ -20,9 +20,9 @@ var Conf = struct {
 	Cipher     string `toml:"cipher"`
 	Password   string `toml:"password"`
 
-	ServerPort    string `toml:"server_port"`
-	ServerAddr    string `toml:"server_addr"`
-	HTTPProxyPort string `toml:"http_proxy_port"`
+	ServerPort string `toml:"server_port"`
+	ServerAddr string `toml:"server_addr"`
+	HTTPProxy  string `toml:"http_proxy"`
 
 	DNSServer     string `toml:"dns_server"`
 	ClientIP      string `toml:"client_ip"`
@@ -41,7 +41,7 @@ func init() {
 	flag.StringVar(&Conf.Password, "p", "12345678", "password")
 	flag.StringVar(&Conf.ServerPort, "P", "5533", "server mode listen port")
 	flag.StringVar(&Conf.ServerAddr, "s", "", "server IP (run in client mode if set)")
-	flag.StringVar(&Conf.HTTPProxyPort, "H", "", "http proxy listen port")
+	flag.StringVar(&Conf.HTTPProxy, "H", "", "http proxy listen addr")
 	flag.StringVar(&Conf.DNSServer, "d", "114.114.114.114", "client dns server")
 	flag.StringVar(&Conf.ClientIP, "c", "127.0.0.1", "client dns service redirect IP")
 

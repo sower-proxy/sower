@@ -12,15 +12,11 @@ import (
 	"github.com/wweir/sower/shadow"
 )
 
-func StartHttpProxy(netType, server, cipher, password, listenIP, port string) {
-	if port[0] != ':' {
-		port = ":" + port
-	}
-
+func StartHttpProxy(netType, server, cipher, password, addr string) {
 	client := NewClient(netType)
 
 	srv := &http.Server{
-		Addr: listenIP + port,
+		Addr: addr,
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == http.MethodConnect {
 				httpsProxy(w, r, client, server, cipher, password)
