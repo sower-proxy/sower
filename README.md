@@ -27,10 +27,10 @@ Yet another cross platform transparent proxy tool
       |                  |            |
       |       127.0.0.1 or other      |
       |                  |            |
-      +-------^----------+---^----^---+
-              |              |    |
-              |              |    |   +----->
-              |   +----------+    |   |
+      +-^-----^----------+---^----^---+
+        |     |              |    |
+        |     |              |    |   +----->
+http(s) proxy |   +----------+    |   |
               2   1               1   2
               +   +               +   +
          blocked request      normal request

@@ -14,20 +14,23 @@ type Client interface {
 	Dial(server string) (net.Conn, error)
 }
 
-func StartClient(netType, server, cipher, password, listenIP string) {
-	var connCh = listenLocal(listenIP, []string{":80", ":443"})
-
-	var client Client
+func NewClient(netType string) Client {
 	switch netType {
 	case QUIC.String():
-		client = quic.NewClient()
+		return quic.NewClient()
 	case KCP.String():
-		client = kcp.NewClient()
+		return kcp.NewClient()
 	case TCP.String():
-		client = tcp.NewClient()
+		return tcp.NewClient()
 	default:
 		glog.Fatalln("invalid net type: " + netType)
+		return nil
 	}
+}
+
+func StartClient(netType, server, cipher, password, listenIP string) {
+	connCh := listenLocal(listenIP, []string{":80", ":443"})
+	client := NewClient(netType)
 
 	glog.Infoln("Client started.")
 	for {

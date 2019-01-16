@@ -17,16 +17,17 @@ import (
 var Conf = struct {
 	ConfigFile string
 	NetType    string `toml:"net_type"`
-	Cipher     string `toml:cipher`
+	Cipher     string `toml:"cipher"`
 	Password   string `toml:"password"`
 
-	ServerPort string `toml:"server_port"`
-	ServerAddr string `toml:"server_addr"`
+	ServerPort    string `toml:"server_port"`
+	ServerAddr    string `toml:"server_addr"`
+	HTTPProxyPort string `toml:"http_proxy_port"`
 
-	DnsServer     string `toml:"dns_server"`
+	DNSServer     string `toml:"dns_server"`
 	ClientIP      string `toml:"client_ip"`
 	ClientIPNet   net.IP `toml:"-"`
-	ClearDnsCache string `toml:"clear_dns_cache"`
+	ClearDNSCache string `toml:"clear_dns_cache"`
 
 	BlockList   []string `toml:"blocklist"`
 	Suggestions []string `toml:"suggestions"`
@@ -40,7 +41,8 @@ func init() {
 	flag.StringVar(&Conf.Password, "p", "12345678", "password")
 	flag.StringVar(&Conf.ServerPort, "P", "5533", "server mode listen port")
 	flag.StringVar(&Conf.ServerAddr, "s", "", "server IP (run in client mode if set)")
-	flag.StringVar(&Conf.DnsServer, "d", "114.114.114.114", "client dns server")
+	flag.StringVar(&Conf.HTTPProxyPort, "H", "", "http proxy listen port")
+	flag.StringVar(&Conf.DNSServer, "d", "114.114.114.114", "client dns server")
 	flag.StringVar(&Conf.ClientIP, "c", "127.0.0.1", "client dns service redirect IP")
 
 	if !flag.Parsed() {
@@ -63,9 +65,9 @@ var OnRefreash = []func() error{func() error {
 	Conf.ClientIPNet = net.ParseIP(Conf.ClientIP)
 
 	// clear dns cache
-	if Conf.ClearDnsCache != "" {
+	if Conf.ClearDNSCache != "" {
 		ctx, _ := context.WithTimeout(context.TODO(), 5*time.Second)
-		if err := exec.CommandContext(ctx, "sh", "-c", Conf.ClearDnsCache).Run(); err != nil {
+		if err := exec.CommandContext(ctx, "sh", "-c", Conf.ClearDNSCache).Run(); err != nil {
 			glog.Errorln(err)
 		}
 	}

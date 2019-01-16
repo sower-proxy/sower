@@ -13,8 +13,14 @@ func main() {
 
 	if conf.ServerAddr == "" {
 		proxy.StartServer(conf.NetType, conf.ServerPort, conf.Cipher, conf.Password)
+
 	} else {
-		go dns.StartDNS(conf.DnsServer, conf.ClientIP, conf.ClientIPNet)
+		if conf.HTTPProxyPort != "" {
+			go proxy.StartHttpProxy(conf.NetType, conf.ServerAddr,
+				conf.Cipher, conf.Password, conf.ClientIP, conf.HTTPProxyPort)
+		}
+
+		go dns.StartDNS(conf.DNSServer, conf.ClientIP, conf.ClientIPNet)
 		proxy.StartClient(conf.NetType, conf.ServerAddr, conf.Cipher, conf.Password, conf.ClientIP)
 	}
 }

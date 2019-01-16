@@ -16,26 +16,29 @@ type Server interface {
 	Listen(port string) (<-chan net.Conn, error)
 }
 
-func StartServer(netType, port, cipher, password string) {
-	var server Server
+func NewServer(netType string) Server {
 	switch netType {
 	case QUIC.String():
-		server = quic.NewServer()
+		return quic.NewServer()
 	case KCP.String():
-		server = kcp.NewServer(password)
+		return kcp.NewServer()
 	case TCP.String():
-		server = tcp.NewServer()
+		return tcp.NewServer()
 	default:
 		glog.Fatalln("invalid net type: " + netType)
+		return nil
 	}
+}
 
+func StartServer(netType, port, cipher, password string) {
 	if port == "" {
 		glog.Fatalln("port must set")
 	}
 	if !strings.Contains(port, ":") {
 		port = ":" + port
 	}
-	connCh, err := server.Listen(port)
+
+	connCh, err := NewServer(netType).Listen(port)
 	if err != nil {
 		glog.Fatalf("listen %v fail: %s", port, err)
 	}

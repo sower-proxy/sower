@@ -15,7 +15,7 @@ type server struct {
 	SockBuf     int
 }
 
-func NewServer(password string) *server {
+func NewServer() *server {
 	return &server{
 		DataShard:   10,
 		ParityShard: 3,

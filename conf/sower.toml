@@ -3,6 +3,7 @@ cipher="AES_128_GCM"
 password="12345678"
 server_port="5533"
 server_addr="remote-server:5533" # replce it to remote server
+http_proxy_port="8080"
 dns_server="223.5.5.5"           # Alibaba public dns
 client_ip="127.0.0.1"
 # clear_dns_cache="killall -HUP mDNSResponder"
@@ -44,6 +45,7 @@ blocklist=[
     "synchrony-cdn.atlassian.com",
     "avatar-cdn.atlassian.com",
     "*.medium.com",
+    "*.us-east-1.prod.public.atl-paas.net",
     "accounts-static.cdn.mozilla.net", # firefox
     "*.services.mozilla.com",
     "pocket-image-cache.com", # pocket
@@ -73,8 +75,6 @@ blocklist=[
     "download.apkpure.com",
     "*.nytimes.com", # New York times
     "*.nyt.com",
-    "bandwagonhost.com", # bandwagonhost
-    "www.bwh1.net",
     "*.akadns.net", # suggestions
     "*.haxx.se",
     "shadowsocks.org",
