@@ -63,7 +63,6 @@ blocklist=[
     "e16991.b.akamaiedge.net",
     "*.web.telegram.org", # telegram
     "core.telegram.org",
-    "telegram.org",
     "telegram.me",
     "t.me",
     "*.slack.com", #slack
