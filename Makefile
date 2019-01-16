@@ -15,10 +15,10 @@ client: build kill
 	sudo $(PWD)/sower -f conf/sower.toml -logtostderr
 
 server: build kill
-	$(PWD)/sower -n QUIC -logtostderr -v 1
+	$(PWD)/sower -n TCP -logtostderr -v 1
 
 run: build kill
-	$(PWD)/sower -n QUIC -logtostderr -v 1  &
+	$(PWD)/sower -n TCP -logtostderr -v 1  &
 	sudo $(PWD)/sower -f conf/sower.toml -logtostderr &
 	@sleep 1
 	curl 127.0.0.1

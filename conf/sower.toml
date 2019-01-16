@@ -1,10 +1,11 @@
-net_type="QUIC"
+net_type="TCP"
+cipher="AES_128_GCM"
 password="12345678"
 server_port="5533"
 server_addr="remote-server:5533" # replce it to remote server
-dns_server="114.114.114.114"
-# client_ip="192.168.0.1"
-# clear_dns_cache="sudo killall -HUP mDNSResponder"
+dns_server="223.5.5.5"           # Alibaba public dns
+client_ip="127.0.0.1"
+# clear_dns_cache="killall -HUP mDNSResponder"
 blocklist=[
     "*.google.com", # google
     "*.google.com.hk",

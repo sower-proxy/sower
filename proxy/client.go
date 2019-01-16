@@ -14,8 +14,8 @@ type Client interface {
 	Dial(server string) (net.Conn, error)
 }
 
-func StartClient(netType, server, cipher, password string) {
-	var connCh = listenLocal([]string{":80", ":443"})
+func StartClient(netType, server, cipher, password, listenIP string) {
+	var connCh = listenLocal(listenIP, []string{":80", ":443"})
 
 	var client Client
 	switch netType {
@@ -47,11 +47,11 @@ func StartClient(netType, server, cipher, password string) {
 	}
 }
 
-func listenLocal(ports []string) <-chan net.Conn {
+func listenLocal(listenIP string, ports []string) <-chan net.Conn {
 	connCh := make(chan net.Conn, 10)
 	for i := range ports {
 		go func(port string) {
-			ln, err := net.Listen("tcp", port)
+			ln, err := net.Listen("tcp", listenIP+port)
 			if err != nil {
 				glog.Fatalln(err)
 			}
@@ -59,7 +59,7 @@ func listenLocal(ports []string) <-chan net.Conn {
 			for {
 				conn, err := ln.Accept()
 				if err != nil {
-					glog.Errorln("accept", port, "fail:", err)
+					glog.Errorln("accept", listenIP+port, "fail:", err)
 					continue
 				}
 

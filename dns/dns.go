@@ -12,7 +12,7 @@ import (
 
 const colon = byte(':')
 
-func StartDNS(dnsServer string) {
+func StartDNS(dnsServer, listenIP string, ipNet net.IP) {
 	dns.HandleFunc(".", func(w dns.ResponseWriter, r *dns.Msg) {
 		// *Msg r has an TSIG record and it was validated
 		if r.IsTsig() != nil && w.TsigStatus() == nil {
@@ -30,17 +30,17 @@ func StartDNS(dnsServer string) {
 		}
 
 		if len(conf.Conf.BlockList) == 0 {
-			bestTry(w, r, domain, dnsServer)
+			bestTry(w, r, domain, dnsServer, ipNet)
 		} else {
-			manual(w, r, domain, dnsServer)
+			manual(w, r, domain, dnsServer, ipNet)
 		}
 	})
 
-	server := &dns.Server{Addr: ":53", Net: "udp"}
+	server := &dns.Server{Addr: listenIP + ":53", Net: "udp"}
 	glog.Fatalln(server.ListenAndServe())
 }
 
-func bestTry(w dns.ResponseWriter, r *dns.Msg, domain, dnsServer string) {
+func bestTry(w dns.ResponseWriter, r *dns.Msg, domain, dnsServer string, ipNet net.IP) {
 	msg, _ := dns.Exchange(r, dnsServer+":53")
 	if msg == nil {
 		return
@@ -63,16 +63,16 @@ func bestTry(w dns.ResponseWriter, r *dns.Msg, domain, dnsServer string) {
 
 	if _, err := net.DialTimeout("tcp", ip+":http", time.Second); err != nil {
 		glog.V(2).Infoln(ip+":80", err)
-		w.WriteMsg(localA(r, domain))
+		w.WriteMsg(localA(r, domain, ipNet))
 		return
 	}
 	w.WriteMsg(msg)
 }
 
-func manual(w dns.ResponseWriter, r *dns.Msg, domain, dnsServer string) {
+func manual(w dns.ResponseWriter, r *dns.Msg, domain, dnsServer string, ipNet net.IP) {
 	if rule.Match(strings.TrimSuffix(domain, ".")) {
 		glog.V(2).Infof("match %s suss", domain)
-		w.WriteMsg(localA(r, domain))
+		w.WriteMsg(localA(r, domain, ipNet))
 		return
 	}
 
@@ -100,12 +100,12 @@ func manual(w dns.ResponseWriter, r *dns.Msg, domain, dnsServer string) {
 	}
 }
 
-func localA(r *dns.Msg, domain string) *dns.Msg {
+func localA(r *dns.Msg, domain string, localIP net.IP) *dns.Msg {
 	m := new(dns.Msg)
 	m.SetReply(r)
 	m.Answer = []dns.RR{&dns.A{
 		Hdr: dns.RR_Header{Name: domain, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 20},
-		A:   conf.Conf.ClientIPNet,
+		A:   localIP,
 	}}
 	return m
 }

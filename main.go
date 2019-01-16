@@ -14,7 +14,7 @@ func main() {
 	if conf.ServerAddr == "" {
 		proxy.StartServer(conf.NetType, conf.ServerPort, conf.Cipher, conf.Password)
 	} else {
-		go dns.StartDNS(conf.DnsServer)
-		proxy.StartClient(conf.NetType, conf.ServerAddr, conf.Cipher, conf.Password)
+		go dns.StartDNS(conf.DnsServer, conf.ClientIP, conf.ClientIPNet)
+		proxy.StartClient(conf.NetType, conf.ServerAddr, conf.Cipher, conf.Password, conf.ClientIP)
 	}
 }
