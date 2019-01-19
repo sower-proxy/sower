@@ -54,7 +54,7 @@ func pickCipher(cipherType, password string) (cipher.AEAD, error) {
 func genKey(filler string, size int) []byte {
 	res := make([]byte, size)
 	if filler == "" {
-		filler = "default_filler"
+		panic("password should not be empty")
 	}
 
 	fillerByte := []byte(filler)

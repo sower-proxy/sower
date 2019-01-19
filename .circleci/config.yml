@@ -7,16 +7,38 @@ jobs:
       - checkout # check out the code in the project directory
       - setup_remote_docker # install docker in docker
       - run:
-          name: build linux binary
+          name: Prepare Environment
+          command: |
+            cp conf/sower.toml .
+            cp deploy/* .
+            mkdir artifacts
+      - run:
+          name: build linux Binary
           command: |
             make build
-            mv sower sower.linux
+            tar czvf artifacts/sower-linux.tar.gz sower sower.toml
       - run:
-          name: build macOS binary
+          name: build macOS Binary
           command: |
             GOOS=darwin GOARCH=amd64 make build
-            mv sower sower.darwin
+            tar czvf artifacts/sower-darwin.tar.gz sower sower.toml
+      - run:
+          name: build Windows Binary
+          command: |
+            GOOS=windows GOARCH=amd64 make build
+            tar czvf artifacts/sower-windows.tar.gz sower sower.toml
+      - run:
+          name: Publish Release on GitHub
+          command: |
+            go get github.com/tcnksm/ghr
+            VERSION=$(git describe --tags)
+            ghr -t ${GITHUB_TOKEN} -u ${CIRCLE_PROJECT_USERNAME} -r ${CIRCLE_PROJECT_REPONAME} -c ${CIRCLE_SHA1} -delete ${VERSION%-*-*} artifacts/
       - run:
           name: build docker image
           command: |
+            docker login -u $DOCKER_USER -p $DOCKER_PASS
             make image
+            VERSION=$(git describe --tags)
+            docker tag sower:latest sower:${VERSION%-*-*}
+            docker push sower:${VERSION%-*-*}
+            docker push sower:latest

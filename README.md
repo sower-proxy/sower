@@ -1,4 +1,5 @@
 # sower
+[![CircleCI](https://circleci.com/gh/wweir/sower.svg?style=svg)](https://circleci.com/gh/wweir/sower)
 Yet another cross platform transparent proxy tool
 
 ## architecture
@@ -46,6 +47,6 @@ http(s) proxy |   +----------+    |   |
 ## todo
 - [x] authenticate
 - [ ] broker
-- [ ] CI/CD
+- [x] CI/CD
 - [ ] relay optimization
 - [ ] deploy script for all normal platform
