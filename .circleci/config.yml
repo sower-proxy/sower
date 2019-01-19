@@ -16,12 +16,12 @@ jobs:
           name: build linux Binary
           command: |
             make build
-            tar czvf artifacts/sower-linux.tar.gz sower sower.toml
+            tar czvf artifacts/sower-linux.tar.gz sower sower.toml sower-client.service sower-server.service
       - run:
           name: build macOS Binary
           command: |
             GOOS=darwin GOARCH=amd64 make build
-            tar czvf artifacts/sower-darwin.tar.gz sower sower.toml
+            tar czvf artifacts/sower-darwin.tar.gz sower sower.toml cc.wweir.sower.plist
       - run:
           name: build Windows Binary
           command: |

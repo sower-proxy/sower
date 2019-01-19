@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+[[ -d /tmp/sower ]] || mkdir /tmp/sower
+cd /tmp/sower
+
+echo ========    Install sower to your system    ========
+VERSION="$(curl -s "https://api.github.com/repos/wweir/sower/releases/latest" | awk -F '"'  '/tag_name/{print $4}')"
+
+succ_message(){
+	set +x
+	echo
+	echo ========    Installed sower to your system    ========
+	echo The config file is: /usr/local/etc/sower.toml
+	echo please set 127.0.0.1 as the first domain name server manually.
+}
+case "$(uname -s)" in
+	"Darwin")
+		echo Please enter remote server adddress:
+		read ADDRESS
+		echo
+		set -x
+
+		curl -SLf https://github.com/wweir/sower/releases/download/$VERSION/sower-darwin.tar.gz | tar xzv
+
+		mv sower /usr/local/bin/
+
+		sed -i~ "s/# server_addr=\"remote-server/server_addr=\"$ADDRESS/" sower.toml
+		sed -i~ "s/# clear_dns_cache/clear_dns_cache/" sower.toml
+		mv sower.toml /usr/local/etc/
+
+		echo
+		echo Register auto start service, root privilege is needed!
+		echo
+		sudo mv cc.wweir.sower.plist /Library/LaunchDaemons/
+		sudo chown root:wheel /Library/LaunchDaemons/cc.wweir.sower.plist
+		sudo launchctl load -w /Library/LaunchDaemons/cc.wweir.sower.plist
+		succ_message
+		;;
+
+	"Linux")
+		if [[ "$(cat /proc/1/comm)" != "systemd" ]]; then
+			echo do not support auto deploy on SysVinit
+			exit 1
+		fi
+		echo Server side or client side, which do you wanna install\[c/s\]:
+		read SIDE
+		echo
+
+		set -x
+		case "$SIDE" in
+			"c")
+				echo Please enter remote server adddress:
+				read ADDRESS
+				echo
+
+				curl -SLf https://github.com/wweir/sower/releases/download/$VERSION/sower-linux.tar.gz | tar xzv
+
+				sudo mv sower /usr/local/bin/
+
+				sed -i~ "s/# server_addr=\"remote-server/server_addr=\"$ADDRESS/" sower.toml
+				sudo mv sower.toml /usr/local/etc/
+
+				sudo mv sower-client.service /etc/systemd/system/
+				sudo systemctl enable sower-client
+				sudo systemctl start sower-client
+				succ_message
+				;;
+
+			"s")
+				curl -SLf https://github.com/wweir/sower/releases/download/$VERSION/sower-linux.tar.gz | tar xzv
+
+				sudo mv sower /usr/local/bin/
+				sudo mv sower-server.service /etc/systemd/system/
+				sudo systemctl enable sower-server
+				sudo systemctl start sower-server
+				;;
+
+			*)
+				echo "invalid: $SIDE" && exit 1
+				;;
+		esac
+		;;
+esac
