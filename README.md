@@ -7,11 +7,9 @@
 
 The sower is a cross-platform transparent proxy tool base on DNS solution.
 
-If you wanna enjoy the sower, you need to deploy sower in both server and client side.
-
-In client side, sower listening UDP `53` and TCP `80`/`443` ports, so that you need run it with privileged.
-
-In server side, sower needs no privileged. It just listening to a port (default `5533`), parse and relay the request to target server.
+If you wanna enjoy the sower, you need to deploy sower on both server and client side.
+On client side, sower listening UDP `53` and TCP `80`/`443` ports, so that you need run it with privileged.
+On server side, it just listening to a port (default `5533`), parse and relay the request to target server.
 
 Sower also provides an http(s) proxy, which listens to port `8080` by default. You can turn it off or use another port at any time.
 
@@ -55,7 +53,7 @@ http(s) proxy |   +----------+    |   |
 ### Auto deploy
 Auto deploy script support Linux server side and masOS/Linux client side.
 
-```
+``` bash
 $ bash -c "$(curl -s https://raw.githubusercontent.com/wweir/sower/master/deploy/install)"
 ```
 
@@ -69,6 +67,14 @@ If you wanna uninstall sower, change `install` into `uninstall` and rerun the co
 3. Run `./sower -h` for help
 5. Config domain name server
 4. Config auto start
+
+### Docker deploy
+The auto build docker images are [wweir/sower](https://hub.docker.com/r/wweir/sower).
+
+It is very simple to use it on the server side. Map the port and run it directly.
+
+But the client is more troublesome and needs some understanding of the working mechanism of the sower.
+
 
 ## todo
 - [x] authenticate
