@@ -45,14 +45,15 @@ blocklist=[
     "synchrony-cdn.atlassian.com",
     "avatar-cdn.atlassian.com",
     "*.medium.com",
-    "*.us-east-1.prod.public.atl-paas.net",
+    "*.prod.public.atl-paas.net",
     "accounts-static.cdn.mozilla.net", # firefox
     "*.services.mozilla.com",
     "pocket-image-cache.com", # pocket
     "*.golang.org", # golang
-    "go.googlesource.com",
+    "*.googlesource.com",
     "godoc.org",
     "gist.github.com", # github
+    "*.github.io",
     "*.k8s.io", # k8s
     "k8s.gcr.io",
     "*.wikipedia.org", # wikipeida
@@ -82,7 +83,7 @@ blocklist=[
     "*.qualtrics.com",
     "*.starfieldtech.com",
     "*.typekit.net",
-    "www.v2ray.com",
+    "*.v2ray.com",
     "homebrew.bintray.com",
 ]
 verbose=0

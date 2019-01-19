@@ -27,6 +27,7 @@ func (s *server) Listen(port string) (<-chan net.Conn, error) {
 				glog.Fatalln("TCP listen:", err)
 			}
 
+			conn.(*net.TCPConn).SetKeepAlive(true)
 			connCh <- conn
 		}
 	}()

@@ -43,7 +43,6 @@ func StartClient(netType, server, cipher, password, listenIP string) {
 			glog.Errorln(err)
 			continue
 		}
-
 		rc = shadow.Shadow(rc, cipher, password)
 
 		go relay(conn, rc)
@@ -66,6 +65,7 @@ func listenLocal(listenIP string, ports []string) <-chan net.Conn {
 					continue
 				}
 
+				conn.(*net.TCPConn).SetKeepAlive(true)
 				connCh <- conn
 			}
 		}(ports[i])

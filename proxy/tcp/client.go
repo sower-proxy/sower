@@ -10,5 +10,11 @@ func NewClient() *client {
 }
 
 func (c *client) Dial(server string) (net.Conn, error) {
-	return net.Dial("tcp", server)
+	conn, err := net.Dial("tcp", server)
+	if err != nil {
+		return nil, err
+	}
+
+	conn.(*net.TCPConn).SetKeepAlive(true)
+	return conn, nil
 }

@@ -66,10 +66,7 @@ func handle(conn net.Conn) {
 		glog.Warningln(err)
 		return
 	}
-
-	if err := rc.(*net.TCPConn).SetKeepAlive(true); err != nil {
-		glog.Warningln(err)
-	}
+	rc.(*net.TCPConn).SetKeepAlive(true)
 
 	relay(rc, conn)
 }
