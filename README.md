@@ -1,9 +1,9 @@
 # sower
-[![GitHub release](http://img.shields.io/github/release/wweir/sower.svg?style=popout)](release)
-[![CircleCI](https://img.shields.io/circleci/token/64114421aab286b6e918741071535250a5273f06/project/github/wweir/sower/master.svg?style=popout)](circleci)
-[![GitHub issue](https://img.shields.io/github/issues/wweir/sower.svg?style=popout)](issue)
-[![GitHub star](https://img.shields.io/github/stars/wweir/sower.svg?style=popout)](star)
-[![GitHub license](https://img.shields.io/github/license/wweir/sower.svg?style=popout)](license)
+[![GitHub release](http://img.shields.io/github/release/wweir/sower.svg?style=popout)](https://github.com/wweir/sower/releases)
+[![CircleCI](https://img.shields.io/circleci/token/64114421aab286b6e918741071535250a5273f06/project/github/wweir/sower/master.svg?style=popout)](https://circleci.com/gh/wweir/sower)
+[![GitHub issue](https://img.shields.io/github/issues/wweir/sower.svg?style=popout)](https://github.com/wweir/sower/issues)
+[![GitHub star](https://img.shields.io/github/stars/wweir/sower.svg?style=popout)](https://github.com/wweir/sower/stargazers)
+[![GitHub license](https://img.shields.io/github/license/wweir/sower.svg?style=popout)](LICENSE)
 
 Yet another cross platform transparent proxy tool
 
