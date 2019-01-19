@@ -71,6 +71,7 @@ blocklist=[
     "js.driftt.com",
     "cloud.feedly.com", # feedly
     "static.grammarly.com", # grammarly
+    "denali-static.grammarly.com",
     "apkpure.com", # apkpure
     "download.apkpure.com",
     "*.nytimes.com", # New York times

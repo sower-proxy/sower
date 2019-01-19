@@ -1,17 +1,18 @@
 #!/usr/bin/env bash
-set -e
+set -u -e
 [[ -d /tmp/sower ]] || mkdir /tmp/sower
 cd /tmp/sower
 
 echo ========    Install sower to your system    ========
-VERSION="$(curl -s "https://api.github.com/repos/wweir/sower/releases/latest" | awk -F '"'  '/tag_name/{printf $4}')"
-
 succ_message(){
 	echo
 	echo ========    Installed sower to your system    ========
 	echo The config file is: /usr/local/etc/sower.toml
 	echo please set 127.0.0.1 as the first domain name server manually.
 }
+
+# main logic
+VERSION="$(curl -s "https://api.github.com/repos/wweir/sower/releases/latest" | awk -F '"'  '/tag_name/{printf $4}')"
 case "$(uname -s)" in
 	"Darwin")
 		printf "Please enter remote server adddress: "
@@ -46,7 +47,7 @@ case "$(uname -s)" in
 
 		case "$SIDE" in
 			"c")
-				echo Please enter remote server adddress:
+				printf "Please enter remote server adddress: "
 				read ADDRESS
 				echo
 
@@ -76,5 +77,8 @@ case "$(uname -s)" in
 				echo "invalid: $SIDE" && exit 1
 				;;
 		esac
+		;;
+	*)
+		echo Do not support auto deploy on this platform.
 		;;
 esac

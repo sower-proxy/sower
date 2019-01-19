@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -u -x
+
+# main logic
+case "$(uname -s)" in
+	"Darwin")
+		sudo launchctl unload /Library/LaunchDaemons/cc.wweir.sower.plist
+		sudo rm -rf /Library/LaunchDaemons/cc.wweir.sower.plist
+		rm -rf /usr/local/bin/sower /usr/local/etc/sower.toml
+		;;
+	"Linux")
+		sudo systemctl disable sower-client ||true
+		sudo systemctl disable sower-server || true
+		sudo rm -rf /etc/systemd/system/sower-client.service /etc/systemd/system/sower-server.service
+		sudo rm -rf /usr/local/bin/sower /usr/local/etc/sower.toml
+		;;
+	*)
+		echo Do not support auto deploy on this platform.
+		;;
+esac
