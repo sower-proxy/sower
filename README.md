@@ -46,3 +46,6 @@ http(s) proxy |   +----------+    |   |
 ## todo
 - [x] authenticate
 - [ ] broker
+- [ ] CI/CD
+- [ ] relay optimization
+- [ ] deploy script for all normal platform

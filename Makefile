@@ -6,20 +6,24 @@ generate:
 	go generate ./...
 
 build:
-	GOBIN=$(PWD) go install -v
+	go build -v -ldflags \
+		"-X main.version=$(shell git describe --tags) \
+		 -X main.date=$(shell date +%Y-%m-%d)"
+image:
+	docker build -t sower -f deploy/Dockerfile .
 
 kill:
 	sudo pkill -9 sower || true
 
 client: build kill
-	sudo $(PWD)/sower -f conf/sower.toml -logtostderr
+	sudo $(PWD)/sower -f conf/sower.toml
 
 server: build kill
-	$(PWD)/sower -n TCP -logtostderr -v 1
+	$(PWD)/sower -n TCP -v 1
 
 run: build kill
-	$(PWD)/sower -n TCP -logtostderr -v 1  &
-	sudo $(PWD)/sower -f conf/sower.toml -logtostderr &
+	$(PWD)/sower -n TCP -v 1  &
+	sudo $(PWD)/sower -f conf/sower.toml &
 	@sleep 1
 	curl 127.0.0.1
 	@sleep 1

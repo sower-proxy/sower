@@ -7,9 +7,11 @@ import (
 	"github.com/wweir/sower/proxy"
 )
 
+var version, date string
+
 func main() {
 	conf := conf.Conf
-	glog.Infoln("Starting:", conf)
+	glog.Infof("Starting sower(%s %s): %v", version, date, conf)
 
 	if conf.ServerAddr == "" {
 		proxy.StartServer(conf.NetType, conf.ServerPort, conf.Cipher, conf.Password)

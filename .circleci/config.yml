@@ -1,0 +1,22 @@
+version: 2
+jobs:
+  build:
+    docker:
+      - image: circleci/golang:1.11.4
+    steps:
+      - checkout # check out the code in the project directory
+      - setup_remote_docker # install docker in docker
+      - run:
+          name: build linux binary
+          command: |
+            make build
+            mv sower sower.linux
+      - run:
+          name: build macOS binary
+          command: |
+            GOOS=darwin GOARCH=amd64 make build
+            mv sower sower.darwin
+      - run:
+          name: build docker image
+          command: |
+            make image
