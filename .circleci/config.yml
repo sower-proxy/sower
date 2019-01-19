@@ -41,6 +41,7 @@ jobs:
             docker login -u $DOCKER_USER -p $DOCKER_PASS
             make image
             VERSION=$(git describe --tags)
-            docker tag wweir/sower:latest wweir/sower:${VERSION%-*-*}
+            docker tag sower wweir/sower:${VERSION%-*-*}
             docker push wweir/sower:${VERSION%-*-*}
+            docker tag sower wweir/sower:latest
             docker push wweir/sower:latest
