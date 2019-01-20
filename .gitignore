@@ -20,3 +20,4 @@ cert.pem
 **/cert.pem
 privkey.pem
 **/privkey.pem
+/sower.toml

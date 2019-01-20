@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"net"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -35,7 +36,7 @@ var Conf = struct {
 }{}
 
 func init() {
-	flag.StringVar(&Conf.ConfigFile, "f", "", "config file location")
+	flag.StringVar(&Conf.ConfigFile, "f", filepath.Dir(os.Args[0])+"/sower.toml", "config file location")
 	flag.StringVar(&Conf.NetType, "n", "TCP", "proxy net type (QUIC|KCP|TCP)")
 	flag.StringVar(&Conf.Cipher, "C", "AES_128_GCM", "cipher type (AES_128_GCM|AES_192_GCM|AES_256_GCM|CHACHA20_IETF_POLY1305|XCHACHA20_IETF_POLY1305)")
 	flag.StringVar(&Conf.Password, "p", "12345678", "password")
@@ -50,7 +51,7 @@ func init() {
 		flag.Parse()
 	}
 
-	if Conf.ConfigFile == "" {
+	if _, err := os.Stat(Conf.ConfigFile); os.IsNotExist(err) {
 		return
 	}
 	if err := OnRefreash[0](); err != nil {
