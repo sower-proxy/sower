@@ -14,6 +14,7 @@ On server side, it just listening to a port (default `5533`), parse and relay th
 Sower also provides an http(s) proxy, which listens to port `8080` by default. You can turn it off or use another port at any time.
 
 ## Architecture
+For more detail, see [透明代理 Sower 技术剖析](https://wweir.cc/post/%E9%80%8F%E6%98%8E%E4%BB%A3%E7%90%86-sower-%E6%8A%80%E6%9C%AF%E5%89%96%E6%9E%90/)
 ```
           request target servers
 <-------------+              +------------->
@@ -53,11 +54,11 @@ http(s) proxy |   +----------+    |   |
 ### Auto deploy
 Auto deploy script support Linux server side and masOS/Linux client side.
 
-``` bash
+```shell
 $ bash -c "$(curl -s https://raw.githubusercontent.com/wweir/sower/master/deploy/install)"
 ```
 
-Then modify the configuration file as needed and set `127.0.0.1` as your first domain name server.
+Then modify the configuration file as needed and set `127.0.0.1` as your first domain name server. In most situation, you just need to modify `/etc/resolv.conf`.
 
 If you wanna uninstall sower, change `install` into `uninstall` and rerun the command.
 
@@ -76,9 +77,10 @@ It is very simple to use it on the server side. Map the port and run it directly
 But the client is more troublesome and needs some understanding of the working mechanism of the sower.
 
 
-## todo
+## Todo
 - [x] authenticate
 - [ ] broker
 - [x] CI/CD
 - [ ] relay optimization
 - [ ] deploy script for all normal platform
+- [ ] dns rule dynamic configuration
