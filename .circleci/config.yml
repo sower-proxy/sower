@@ -16,22 +16,24 @@ jobs:
           name: build linux Binary
           command: |
             make build
-            tar czvf artifacts/sower-linux.tar.gz sower sower.toml sower-client.service sower-server.service
+            tar czvf artifacts/sower_linux_amd64.tar.gz sower sower.toml sower-client.service sower-server.service
       - run:
           name: build macOS Binary
           command: |
             GOOS=darwin GOARCH=amd64 make build
-            tar czvf artifacts/sower-darwin.tar.gz sower sower.toml cc.wweir.sower.plist
+            tar czvf artifacts/sower_darwin_amd64.tar.gz sower sower.toml cc.wweir.sower.plist
       - run:
           name: build Windows Binary
           command: |
             GOOS=windows GOARCH=amd64 make build
-            tar czvf artifacts/sower-windows.tar.gz sower sower.toml
+            tar czvf artifacts/sower_windows_amd64.tar.gz sower sower.toml
       - run:
           name: Publish Release on GitHub
           command: |
             if git log -1 --pretty='%s' | grep -oE '(^|\s)@release(\s|$)'; then
-              go get github.com/tcnksm/ghr
+              GHR_VERSION="$(curl -s "https://api.github.com/repos/tcnksm/ghr/releases/latest" | awk -F '"'  '/tag_name/{printf $4}')"
+              curl -SLf https://github.com/tcnksm/ghr/releases/download/"$GHR_VERSION"/ghr_"$GHR_VERSION"_linux_amd64.tar.gz | tar xzC /usr/local/bin --strip-components=1
+
               VERSION=$(git describe --tags)
               ghr -t ${GITHUB_TOKEN} -u ${CIRCLE_PROJECT_USERNAME} -r ${CIRCLE_PROJECT_REPONAME} -c ${CIRCLE_SHA1} -delete ${VERSION%-*-*} artifacts/
             fi

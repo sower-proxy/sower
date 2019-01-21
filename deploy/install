@@ -19,7 +19,7 @@ case "$(uname -s)" in
 		read ADDRESS
 		echo
 
-		curl -SLf https://github.com/wweir/sower/releases/download/$VERSION/sower-darwin.tar.gz | tar xzv
+		curl -SLf https://github.com/wweir/sower/releases/download/$VERSION/sower_darwin_amd64.tar.gz | tar xzv
 
 		mv sower /usr/local/bin/
 
@@ -51,7 +51,7 @@ case "$(uname -s)" in
 				read ADDRESS
 				echo
 
-				curl -SLf https://github.com/wweir/sower/releases/download/$VERSION/sower-linux.tar.gz | tar xzv
+				curl -SLf https://github.com/wweir/sower/releases/download/$VERSION/sower_linux_amd64.tar.gz | tar xzv
 
 				sudo mv sower /usr/local/bin/
 
@@ -65,7 +65,7 @@ case "$(uname -s)" in
 				;;
 
 			"s")
-				curl -SLf https://github.com/wweir/sower/releases/download/$VERSION/sower-linux.tar.gz | tar xzv
+				curl -SLf https://github.com/wweir/sower/releases/download/$VERSION/sower_linux_amd64.tar.gz | tar xzv
 
 				sudo mv sower /usr/local/bin/
 				sudo mv sower-server.service /etc/systemd/system/
