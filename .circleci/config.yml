@@ -32,7 +32,7 @@ jobs:
           command: |
             if git log -1 --pretty='%s' | grep -oE '(^|\s)@release(\s|$)'; then
               GHR_VERSION="$(curl -s "https://api.github.com/repos/tcnksm/ghr/releases/latest" | awk -F '"'  '/tag_name/{printf $4}')"
-              curl -SLf https://github.com/tcnksm/ghr/releases/download/"$GHR_VERSION"/ghr_"$GHR_VERSION"_linux_amd64.tar.gz | tar xzC /usr/local/bin --strip-components=1
+              curl -SLf https://github.com/tcnksm/ghr/releases/download/"$GHR_VERSION"/ghr_"$GHR_VERSION"_linux_amd64.tar.gz | tar xzC /go/bin --strip-components=1
 
               VERSION=$(git describe --tags)
               ghr -t ${GITHUB_TOKEN} -u ${CIRCLE_PROJECT_USERNAME} -r ${CIRCLE_PROJECT_REPONAME} -c ${CIRCLE_SHA1} -delete ${VERSION%-*-*} artifacts/
