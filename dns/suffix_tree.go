@@ -5,16 +5,17 @@ import (
 )
 
 type Node struct {
+	sep  string
 	Node map[string]*Node
 }
 
-func NewNode() *Node {
-	return &Node{Node: map[string]*Node{}}
+func NewNode(sep string) *Node {
+	return &Node{sep: sep, Node: map[string]*Node{}}
 }
-func NewNodeFromRule(rules ...string) *Node {
-	node := NewNode()
+func NewNodeFromRules(sep string, rules ...string) *Node {
+	node := NewNode(sep)
 	for i := range rules {
-		node.Add(strings.Split(rules[i], "."))
+		node.Add(rules[i])
 	}
 	return node
 }
@@ -28,26 +29,32 @@ func (n *Node) string(prefix string) (out string) {
 	}
 	return
 }
+func (n *Node) trim(item string) string {
+	return strings.TrimSuffix(item, n.sep)
+}
 
-func (n *Node) Add(secs []string) {
+func (n *Node) Add(item string) {
+	n.add(strings.Split(n.trim(item), n.sep))
+}
+func (n *Node) add(secs []string) {
 	length := len(secs)
 	switch length {
 	case 0:
 		return
 	case 1:
-		n.Node[secs[length-1]] = NewNode()
+		n.Node[secs[length-1]] = NewNode(n.sep)
 	default:
 		subNode, ok := n.Node[secs[length-1]]
 		if !ok {
-			subNode = NewNode()
+			subNode = NewNode(n.sep)
 			n.Node[secs[length-1]] = subNode
 		}
-		subNode.Add(secs[:length-1])
+		subNode.add(secs[:length-1])
 	}
 }
 
-func (n *Node) Match(addr string) bool {
-	return n.matchSecs(strings.Split(addr, "."))
+func (n *Node) Match(item string) bool {
+	return n.matchSecs(strings.Split(n.trim(item), n.sep))
 }
 
 func (n *Node) matchSecs(secs []string) bool {

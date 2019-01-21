@@ -31,13 +31,18 @@ func NewClient(netType string) Client {
 func StartClient(netType, server, cipher, password, listenIP string) {
 	connCh := listenLocal(listenIP, []string{":80", ":443"})
 	client := NewClient(netType)
+	ips, err := net.LookupIP(server)
+	if err != nil || len(ips) == 0 {
+		glog.Fatalln(ips, err)
+	}
+	serverAddr := ips[0].String()
 
 	glog.Infoln("Client started.")
 	for {
 		conn := <-connCh
 		glog.V(1).Infof("new conn from (%s) to (%s)", conn.RemoteAddr(), server)
 
-		rc, err := client.Dial(server)
+		rc, err := client.Dial(serverAddr)
 		if err != nil {
 			conn.Close()
 			glog.Errorln(err)

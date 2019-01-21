@@ -70,7 +70,8 @@ func bestTry(w dns.ResponseWriter, r *dns.Msg, domain, dnsServer string, ipNet n
 }
 
 func manual(w dns.ResponseWriter, r *dns.Msg, domain, dnsServer string, ipNet net.IP) {
-	if rule.Match(strings.TrimSuffix(domain, ".")) {
+	if !writeList.Match(domain) &&
+		(blockList.Match(domain) || suggestList.Match(domain)) {
 		glog.V(2).Infof("match %s suss", domain)
 		w.WriteMsg(localA(r, domain, ipNet))
 		return

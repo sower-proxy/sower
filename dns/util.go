@@ -5,15 +5,26 @@ import (
 	"github.com/wweir/sower/conf"
 )
 
-var rule *Node
+var (
+	blockList   *Node
+	suggestList *Node
+	writeList   = NewNode(".")
+)
 
 func init() {
-	rule = NewNodeFromRule(conf.Conf.BlockList...)
-	glog.V(2).Infof("block rule:\n%s", rule)
+	//first init
+	blockList = loadRules("block", conf.Conf.BlockList)
+	suggestList = loadRules("suggest", conf.Conf.BlockList)
 
 	conf.OnRefreash = append(conf.OnRefreash, func() error {
-		rule = NewNodeFromRule(conf.Conf.BlockList...)
-		glog.V(2).Infof("block rule:\n%s", rule)
+		blockList = loadRules("block", conf.Conf.BlockList)
+		suggestList = loadRules("suggest", conf.Conf.Suggestions)
 		return nil
 	})
+}
+
+func loadRules(name string, list []string) *Node {
+	rule := NewNodeFromRules(".", list...)
+	glog.V(2).Infof("load %s rule:\n%s", name, rule)
+	return rule
 }

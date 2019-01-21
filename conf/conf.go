@@ -10,8 +10,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/BurntSushi/toml"
 	"github.com/golang/glog"
+	toml "github.com/pelletier/go-toml"
 	"github.com/wweir/fsnotify"
 )
 
@@ -33,7 +33,30 @@ var Conf = struct {
 	BlockList   []string `toml:"blocklist"`
 	Suggestions []string `toml:"suggestions"`
 	Verbose     int      `toml:"verbose"`
+
+	tree *toml.Tree // for suggestions
 }{}
+var OnRefreash = []func() error{
+	func() (err error) {
+		if Conf.tree, err = toml.LoadFile(Conf.ConfigFile); err != nil {
+			return err
+		} else if err = Conf.tree.Unmarshal(&Conf); err != nil {
+			return err
+		}
+
+		Conf.ClientIPNet = net.ParseIP(Conf.ClientIP)
+		return flag.Set("v", strconv.Itoa(Conf.Verbose))
+	},
+	func() error {
+		if Conf.ClearDNSCache != "" {
+			ctx, _ := context.WithTimeout(context.TODO(), 5*time.Second)
+			if err := exec.CommandContext(ctx, "sh", "-c", Conf.ClearDNSCache).Run(); err != nil {
+				glog.Errorln(err)
+			}
+		}
+		return nil
+	},
+}
 
 func init() {
 	flag.StringVar(&Conf.ConfigFile, "f", filepath.Dir(os.Args[0])+"/sower.toml", "config file location")
@@ -59,27 +82,6 @@ func init() {
 	}
 	watchConfigFile()
 }
-
-var OnRefreash = []func() error{func() error {
-	if _, err := toml.DecodeFile(Conf.ConfigFile, &Conf); err != nil {
-		return err
-	}
-	Conf.ClientIPNet = net.ParseIP(Conf.ClientIP)
-
-	// clear dns cache
-	if Conf.ClearDNSCache != "" {
-		ctx, _ := context.WithTimeout(context.TODO(), 5*time.Second)
-		if err := exec.CommandContext(ctx, "sh", "-c", Conf.ClearDNSCache).Run(); err != nil {
-			glog.Errorln(err)
-		}
-	}
-
-	// for glog
-	if err := flag.Set("v", strconv.Itoa(Conf.Verbose)); err != nil {
-		return err
-	}
-	return nil
-}}
 
 func watchConfigFile() {
 	watcher, err := fsnotify.NewWatcher()
