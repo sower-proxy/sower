@@ -55,6 +55,7 @@ func StartServer(netType, port, cipher, password string) {
 func handle(conn net.Conn) {
 	conn, addr, err := parse.ParseAddr(conn)
 	if err != nil {
+		conn.Close()
 		glog.Warningln(err)
 		return
 	}
