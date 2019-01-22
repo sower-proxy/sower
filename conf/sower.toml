@@ -21,11 +21,13 @@ blocklist=[
     "*.twitter.com", # twitter
     "*.twimg.com",
     "*.blogspot.com", # blogspot
-    "*.github.io",
     "*.wikipedia.org", # wikipeida
     "*.wikimedia.org",
     "*.wikisource.org",
     "*.web.telegram.org", # telegram
+    "*.github.com", # github is too slow in direct connection
+    "*.github.io",
+    "*.s3.amazonaws.com", # aws s3, for github release file
     "lookup-api.apple.com", # macOS lookup service
     "lookup-api.apple.com.edgekey.net",
     "e16991.b.akamaiedge.net",
