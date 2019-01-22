@@ -13,6 +13,8 @@ On server side, it just listening to a port (default `5533`), parse and relay th
 
 Sower also provides an http(s) proxy, which listens to port `8080` by default. You can turn it off or use another port at any time.
 
+The first time you visit a new website, sower will detect if the domain in block list and add it in suggect list. So that, you do not need to care about the rules, sower will handle it in a intelligent way. The only situation you should care about rules is some site network speed too slow.
+
 ## Architecture
 For more detail, see [透明代理 Sower 技术剖析](https://wweir.cc/post/%E9%80%8F%E6%98%8E%E4%BB%A3%E7%90%86-sower-%E6%8A%80%E6%9C%AF%E5%89%96%E6%9E%90/)
 ```
