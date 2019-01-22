@@ -23,9 +23,13 @@ case "$(uname -s)" in
 
 		mv sower /usr/local/bin/
 
-		sed -i~ "s/# server_addr=\"remote-server/server_addr=\"$ADDRESS/" sower.toml
-		sed -i~ "s/# clear_dns_cache/clear_dns_cache/" sower.toml
-		mv sower.toml /usr/local/etc/
+		if [[ -r /usr/local/etc/sower.toml ]]; then
+			echo The config file already exists, keep the original file
+		else
+			sed -i~ "s/# server_addr=\"remote-server/server_addr=\"$ADDRESS/" sower.toml
+			sed -i~ "s/# clear_dns_cache/clear_dns_cache/" sower.toml
+			mv sower.toml /usr/local/etc/
+		fi
 
 		echo
 		echo Register auto start service, root privilege is needed!
@@ -55,8 +59,12 @@ case "$(uname -s)" in
 
 				sudo mv sower /usr/local/bin/
 
-				sed -i~ "s/# server_addr=\"remote-server/server_addr=\"$ADDRESS/" sower.toml
-				sudo mv sower.toml /usr/local/etc/
+				if [[ -r /usr/local/etc/sower.toml ]]; then
+					echo The config file already exists, keep the original file
+				else
+					sed -i~ "s/# server_addr=\"remote-server/server_addr=\"$ADDRESS/" sower.toml
+					sudo mv sower.toml /usr/local/etc/
+				fi
 
 				sudo mv sower-client.service /etc/systemd/system/
 				sudo systemctl enable sower-client
