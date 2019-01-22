@@ -76,45 +76,42 @@ func (i *intelliSuggest) GetOne(domain interface{}) (interface{}, error) {
 		return false, nil
 	}
 
-	{ // First: test direct connect
-		for idx := range i.ports {
-			conn, err := net.DialTimeout("tcp", addr+i.ports[idx], i.timeout)
-			if err == nil {
-				conn.Close()
-				return false, nil
-			}
+	for idx, port := range i.ports {
+		// First: test direct connect
+		conn, err := net.DialTimeout("tcp", addr+port, i.timeout)
+		if err == nil {
+			conn.Close()
+			return false, nil
 		}
 		glog.V(2).Infoln("first dial fail:", addr)
-	}
-	{ // Second: test remote connect
-		for idx := range i.ports {
-			conn, err := net.DialTimeout("tcp", i.listenIP+i.ports[idx], i.timeout/100)
-			if err != nil {
-				glog.V(1).Infoln("dial self service fail:", err)
-				return false, err
-			}
-			defer conn.Close()
 
-			conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-			if _, err = conn.Write([]byte("TRACE / HTTP/1.1\r\nHost: " + addr + "\r\n\r\n")); err != nil {
-				glog.V(1).Infoln("dial self service fail:", err)
-				return false, err
-			}
-			if _, err = conn.Read(make([]byte, 1)); err != nil && err != io.EOF {
+		// Second: test remote connect
+		conn, err = net.DialTimeout("tcp", i.listenIP+port, i.timeout/100)
+		if err != nil {
+			glog.V(1).Infoln("dial self service fail:", err)
+			return false, err
+		}
+		defer conn.Close()
+
+		conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		if _, err = conn.Write([]byte("TRACE / HTTP/1.1\r\nHost: " + addr + "\r\n\r\n")); err != nil {
+			glog.V(1).Infoln("dial self service fail:", err)
+			return false, err
+		}
+		if _, err = conn.Read(make([]byte, 1)); err != nil && err != io.EOF {
+			if idx+1 == len(i.ports) {
 				return false, nil
 			}
-			break
+			continue
 		}
 
 		glog.V(2).Infoln("remote dial succ:", addr)
-	}
-	{ // Third: retest direct connect
-		for idx := range i.ports {
-			conn, err := net.DialTimeout("tcp", addr+i.ports[idx], i.timeout)
-			if err == nil {
-				conn.Close()
-				return false, nil
-			}
+
+		// Third: retest direct connect
+		conn, err = net.DialTimeout("tcp", addr+port, i.timeout)
+		if err == nil {
+			conn.Close()
+			return false, nil
 		}
 
 		glog.V(2).Infoln("retry dial fail:", addr)
