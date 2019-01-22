@@ -5,7 +5,7 @@
 [![GitHub star](https://img.shields.io/github/stars/wweir/sower.svg?style=popout)](https://github.com/wweir/sower/stargazers)
 [![GitHub license](https://img.shields.io/github/license/wweir/sower.svg?style=popout)](LICENSE)
 
-The sower is a cross-platform transparent proxy tool base on DNS solution.
+The sower is a cross-platform intelligent transparent proxy tool base on DNS solution.
 
 If you wanna enjoy the sower, you need to deploy sower on both server and client side.
 On client side, sower listening UDP `53` and TCP `80`/`443` ports, so that you need run it with privileged.
@@ -58,7 +58,8 @@ Auto deploy script support Linux server side and masOS/Linux client side.
 $ bash -c "$(curl -s https://raw.githubusercontent.com/wweir/sower/master/deploy/install)"
 ```
 
-Then modify the configuration file as needed and set `127.0.0.1` as your first domain name server. In most situation, you just need to modify `/etc/resolv.conf`.
+Then modify the configuration file as needed and set `127.0.0.1` as your first domain name server.
+In most situation, you just need to modify `/etc/resolv.conf`.
 
 If you wanna uninstall sower, change `install` into `uninstall` and rerun the command.
 
@@ -83,4 +84,4 @@ But the client is more troublesome and needs some understanding of the working m
 - [x] CI/CD
 - [ ] relay optimization
 - [ ] deploy script for all normal platform
-- [ ] dns rule dynamic configuration
+- [x] dns rule intelligent suggestions

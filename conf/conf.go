@@ -3,11 +3,11 @@ package conf
 import (
 	"context"
 	"flag"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/golang/glog"
@@ -27,24 +27,32 @@ var Conf = struct {
 
 	DNSServer     string `toml:"dns_server"`
 	ClientIP      string `toml:"client_ip"`
-	ClientIPNet   net.IP `toml:"-"`
 	ClearDNSCache string `toml:"clear_dns_cache"`
 
 	BlockList   []string `toml:"blocklist"`
+	WhiteList   []string `toml:"whitelist"`
 	Suggestions []string `toml:"suggestions"`
 	Verbose     int      `toml:"verbose"`
-
-	tree *toml.Tree // for suggestions
 }{}
+var mu = &sync.Mutex{}
+
 var OnRefreash = []func() error{
 	func() (err error) {
-		if Conf.tree, err = toml.LoadFile(Conf.ConfigFile); err != nil {
-			return err
-		} else if err = Conf.tree.Unmarshal(&Conf); err != nil {
+		mu.Lock()
+		defer mu.Unlock()
+
+		f, err := os.OpenFile(Conf.ConfigFile, os.O_RDONLY, 0644)
+		if err != nil {
 			return err
 		}
+		defer f.Close()
 
-		Conf.ClientIPNet = net.ParseIP(Conf.ClientIP)
+		file := Conf.ConfigFile
+		if err = toml.NewDecoder(f).Decode(&Conf); err != nil {
+			return err
+		}
+		Conf.ConfigFile = file
+
 		return flag.Set("v", strconv.Itoa(Conf.Verbose))
 	},
 	func() error {
@@ -75,10 +83,13 @@ func init() {
 	}
 
 	if _, err := os.Stat(Conf.ConfigFile); os.IsNotExist(err) {
+		glog.Warningln("no config file has been load:", Conf.ConfigFile)
 		return
 	}
-	if err := OnRefreash[0](); err != nil {
-		panic(err)
+	for i := range OnRefreash {
+		if err := OnRefreash[i](); err != nil {
+			glog.Fatalln(err)
+		}
 	}
 	watchConfigFile()
 }
@@ -113,4 +124,28 @@ func watchConfigFile() {
 			}
 		}
 	}()
+}
+
+func AddSuggest(domain string) {
+	mu.Lock()
+	defer mu.Unlock()
+
+	Conf.Suggestions = append(Conf.Suggestions, domain)
+
+	// safe write
+	f, err := os.OpenFile(Conf.ConfigFile+"~", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	if err != nil {
+		glog.Errorln(err)
+		return
+	}
+	defer f.Close()
+
+	if err := toml.NewEncoder(f).ArraysWithOneElementPerLine(true).Encode(Conf); err != nil {
+		glog.Errorln(err)
+		return
+	}
+
+	if err = os.Rename(Conf.ConfigFile+"~", Conf.ConfigFile); err != nil {
+		glog.Errorln(err)
+	}
 }

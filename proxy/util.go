@@ -34,9 +34,10 @@ func redirect(dst, src net.Conn, wg *sync.WaitGroup, exitFlag *int32) {
 	}
 
 	if atomic.CompareAndSwapInt32(exitFlag, 0, 1) {
+		// wakeup blocked goroutine
 		now := time.Now()
-		src.SetReadDeadline(now)
-		dst.SetWriteDeadline(now)
+		src.SetDeadline(now)
+		dst.SetDeadline(now)
 	} else {
 		src.Close()
 		dst.Close()

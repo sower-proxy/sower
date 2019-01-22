@@ -1,16 +1,22 @@
 package tcp
 
-import "net"
+import (
+	"net"
+	"time"
+)
 
 type client struct {
+	DialTimeout time.Duration
 }
 
 func NewClient() *client {
-	return &client{}
+	return &client{
+		DialTimeout: 5 * time.Second,
+	}
 }
 
 func (c *client) Dial(server string) (net.Conn, error) {
-	conn, err := net.Dial("tcp", server)
+	conn, err := net.DialTimeout("tcp", server, c.DialTimeout)
 	if err != nil {
 		return nil, err
 	}

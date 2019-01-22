@@ -22,7 +22,7 @@ func main() {
 				conf.Cipher, conf.Password, conf.HTTPProxy)
 		}
 
-		go dns.StartDNS(conf.DNSServer, conf.ClientIP, conf.ClientIPNet)
+		go dns.StartDNS(conf.DNSServer, conf.ClientIP)
 		proxy.StartClient(conf.NetType, conf.ServerAddr, conf.Cipher, conf.Password, conf.ClientIP)
 	}
 }

@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"net"
+	"strings"
 
 	"github.com/golang/glog"
 	"github.com/wweir/sower/proxy/kcp"
@@ -31,18 +32,20 @@ func NewClient(netType string) Client {
 func StartClient(netType, server, cipher, password, listenIP string) {
 	connCh := listenLocal(listenIP, []string{":80", ":443"})
 	client := NewClient(netType)
-	ips, err := net.LookupIP(server)
-	if err != nil || len(ips) == 0 {
-		glog.Fatalln(ips, err)
+	if idx := strings.Index(server, ":"); idx > 0 {
+		ips, err := net.LookupIP(server[:idx])
+		if err != nil || len(ips) == 0 {
+			glog.Fatalln(err, ips)
+		}
+		server = ips[0].String() + server[idx:]
 	}
-	serverAddr := ips[0].String()
 
 	glog.Infoln("Client started.")
 	for {
 		conn := <-connCh
 		glog.V(1).Infof("new conn from (%s) to (%s)", conn.RemoteAddr(), server)
 
-		rc, err := client.Dial(serverAddr)
+		rc, err := client.Dial(server)
 		if err != nil {
 			conn.Close()
 			glog.Errorln(err)

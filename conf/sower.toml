@@ -9,82 +9,22 @@ client_ip="127.0.0.1"
 # clear_dns_cache="killall -HUP mDNSResponder"
 blocklist=[
     "*.google.com", # google
-    "*.google.com.hk",
-    "*.google.ca",
-    "*.google.jp",
-    "*.google.tw",
-    "ocsp.pki.goog",
-    "g.co",
     "*.goo.gl",
     "*.googleusercontent.com",
     "*.googleapis.com",
-    "gmail.com",
     "*.youtube.com", # youtube
     "*.ytimg.com",
     "*.ggpht.com",
     "*.googlevideo.com",
-    "*.vimeo.com",
     "*.facebook.com", # facebook
     "*.xx.fbcdn.net",
-    "connect.facebook.net",
     "*.twitter.com", # twitter
-    "t.co",
     "*.twimg.com",
-    "www.linkedin.com",
-    "www.reddit.com", # reddit
-    "www.redditmedia.com",
     "*.blogspot.com", # blogspot
-    "www.blogger.com",
-    "www.feedburner.com",
-    "img1.blogblog.com",
-    "*.aws.amazon.com", # amazon
-    "m.media-amazon.com",
-    "*.awsstatic.com",
-    "*.s3.amazonaws.com",
-	"*.cloudfront.net", # atlassian
-    "synchrony-cdn.atlassian.com",
-    "avatar-cdn.atlassian.com",
-    "*.medium.com",
-    "*.prod.public.atl-paas.net",
-    "accounts-static.cdn.mozilla.net", # firefox
-    "*.services.mozilla.com",
-    "pocket-image-cache.com", # pocket
-    "*.golang.org", # golang
-    "*.googlesource.com",
-    "godoc.org",
-    "gist.github.com", # github
     "*.github.io",
-    "*.k8s.io", # k8s
-    "k8s.gcr.io",
     "*.wikipedia.org", # wikipeida
     "*.wikimedia.org",
     "*.wikisource.org",
-    "lookup-api.apple.com",
-    "lookup-api.apple.com.edgekey.net",
-    "e16991.b.akamaiedge.net",
     "*.web.telegram.org", # telegram
-    "core.telegram.org",
-    "telegram.me",
-    "t.me",
-    "*.slack.com", #slack
-    "*.slack-edge.com",
-    "js.driftt.com",
-    "cloud.feedly.com", # feedly
-    "static.grammarly.com", # grammarly
-    "denali-static.grammarly.com",
-    "apkpure.com", # apkpure
-    "download.apkpure.com",
-    "*.nytimes.com", # New York times
-    "*.nyt.com",
-    "*.akadns.net", # suggestions
-    "*.haxx.se",
-    "shadowsocks.org",
-    "t66y.com",
-    "ocsp.godaddy.com",
-    "*.qualtrics.com",
-    "*.starfieldtech.com",
-    "*.typekit.net",
-    "*.v2ray.com",
-    "homebrew.bintray.com",
 ]
 verbose=0
