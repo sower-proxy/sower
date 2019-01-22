@@ -16,7 +16,7 @@ const colon = byte(':')
 
 func StartDNS(dnsServer, listenIP string) {
 	ip := net.ParseIP(listenIP)
-	suggest := &intelliSuggest{listenIP, 2 * time.Second}
+	suggest := &intelliSuggest{listenIP, 2 * time.Second, []string{":80", ":443"}}
 	mem.DefaultCache = mem.New(time.Hour)
 
 	dns.HandleFunc(".", func(w dns.ResponseWriter, r *dns.Msg) {
@@ -66,44 +66,57 @@ func matchAndServe(w dns.ResponseWriter, r *dns.Msg, domain, listenIP, dnsServer
 type intelliSuggest struct {
 	listenIP string
 	timeout  time.Duration
+	ports    []string
 }
 
 func (i *intelliSuggest) GetOne(domain interface{}) (interface{}, error) {
 	addr := strings.TrimSuffix(domain.(string), ".")
+	// kill deadloop, for ugly wildcard setting dns setting
+	if len(strings.Split(addr, ".")) > 10 {
+		return false, nil
+	}
 
 	{ // First: test direct connect
-		conn, err := net.DialTimeout("tcp", addr+":http", i.timeout)
-		if err == nil {
-			conn.Close()
-			return false, nil
+		for idx := range i.ports {
+			conn, err := net.DialTimeout("tcp", addr+i.ports[idx], i.timeout)
+			if err == nil {
+				conn.Close()
+				return false, nil
+			}
 		}
 		glog.V(2).Infoln("first dial fail:", addr)
 	}
 	{ // Second: test remote connect
-		conn, err := net.DialTimeout("tcp", i.listenIP+":http", i.timeout/100)
-		if err != nil {
-			glog.V(1).Infoln("dial self service fail:", err)
-			return false, err
-		}
-		defer conn.Close()
+		for idx := range i.ports {
+			conn, err := net.DialTimeout("tcp", i.listenIP+i.ports[idx], i.timeout/100)
+			if err != nil {
+				glog.V(1).Infoln("dial self service fail:", err)
+				return false, err
+			}
+			defer conn.Close()
 
-		conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-		if _, err = conn.Write([]byte("TRACE / HTTP/1.1\r\nHost: " + addr + "\r\n\r\n")); err != nil {
-			glog.V(1).Infoln("dial self service fail:", err)
-			return false, err
+			conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+			if _, err = conn.Write([]byte("TRACE / HTTP/1.1\r\nHost: " + addr + "\r\n\r\n")); err != nil {
+				glog.V(1).Infoln("dial self service fail:", err)
+				return false, err
+			}
+			if _, err = conn.Read(make([]byte, 1)); err != nil && err != io.EOF {
+				return false, nil
+			}
+			break
 		}
-		if _, err = conn.Read(make([]byte, 1)); err != nil && err != io.EOF {
-			return false, nil
-		}
+
 		glog.V(2).Infoln("remote dial succ:", addr)
 	}
 	{ // Third: retest direct connect
-		conn, err := net.DialTimeout("tcp", addr+":http", i.timeout)
-		if err == nil {
-			whiteList.Add(addr)
-			conn.Close()
-			return false, nil
+		for idx := range i.ports {
+			conn, err := net.DialTimeout("tcp", addr+i.ports[idx], i.timeout)
+			if err == nil {
+				conn.Close()
+				return false, nil
+			}
 		}
+
 		glog.V(2).Infoln("retry dial fail:", addr)
 	}
 

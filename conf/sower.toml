@@ -26,5 +26,8 @@ blocklist=[
     "*.wikimedia.org",
     "*.wikisource.org",
     "*.web.telegram.org", # telegram
+    "lookup-api.apple.com", # macOS lookup service
+    "lookup-api.apple.com.edgekey.net",
+    "e16991.b.akamaiedge.net",
 ]
 verbose=0
