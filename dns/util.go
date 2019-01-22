@@ -6,12 +6,13 @@ import (
 	"github.com/golang/glog"
 	"github.com/miekg/dns"
 	"github.com/wweir/sower/conf"
+	"github.com/wweir/sower/util"
 )
 
 var (
-	blockList   *Node
-	whiteList   *Node
-	suggestList *Node
+	blockList   *util.Node
+	whiteList   *util.Node
+	suggestList *util.Node
 )
 
 func init() {
@@ -28,8 +29,8 @@ func init() {
 	})
 }
 
-func loadRules(name string, list []string) *Node {
-	rule := NewNodeFromRules(".", list...)
+func loadRules(name string, list []string) *util.Node {
+	rule := util.NewNodeFromRules(".", list...)
 	glog.V(2).Infof("load %s rule:\n%s", name, rule)
 	return rule
 }

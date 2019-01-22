@@ -115,6 +115,7 @@ func (i *intelliSuggest) GetOne(domain interface{}) (interface{}, error) {
 		}
 
 		glog.V(2).Infoln("retry dial fail:", addr)
+		break
 	}
 
 	// After three round test, most probably the addr is blocked

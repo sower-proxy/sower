@@ -1,4 +1,4 @@
-package dns
+package util
 
 import (
 	"strings"
@@ -28,14 +28,15 @@ func NewNodeFromRules(sep string, rules ...string) *Node {
 func (n *Node) String() string {
 	n.RLock()
 	defer n.RUnlock()
-	return n.string("")
+	return n.string("", "     ")
 }
-func (n *node) string(prefix string) (out string) {
+func (n *node) string(prefix, indent string) (out string) {
 	for key, val := range n.node {
-		out += prefix + key + "\n" + val.string(prefix+"    ")
+		out += prefix + key + "\n" + val.string(prefix+indent, indent)
 	}
 	return
 }
+
 func (n *Node) trim(item string) string {
 	return strings.TrimSuffix(item, n.sep)
 }

@@ -7,10 +7,12 @@ import (
 	"net"
 	"net/http"
 	"strings"
+
+	"github.com/wweir/sower/util"
 )
 
-func ParseAddr(conn net.Conn) (teeConn *TeeConn, addr string, err error) {
-	teeConn = &TeeConn{Conn: conn}
+func ParseAddr(conn net.Conn) (teeConn *util.TeeConn, addr string, err error) {
+	teeConn = &util.TeeConn{Conn: conn}
 	teeConn.StartOrReset()
 	defer teeConn.Stop()
 

@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/golang/glog"
 	toml "github.com/pelletier/go-toml"
 	"github.com/wweir/fsnotify"
+	"github.com/wweir/sower/util"
 )
 
 var Conf = struct {
@@ -129,8 +131,20 @@ func watchConfigFile() {
 func AddSuggest(domain string) {
 	mu.Lock()
 	defer mu.Unlock()
+	{ // uinque key
+		Conf.Suggestions = append(Conf.Suggestions, domain)
+		sort.Sort(util.NewReverseSecSlice(Conf.Suggestions))
 
-	Conf.Suggestions = append(Conf.Suggestions, domain)
+		last := ""
+		suggestions := make([]string, 0, len(Conf.Suggestions))
+		for _, suggestion := range Conf.Suggestions {
+			if suggestion != last {
+				suggestions = append(suggestions, suggestion)
+			}
+			last = suggestion
+		}
+		Conf.Suggestions = suggestions
+	}
 
 	// safe write
 	f, err := os.OpenFile(Conf.ConfigFile+"~", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
