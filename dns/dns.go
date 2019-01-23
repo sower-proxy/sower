@@ -1,6 +1,7 @@
 package dns
 
 import (
+	"errors"
 	"io"
 	"net"
 	"strings"
@@ -69,19 +70,22 @@ type intelliSuggest struct {
 	ports    []string
 }
 
-func (i *intelliSuggest) GetOne(domain interface{}) (interface{}, error) {
-	addr := strings.TrimSuffix(domain.(string), ".")
+func (i *intelliSuggest) GetOne(domain interface{}) (ret interface{}, err error) {
+	ret = false
+
 	// kill deadloop, for ugly wildcard setting dns setting
+	addr := strings.TrimSuffix(domain.(string), ".")
 	if len(strings.Split(addr, ".")) > 10 {
-		return false, nil
+		return
 	}
 
+	var conn net.Conn
 	for idx, port := range i.ports {
 		// First: test direct connect
-		conn, err := net.DialTimeout("tcp", addr+port, i.timeout)
+		conn, err = net.DialTimeout("tcp", addr+port, i.timeout)
 		if err == nil {
 			conn.Close()
-			return false, nil
+			return
 		}
 		glog.V(2).Infoln("first dial fail:", addr)
 
@@ -89,18 +93,18 @@ func (i *intelliSuggest) GetOne(domain interface{}) (interface{}, error) {
 		conn, err = net.DialTimeout("tcp", i.listenIP+port, i.timeout/100)
 		if err != nil {
 			glog.V(1).Infoln("dial self service fail:", err)
-			return false, err
+			return
 		}
 		defer conn.Close()
 
 		conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 		if _, err = conn.Write([]byte("TRACE / HTTP/1.1\r\nHost: " + addr + "\r\n\r\n")); err != nil {
 			glog.V(1).Infoln("dial self service fail:", err)
-			return false, err
+			return
 		}
-		if _, err = conn.Read(make([]byte, 1)); err != nil && err != io.EOF {
+		if _, err = conn.Read(make([]byte, 1)); err == io.EOF {
 			if idx+1 == len(i.ports) {
-				return false, nil
+				return ret, errors.New("remote connect fail")
 			}
 			continue
 		}
@@ -111,7 +115,7 @@ func (i *intelliSuggest) GetOne(domain interface{}) (interface{}, error) {
 		conn, err = net.DialTimeout("tcp", addr+port, i.timeout)
 		if err == nil {
 			conn.Close()
-			return false, nil
+			return
 		}
 
 		glog.V(2).Infoln("retry dial fail:", addr)
@@ -121,5 +125,5 @@ func (i *intelliSuggest) GetOne(domain interface{}) (interface{}, error) {
 	// After three round test, most probably the addr is blocked
 	conf.AddSuggest(addr)
 	glog.Infof("added suggest domain: %s", addr)
-	return true, nil
+	return
 }
