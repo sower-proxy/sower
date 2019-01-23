@@ -1,7 +1,6 @@
 package dns
 
 import (
-	"errors"
 	"net"
 	"strings"
 	"time"
@@ -10,6 +9,7 @@ import (
 	"github.com/miekg/dns"
 	mem "github.com/wweir/mem-go"
 	"github.com/wweir/sower/conf"
+	"github.com/wweir/sower/util"
 )
 
 const colon = byte(':')
@@ -42,7 +42,9 @@ func StartDNS(dnsServer, listenIP string) {
 	glog.Fatalln(server.ListenAndServe())
 }
 
-func matchAndServe(w dns.ResponseWriter, r *dns.Msg, domain, listenIP, dnsServer string, ipNet net.IP, suggest *intelliSuggest) {
+func matchAndServe(w dns.ResponseWriter, r *dns.Msg, domain, listenIP,
+	dnsServer string, ipNet net.IP, suggest *intelliSuggest) {
+
 	inWriteList := whiteList.Match(domain)
 
 	if !inWriteList && (blockList.Match(domain) || suggestList.Match(domain)) {
@@ -69,8 +71,8 @@ type intelliSuggest struct {
 	ports    []string
 }
 
-func (i *intelliSuggest) GetOne(domain interface{}) (ret interface{}, err error) {
-	ret = false
+func (i *intelliSuggest) GetOne(domain interface{}) (iface interface{}, e error) {
+	iface = struct{}{}
 
 	// kill deadloop, for ugly wildcard setting dns setting
 	addr := strings.TrimSuffix(domain.(string), ".")
@@ -78,55 +80,36 @@ func (i *intelliSuggest) GetOne(domain interface{}) (ret interface{}, err error)
 		return
 	}
 
-	var conn net.Conn
-	for idx, port := range i.ports {
-		// First: test direct connect
-		conn, err = net.DialTimeout("tcp", addr+port, i.timeout)
-		if err == nil {
-			conn.Close()
-			return
-		}
-		glog.V(2).Infoln("first dial fail:", addr)
+	for _, port := range i.ports {
+		// give local dial a hand, make it not so easy to be added into suggestions
+		util.HTTPPing(addr+port, addr, i.timeout/10)
+		localCh := util.HTTPPing(addr+port, addr, i.timeout)
+		remoteCh := util.HTTPPing(i.listenIP+port, addr, i.timeout)
 
-		// Second: test remote connect
-		conn, err = net.DialTimeout("tcp", i.listenIP+port, i.timeout/100)
-		if err != nil {
-			glog.V(1).Infoln("dial self service fail:", err)
-			return
-		}
-		defer conn.Close()
-
-		conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-		if _, err = conn.Write([]byte("TRACE / HTTP/1.1\r\nHost: " + addr + "\r\n\r\n")); err != nil {
-			glog.V(1).Infoln("dial self service fail:", err)
-			return
-		}
-
-		// err -> nil:		read something succ
-		// err -> io.EOF:	no such domain or connection refused
-		// err -> timeout:	tcp package has been dropped
-		if _, err = conn.Read(make([]byte, 1)); err != nil {
-			if idx+1 == len(i.ports) {
-				return ret, errors.New("remote connect fail")
+		select {
+		case err := <-localCh:
+			if err == nil {
+				glog.V(2).Infoln(addr, "local first, succ")
+				return
 			}
-			continue
+			if err = <-remoteCh; err != nil {
+				glog.V(2).Infoln(addr, "local first, all fail")
+				return
+			}
+			glog.V(2).Infoln(addr, "local first, remote succ")
+			conf.AddSuggest(addr)
+
+		case err := <-remoteCh:
+			if err != nil {
+				glog.V(2).Infoln(addr, "remote first, fail")
+				return
+			}
+			glog.V(2).Infoln(addr, "remote first, succ")
+			conf.AddSuggest(addr)
 		}
 
-		glog.V(2).Infoln("remote dial succ:", addr)
-
-		// Third: retest direct connect
-		conn, err = net.DialTimeout("tcp", addr+port, i.timeout)
-		if err == nil {
-			conn.Close()
-			return
-		}
-
-		glog.V(2).Infoln("retry dial fail:", addr)
-		break
+		glog.Infof("added suggest domain: %s", addr)
+		return
 	}
-
-	// After three round test, most probably the addr is blocked
-	conf.AddSuggest(addr)
-	glog.Infof("added suggest domain: %s", addr)
 	return
 }
