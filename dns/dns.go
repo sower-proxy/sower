@@ -90,11 +90,11 @@ func (i *intelliSuggest) GetOne(domain interface{}) (iface interface{}, e error)
 		case err := <-localCh:
 			if err == nil {
 				glog.V(2).Infoln(addr, "local first, succ")
-				return
+				continue
 			}
 			if err = <-remoteCh; err != nil {
 				glog.V(2).Infoln(addr, "local first, all fail")
-				return
+				continue
 			}
 			glog.V(2).Infoln(addr, "local first, remote succ")
 			conf.AddSuggest(addr)
@@ -102,7 +102,7 @@ func (i *intelliSuggest) GetOne(domain interface{}) (iface interface{}, e error)
 		case err := <-remoteCh:
 			if err != nil {
 				glog.V(2).Infoln(addr, "remote first, fail")
-				return
+				continue
 			}
 			glog.V(2).Infoln(addr, "remote first, succ")
 			conf.AddSuggest(addr)
