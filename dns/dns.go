@@ -2,7 +2,6 @@ package dns
 
 import (
 	"errors"
-	"io"
 	"net"
 	"strings"
 	"time"
@@ -102,7 +101,11 @@ func (i *intelliSuggest) GetOne(domain interface{}) (ret interface{}, err error)
 			glog.V(1).Infoln("dial self service fail:", err)
 			return
 		}
-		if _, err = conn.Read(make([]byte, 1)); err == io.EOF {
+
+		// err -> nil:		read something succ
+		// err -> io.EOF:	no such domain or connection refused
+		// err -> timeout:	tcp package has been dropped
+		if _, err = conn.Read(make([]byte, 1)); err != nil {
 			if idx+1 == len(i.ports) {
 				return ret, errors.New("remote connect fail")
 			}
