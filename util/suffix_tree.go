@@ -52,7 +52,7 @@ func (n *node) add(secs []string) {
 	case 0:
 		return
 	case 1:
-		n.node[secs[length-1]] = &node{node: map[string]*node{}}
+		n.node[secs[length-1]] = &node{node: map[string]*node{"": &node{}}}
 	default:
 		subNode, ok := n.node[secs[length-1]]
 		if !ok {
@@ -70,15 +70,11 @@ func (n *Node) Match(item string) bool {
 func (n *node) matchSecs(secs []string) bool {
 	length := len(secs)
 	if length == 0 {
-		switch len(n.node) {
-		case 0:
+		if _, ok := n.node[""]; ok {
 			return true
-		case 1:
-			_, ok := n.node["*"]
-			return ok
-		default:
-			return false
 		}
+		_, ok := n.node["*"]
+		return ok
 	}
 
 	if n, ok := n.node[secs[length-1]]; ok {
