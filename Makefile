@@ -6,7 +6,7 @@ generate:
 	go generate ./...
 
 build:
-	go build -v -ldflags \
+	GO111MODULE=on go build -v -ldflags \
 		"-X main.version=$(shell git describe --tags) \
 		 -X main.date=$(shell date +%Y-%m-%d)"
 image:
