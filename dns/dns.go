@@ -22,7 +22,8 @@ func StartDNS(dnsServer, listenIP string) {
 	dns.HandleFunc(".", func(w dns.ResponseWriter, r *dns.Msg) {
 		// *Msg r has an TSIG record and it was validated
 		if r.IsTsig() != nil && w.TsigStatus() == nil {
-			r.SetTsig(r.Extra[len(r.Extra)-1].(*dns.TSIG).Hdr.Name, dns.HmacMD5, 300, time.Now().Unix())
+			lastTsig := r.Extra[len(r.Extra)-1].(*dns.TSIG)
+			r.SetTsig(lastTsig.Hdr.Name, dns.HmacMD5, 300, time.Now().Unix())
 		}
 
 		//https://stackoverflow.com/questions/4082081/requesting-a-and-aaaa-records-in-single-dns-query/4083071#4083071
@@ -82,7 +83,7 @@ func (i *intelliSuggest) GetOne(domain interface{}) (iface interface{}, e error)
 
 	for _, port := range i.ports {
 		// give local dial a hand, make it not so easy to be added into suggestions
-		util.HTTPPing(addr+port, addr, i.timeout/10)
+		util.HTTPPing(addr+port, addr, i.timeout/4)
 		localCh := util.HTTPPing(addr+port, addr, i.timeout)
 		remoteCh := util.HTTPPing(i.listenIP+port, addr, i.timeout)
 
