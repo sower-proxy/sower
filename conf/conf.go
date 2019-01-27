@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -131,20 +130,9 @@ func watchConfigFile() {
 func AddSuggest(domain string) {
 	mu.Lock()
 	defer mu.Unlock()
-	{ // uinque key
-		Conf.Suggestions = append(Conf.Suggestions, domain)
-		sort.Sort(util.NewReverseSecSlice(Conf.Suggestions))
 
-		last := ""
-		suggestions := make([]string, 0, len(Conf.Suggestions))
-		for _, suggestion := range Conf.Suggestions {
-			if suggestion != last {
-				suggestions = append(suggestions, suggestion)
-			}
-			last = suggestion
-		}
-		Conf.Suggestions = suggestions
-	}
+	Conf.Suggestions = append(Conf.Suggestions, domain)
+	Conf.Suggestions = util.NewReverseSecSlice(Conf.Suggestions).Sort().Uniq()
 
 	// safe write
 	f, err := os.OpenFile(Conf.ConfigFile+"~", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)

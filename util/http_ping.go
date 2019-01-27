@@ -4,15 +4,12 @@ import (
 	"bytes"
 	"crypto/tls"
 	"encoding/binary"
-	"errors"
 	"io"
 	"net"
-	"strings"
 	"time"
 )
 
-// HTTPPing try connect to a http server with domain though the http addr
-
+// HTTPPing try connect to a http(s) server with domain though the http addr
 func HTTPPing(tcpAddr, domain string, timeout time.Duration) <-chan error {
 	errCh := make(chan error)
 	go func() {
@@ -28,13 +25,13 @@ func httpPing(tcpAddr, domain string, timeout time.Duration) error {
 	}
 	defer conn.Close()
 
-	idx := strings.Index(tcpAddr, ":")
-	if idx <= 0 {
-		return errors.New("tcp address port is needed")
+	host, port, err := net.SplitHostPort(tcpAddr)
+	if err != nil {
+		return err
 	}
 
 	var msg []byte
-	switch tcpAddr[idx:] {
+	switch port {
 	case ":80":
 		msg = []byte("TRACE / HTTP/1.1\r\nHost: " + domain + "\r\n\r\n")
 	case ":443":
@@ -50,10 +47,8 @@ func httpPing(tcpAddr, domain string, timeout time.Duration) error {
 	// err -> io.EOF:	no such domain or connection refused
 	// err -> timeout:	tcp package has been dropped
 	_, err = conn.Read(make([]byte, 1))
-	if err == io.EOF {
-		if tcpAddr[:idx] == domain {
-			return nil
-		}
+	if err == io.EOF && host == domain {
+		return nil
 	}
 	return err
 }
@@ -119,7 +114,7 @@ func NewClientHelloSNIMsg(domain string) []byte {
 		},
 	}
 
-	buf := bytes.NewBuffer(make([]byte, 0, length+71))
+	buf := bytes.NewBuffer(make([]byte, 0, length+61))
 	binary.Write(buf, binary.BigEndian, msg)
 	buf.WriteString(domain)
 	return buf.Bytes()

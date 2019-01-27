@@ -8,11 +8,9 @@ import (
 	"encoding/pem"
 	"math/big"
 	"net"
-	"time"
 
 	"github.com/golang/glog"
 	quic "github.com/lucas-clemente/quic-go"
-	"github.com/pkg/errors"
 )
 
 type streamConn struct {
@@ -47,21 +45,4 @@ func mockTlsPem() *tls.Config {
 		glog.Fatalln(err)
 	}
 	return &tls.Config{Certificates: []tls.Certificate{tlsCert}}
-}
-
-func WithTimeout(fn func() error, timeout time.Duration) error {
-	var okCh = make(chan struct{})
-	var err error
-
-	go func() {
-		err = fn()
-		close(okCh)
-	}()
-
-	select {
-	case <-okCh:
-		return err
-	case <-time.After(timeout):
-		return errors.New("timeout: " + timeout.String())
-	}
 }

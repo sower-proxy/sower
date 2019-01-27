@@ -7,6 +7,7 @@ import (
 
 	quic "github.com/lucas-clemente/quic-go"
 	"github.com/pkg/errors"
+	"github.com/wweir/sower/util"
 )
 
 type client struct {
@@ -40,7 +41,7 @@ func (c *client) Dial(server string) (net.Conn, error) {
 	}
 
 	var stream quic.Stream
-	if err := WithTimeout(func() (err error) {
+	if err := util.WithTimeout(func() (err error) {
 		if stream, err = c.sess.OpenStream(); err != nil {
 			c.sess = nil
 		}

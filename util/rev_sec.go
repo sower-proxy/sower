@@ -13,6 +13,24 @@ func NewReverseSecSlice(a []string) *ReverseSecSlice {
 	return &ReverseSecSlice{sort.StringSlice(a)}
 }
 
+func (p *ReverseSecSlice) Sort() *ReverseSecSlice {
+	sort.Sort(p)
+	return p
+}
+func (p *ReverseSecSlice) Uniq() []string {
+	olds := []string(p.StringSlice)
+
+	last := ""
+	strs := make([]string, 0, len(olds))
+	for _, str := range olds {
+		if str != last {
+			strs = append(strs, str)
+		}
+		last = str
+	}
+	return strs
+}
+
 func (p *ReverseSecSlice) Less(i, j int) bool {
 	secsI := strings.Split(p.StringSlice[i], ".")
 	secsJ := strings.Split(p.StringSlice[j], ".")
