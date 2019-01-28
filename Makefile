@@ -16,14 +16,14 @@ kill:
 	sudo pkill -9 sower || true
 
 client: build kill
-	sudo $(PWD)/sower -f /usr/local/etc/sower.toml
+	sudo $(PWD)/sower -f conf/sower.toml
 
 server: build kill
 	$(PWD)/sower -n TCP -v 1
 
 run: build kill
 	$(PWD)/sower -n TCP -v 1  &
-	sudo $(PWD)/sower -f /usr/local/etc/sower.toml &
+	sudo $(PWD)/sower -f conf/sower.toml &
 	@sleep 1
 	curl 127.0.0.1
 	@sleep 1

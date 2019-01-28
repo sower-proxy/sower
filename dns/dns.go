@@ -16,8 +16,9 @@ const colon = byte(':')
 
 func StartDNS(dnsServer, listenIP string) {
 	ip := net.ParseIP(listenIP)
-	suggest := &intelliSuggest{listenIP, 2 * time.Second, []string{":80", ":443"}}
+	suggest := &intelliSuggest{listenIP, 2 * time.Second, []string{"80", "443"}}
 	mem.DefaultCache = mem.New(time.Hour)
+	dnsServer = net.JoinHostPort(dnsServer, "53")
 
 	dns.HandleFunc(".", func(w dns.ResponseWriter, r *dns.Msg) {
 		// *Msg r has an TSIG record and it was validated
@@ -39,7 +40,7 @@ func StartDNS(dnsServer, listenIP string) {
 		matchAndServe(w, r, domain, listenIP, dnsServer, ip, suggest)
 	})
 
-	server := &dns.Server{Addr: listenIP + ":53", Net: "udp"}
+	server := &dns.Server{Addr: net.JoinHostPort(listenIP, "53"), Net: "udp"}
 	glog.Fatalln(server.ListenAndServe())
 }
 
@@ -58,7 +59,7 @@ func matchAndServe(w dns.ResponseWriter, r *dns.Msg, domain, listenIP,
 		go mem.Remember(suggest, domain)
 	}
 
-	msg, err := dns.Exchange(r, dnsServer+":53")
+	msg, err := dns.Exchange(r, dnsServer)
 	if msg == nil { // expose any response except nil
 		glog.V(1).Infof("get dns of %s fail: %s", domain, err)
 		return
@@ -83,7 +84,7 @@ func (i *intelliSuggest) GetOne(domain interface{}) (iface interface{}, e error)
 
 	for _, port := range i.ports {
 		// give local dial a hand, make it not so easy to be added into suggestions
-		util.HTTPPing(addr+port, addr, i.timeout/4)
+		util.HTTPPing(addr+port, addr, i.timeout/5)
 		localCh := util.HTTPPing(addr+port, addr, i.timeout)
 		remoteCh := util.HTTPPing(i.listenIP+port, addr, i.timeout)
 

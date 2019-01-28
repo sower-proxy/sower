@@ -2,7 +2,6 @@ package proxy
 
 import (
 	"net"
-	"strings"
 
 	"github.com/golang/glog"
 	"github.com/wweir/sower/proxy/kcp"
@@ -30,14 +29,12 @@ func NewClient(netType string) Client {
 }
 
 func StartClient(netType, server, cipher, password, listenIP string) {
-	connCh := listenLocal(listenIP, []string{":80", ":443"})
+	connCh := listenLocal(listenIP, []string{"80", "443"})
 	client := NewClient(netType)
-	if idx := strings.Index(server, ":"); idx > 0 {
-		ips, err := net.LookupIP(server[:idx])
-		if err != nil || len(ips) == 0 {
-			glog.Fatalln(err, ips)
-		}
-		server = ips[0].String() + server[idx:]
+	if addr, err := net.ResolveTCPAddr("tcp", server); err != nil {
+		glog.Fatalln(err)
+	} else {
+		server = addr.String()
 	}
 
 	glog.Infoln("Client started.")
@@ -61,7 +58,7 @@ func listenLocal(listenIP string, ports []string) <-chan net.Conn {
 	connCh := make(chan net.Conn, 10)
 	for i := range ports {
 		go func(port string) {
-			ln, err := net.Listen("tcp", listenIP+port)
+			ln, err := net.Listen("tcp", net.JoinHostPort(listenIP, port))
 			if err != nil {
 				glog.Fatalln(err)
 			}

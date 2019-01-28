@@ -14,6 +14,11 @@ import (
 
 func StartHttpProxy(netType, server, cipher, password, addr string) {
 	client := NewClient(netType)
+	if addr, err := net.ResolveTCPAddr("tcp", server); err != nil {
+		glog.Fatalln(err)
+	} else {
+		server = addr.String()
+	}
 
 	srv := &http.Server{
 		Addr: addr,
