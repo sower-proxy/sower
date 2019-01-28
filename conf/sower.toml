@@ -23,4 +23,9 @@ blocklist=[
     "*.blogspot.com", # blogspot
     "*.wikipedia.org", # wikipeida
 ]
+whitelist=[
+    "iamp.*.*.*",
+    "iamp.*.*",
+    "imap-mail.*.*",
+]
 verbose=0

@@ -43,6 +43,23 @@ func TestNode_Match(t *testing.T) {
 			{"a.wweir.cc", true},
 			{"b.wweir.cc", true},
 		},
+	}, {
+		"fuzz3",
+		NewNodeFromRules(".", "a.*.cc"),
+		[]test{
+			{"wweir.cc", false},
+			{"a.wweir.cc", true},
+			{"b.wweir.cc", false},
+		},
+	}, {
+		"fuzz4",
+		NewNodeFromRules(".", "*.*.cc", "iamp.*.*"),
+		[]test{
+			{"wweir.cc", false},
+			{"a.wweir.cc", true},
+			{"b.wweir.cc", true},
+			{"iamp.wweir.cc", true},
+		},
 	}}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

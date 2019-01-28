@@ -20,7 +20,7 @@ func init() {
 
 	//first init
 	blockList = loadRules("block", conf.Conf.BlockList)
-	suggestList = loadRules("suggest", conf.Conf.BlockList)
+	suggestList = loadRules("suggest", conf.Conf.Suggestions)
 	whiteList = loadRules("white", conf.Conf.WhiteList)
 	whiteList.Add(host)
 

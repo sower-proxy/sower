@@ -64,23 +64,27 @@ func (n *node) add(secs []string) {
 }
 
 func (n *Node) Match(item string) bool {
-	return n.matchSecs(strings.Split(n.trim(item), n.sep))
+	return n.matchSecs(strings.Split(n.trim(item), n.sep), false)
 }
 
-func (n *node) matchSecs(secs []string) bool {
+func (n *node) matchSecs(secs []string, fuzzNode bool) bool {
 	length := len(secs)
 	if length == 0 {
 		if _, ok := n.node[""]; ok {
 			return true
 		}
-		_, ok := n.node["*"]
-		return ok
+		if _, ok := n.node["*"]; ok {
+			return !fuzzNode
+		}
+		return false
 	}
 
 	if n, ok := n.node[secs[length-1]]; ok {
-		return n.matchSecs(secs[:length-1])
+		return n.matchSecs(secs[:length-1], false)
+	}
+	if n, ok := n.node["*"]; ok {
+		return n.matchSecs(secs[:length-1], true)
 	}
 
-	_, ok := n.node["*"]
-	return ok
+	return false
 }
