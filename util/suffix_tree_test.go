@@ -30,21 +30,15 @@ func TestNode_Match(t *testing.T) {
 		},
 	}, {
 		"fuzz1",
-		NewNodeFromRules(".", "wweir.cc", "*.wweir.cc"),
-		[]test{
-			{"wweir.cc", true},
-			{"a.wweir.cc", true},
-		},
-	}, {
-		"fuzz2",
-		NewNodeFromRules(".", "a.wweir.cc", "*.wweir.cc"),
+		NewNodeFromRules(".", "wweir.cc", "a.wweir.cc", "*.wweir.cc"),
 		[]test{
 			{"wweir.cc", true},
 			{"a.wweir.cc", true},
 			{"b.wweir.cc", true},
+			{"a.b.wweir.cc", false},
 		},
 	}, {
-		"fuzz3",
+		"fuzz2",
 		NewNodeFromRules(".", "a.*.cc"),
 		[]test{
 			{"wweir.cc", false},
@@ -52,13 +46,23 @@ func TestNode_Match(t *testing.T) {
 			{"b.wweir.cc", false},
 		},
 	}, {
-		"fuzz4",
+		"fuzz3",
 		NewNodeFromRules(".", "*.*.cc", "iamp.*.*"),
 		[]test{
 			{"wweir.cc", false},
 			{"a.wweir.cc", true},
 			{"b.wweir.cc", true},
 			{"iamp.wweir.cc", true},
+		},
+	}, {
+		"fuzz4",
+		NewNodeFromRules(".", "**.cc", "a.**.com"),
+		[]test{
+			{"wweir.cc", true},
+			{"a.wweir.cc", true},
+			{"a.b.wweir.cc", true},
+			{"a.wweir.com", true},
+			{"b.wweir.com", false},
 		},
 	}}
 	for _, tt := range tests {

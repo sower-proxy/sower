@@ -54,10 +54,15 @@ func (n *node) add(secs []string) {
 	case 1:
 		n.node[secs[length-1]] = &node{node: map[string]*node{"": &node{}}}
 	default:
-		subNode, ok := n.node[secs[length-1]]
+		sec := secs[length-1]
+		if sec == "**" {
+			sec = "*"
+		}
+
+		subNode, ok := n.node[sec]
 		if !ok {
 			subNode = &node{node: map[string]*node{}}
-			n.node[secs[length-1]] = subNode
+			n.node[sec] = subNode
 		}
 		subNode.add(secs[:length-1])
 	}
@@ -73,6 +78,9 @@ func (n *node) matchSecs(secs []string, fuzzNode bool) bool {
 		if _, ok := n.node[""]; ok {
 			return true
 		}
+		if _, ok := n.node["**"]; ok {
+			return true
+		}
 		if _, ok := n.node["*"]; ok {
 			return !fuzzNode
 		}
@@ -84,6 +92,9 @@ func (n *node) matchSecs(secs []string, fuzzNode bool) bool {
 	}
 	if n, ok := n.node["*"]; ok {
 		return n.matchSecs(secs[:length-1], true)
+	}
+	if _, ok := n.node["**"]; ok {
+		return true
 	}
 
 	return false

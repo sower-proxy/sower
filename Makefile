@@ -1,10 +1,11 @@
 SERVER:=127.0.0.1:5533
 
-default: build
+default: test build
 
 generate:
 	go generate ./...
-
+test:
+	go test -race ./...
 build:
 	GO111MODULE=on go build -v -ldflags \
 		"-X main.version=$(shell git describe --tags) \

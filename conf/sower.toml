@@ -8,24 +8,26 @@ dns_server="223.5.5.5"           # Alibaba public dns
 client_ip="127.0.0.1"            # listen the IP, dns target is the IP
 # clear_dns_cache="killall -HUP mDNSResponder"
 blocklist=[
-    "*.google.com", # google
-    "*.goo.gl",
-    "*.googleusercontent.com",
-    "*.googleapis.com",
-    "*.youtube.com", # youtube
-    "*.ytimg.com",
-    "*.ggpht.com",
-    "*.googlevideo.com",
-    "*.facebook.com", # facebook
-    "*.xx.fbcdn.net",
-    "*.twitter.com", # twitter
-    "*.twimg.com",
-    "*.blogspot.com", # blogspot
-    "*.wikipedia.org", # wikipeida
+    "**.google.com", # google
+    "**.goo.gl",
+    "**.googleusercontent.com",
+    "**.googleapis.com",
+    "**.youtube.com", # youtube
+    "**.ytimg.com",
+    "**.ggpht.com",
+    "**.googlevideo.com",
+    "**.facebook.com", # facebook
+    "**.xx.fbcdn.net",
+    "**.twitter.com", # twitter
+    "**.twimg.com",
+    "**.blogspot.com", # blogspot
+    "**.wikipedia.org", # wikipeida
 ]
 whitelist=[
     "iamp.*.*.*",
     "iamp.*.*",
-    "imap-mail.*.*",
+    "imap-mail.outlook.com",
+    "**.qq.com",
+    "**.baidu.com"
 ]
 verbose=0

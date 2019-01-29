@@ -12,12 +12,10 @@
 *.out
 
 .DS_Store
-**/.DS_Store
+._*
+*.swp
+*.swo
 .vscode
 .idea
 sower
-cert.pem
-**/cert.pem
-privkey.pem
-**/privkey.pem
 /sower.toml
