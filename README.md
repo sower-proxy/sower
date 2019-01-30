@@ -17,6 +17,8 @@ Sower also provides an http(s) proxy listening on `:8080` by default. You can tu
 
 
 ## Installation
+After Deployed, please check your config file, it is placed in `/usr/local/etc/sower.toml` by default. Here is the example config file [**conf/sower.toml**](https://github.com/wweir/sower/blob/master/conf/sower.toml)
+
 ### Auto deploy
 Auto deploy script support Linux server side and masOS/Linux client side.
 
