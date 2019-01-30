@@ -84,7 +84,7 @@ func (i *intelliSuggest) GetOne(domain interface{}) (iface interface{}, e error)
 
 	for _, port := range i.ports {
 		// give local dial a hand, make it not so easy to be added into suggestions
-		util.HTTPPing(addr+port, addr, i.timeout/5)
+		<-util.HTTPPing(addr+port, addr, i.timeout/5)
 		localCh := util.HTTPPing(addr+port, addr, i.timeout)
 		remoteCh := util.HTTPPing(i.listenIP+port, addr, i.timeout)
 
