@@ -28,6 +28,6 @@ whitelist=[
     "iamp.*.*",
     "imap-mail.outlook.com",
     "**.qq.com",
-    "**.baidu.com"
+    "**.baidu.com",
 ]
 verbose=0
