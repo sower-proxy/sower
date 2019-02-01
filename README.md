@@ -41,7 +41,7 @@ If you wanna uninstall sower, change `install` into `uninstall` and rerun the co
 ### Docker deploy
 The auto build docker images are [wweir/sower](https://hub.docker.com/r/wweir/sower).
 
-It is very simple to use it on the server side. Map the port and run it directly.
+It is very simple to use it on the server side. Export the port(5533) and run it directly.
 
 But the client is more troublesome and needs some understanding of the working mechanism of the sower.
 

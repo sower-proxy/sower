@@ -19,6 +19,7 @@ require (
 	github.com/ulule/deepcopier v0.0.0-20171107155558-ca99b135e50f // indirect
 	github.com/wweir/fsnotify v1.4.8
 	github.com/wweir/mem-go v0.0.0-20190109100331-8673ab596296
+	github.com/wweir/netboot v0.0.2
 	github.com/xtaci/kcp-go v5.0.7+incompatible
 	golang.org/x/crypto v0.0.0-20190123085648-057139ce5d2b
 	golang.org/x/net v0.0.0-20190125091013-d26f9f9a57f3 // indirect
