@@ -4,7 +4,7 @@ password="12345678"
 server_port="5533"
 # server_addr="remote-server:5533" # replce it to remote server
 http_proxy=":8080"               # eg: 192.168.0.2:8080
-dns_server="223.5.5.5"           # Alibaba public dns
+dns_server=""                    # Keep empty for dynamic setting from net env
 client_ip="127.0.0.1"            # listen the IP, dns target is the IP
 # clear_dns_cache="killall -HUP mDNSResponder"
 blocklist=[
@@ -22,6 +22,7 @@ blocklist=[
     "**.twimg.com",
     "**.blogspot.com", # blogspot
     "**.wikipedia.org", # wikipeida
+    "*.cloudfront.net",
 ]
 whitelist=[
     "iamp.*.*.*",
