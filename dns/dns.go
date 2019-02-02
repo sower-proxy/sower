@@ -18,8 +18,23 @@ func StartDNS(dnsServer, listenIP string) {
 	ip := net.ParseIP(listenIP)
 	suggest := &intelliSuggest{listenIP, 2 * time.Second, []string{"80", "443"}}
 	mem.DefaultCache = mem.New(time.Hour)
+	var dhcpCh chan struct{}
 	if dnsServer != "" {
 		dnsServer = net.JoinHostPort(dnsServer, "53")
+	} else {
+		dhcpCh = make(chan struct{})
+		go func() {
+			for {
+				<-dhcpCh
+				host := GetDefaultDNSServer()
+				if host == "" {
+					continue
+				}
+				// atomic action
+				dnsServer = net.JoinHostPort(host, "53")
+				glog.Infoln("set dns server to", host)
+			}
+		}()
 	}
 
 	dns.HandleFunc(".", func(w dns.ResponseWriter, r *dns.Msg) {
@@ -39,15 +54,15 @@ func StartDNS(dnsServer, listenIP string) {
 			domain = domain[:idx]
 		}
 
-		matchAndServe(w, r, domain, listenIP, &dnsServer, ip, suggest)
+		matchAndServe(w, r, domain, listenIP, dnsServer, dhcpCh, ip, suggest)
 	})
 
 	server := &dns.Server{Addr: net.JoinHostPort(listenIP, "53"), Net: "udp"}
 	glog.Fatalln(server.ListenAndServe())
 }
 
-func matchAndServe(w dns.ResponseWriter, r *dns.Msg, domain, listenIP string,
-	dnsServer *string, ipNet net.IP, suggest *intelliSuggest) {
+func matchAndServe(w dns.ResponseWriter, r *dns.Msg, domain, listenIP, dnsServer string,
+	dhcpCh chan struct{}, ipNet net.IP, suggest *intelliSuggest) {
 
 	inWriteList := whiteList.Match(domain)
 
@@ -61,18 +76,12 @@ func matchAndServe(w dns.ResponseWriter, r *dns.Msg, domain, listenIP string,
 		go mem.Remember(suggest, domain)
 	}
 
-	if *dnsServer == "" {
-		host := GetDefaultDNSServer()
-		if host == "" {
-			return
+	msg, err := dns.Exchange(r, dnsServer)
+	if err != nil && dhcpCh != nil {
+		select {
+		case dhcpCh <- struct{}{}:
+		default:
 		}
-		*dnsServer = net.JoinHostPort(host, "53")
-		glog.Infoln("set dns server to", host)
-	}
-
-	msg, err := dns.Exchange(r, *dnsServer)
-	if err != nil {
-		*dnsServer = ""
 	}
 	if msg == nil { // expose any response except nil
 		glog.V(1).Infof("get dns of %s fail: %s", domain, err)

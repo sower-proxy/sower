@@ -8,14 +8,12 @@ import (
 	"github.com/wweir/netboot/dhcp4"
 )
 
-func GetDefaultDNSServer() string {
-	xid := make([]byte, 4)
-	rand.Read(xid)
+var xid = make([]byte, 4)
 
+func GetDefaultDNSServer() string {
 	pack := &dhcp4.Packet{
-		Type:          dhcp4.MsgDiscover,
-		TransactionID: xid,
-		Broadcast:     true,
+		Type:      dhcp4.MsgDiscover,
+		Broadcast: true,
 	}
 	options := map[dhcp4.Option][]byte{
 		dhcp4.OptRequestedOptions: []byte{byte(dhcp4.OptDNSServers)},
@@ -24,12 +22,14 @@ func GetDefaultDNSServer() string {
 	ifaces := mustGetInterfaces()
 	for _, iface := range ifaces {
 		conn, err := dhcp4.NewConn(iface.IP.String() + ":68")
-		if err != nil {
-			glog.Errorln(err)
+		if err != nil { // maybe in use
+			glog.V(1).Infoln(err)
 			continue
 		}
 		defer conn.Close()
 
+		rand.Read(xid)
+		pack.TransactionID = xid
 		pack.HardwareAddr = iface.Interface.HardwareAddr
 		options[dhcp4.OptClientIdentifier] = iface.Interface.HardwareAddr
 		pack.Options = dhcp4.Options(options)
@@ -45,12 +45,12 @@ func GetDefaultDNSServer() string {
 			continue
 		}
 
-		ip, err := pack.Options.IP(dhcp4.OptDNSServers)
+		ips, err := pack.Options.IPs(dhcp4.OptDNSServers)
 		if err != nil {
 			glog.Errorln(err)
 			continue
 		}
-		return ip.String()
+		return ips[0].String() // if len(ips) == 0, err should not be wrong size
 	}
 	return ""
 }
