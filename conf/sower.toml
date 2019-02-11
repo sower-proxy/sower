@@ -12,6 +12,7 @@ blocklist=[
     "**.goo.gl",
     "**.googleusercontent.com",
     "**.googleapis.com",
+    "*.googlesource.com",
     "**.youtube.com", # youtube
     "**.ytimg.com",
     "**.ggpht.com",
@@ -21,6 +22,7 @@ blocklist=[
     "**.twitter.com", # twitter
     "**.twimg.com",
     "**.blogspot.com", # blogspot
+    "**.appspot.com",
     "**.wikipedia.org", # wikipeida
     "*.cloudfront.net",
 ]

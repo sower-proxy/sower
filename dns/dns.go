@@ -107,29 +107,29 @@ func (i *intelliSuggest) GetOne(domain interface{}) (iface interface{}, e error)
 
 	for _, port := range i.ports {
 		// give local dial a hand, make it not so easy to be added into suggestions
-		<-util.HTTPPing(addr+port, addr, i.timeout/10)
-		localCh := util.HTTPPing(addr+port, addr, i.timeout)
-		remoteCh := util.HTTPPing(i.listenIP+port, addr, i.timeout)
+		<-util.HTTPPing(net.JoinHostPort(addr, port), addr, i.timeout/50)
+		localCh := util.HTTPPing(net.JoinHostPort(addr, port), addr, i.timeout)
+		remoteCh := util.HTTPPing(net.JoinHostPort(i.listenIP, port), addr, i.timeout)
 
 		select {
 		case err := <-localCh:
 			if err == nil {
-				glog.V(2).Infoln(addr, "local first, succ")
+				glog.V(2).Infoln("PING", addr, "local first, succ")
 				continue
 			}
-			if err = <-remoteCh; err != nil {
-				glog.V(2).Infoln(addr, "local first, all fail")
+			if e := <-remoteCh; e != nil {
+				glog.V(2).Infoln("PING", addr, "local first, all fail:", err)
 				continue
 			}
-			glog.V(2).Infoln(addr, "local first, remote succ")
+			glog.V(2).Infoln("PING", addr, "local first, remote succ")
 			conf.AddSuggest(addr)
 
 		case err := <-remoteCh:
 			if err != nil {
-				glog.V(2).Infoln(addr, "remote first, fail")
+				glog.V(2).Infoln("PING", addr, "remote first, fail:", err)
 				continue
 			}
-			glog.V(2).Infoln(addr, "remote first, succ")
+			glog.V(2).Infoln("PING", addr, "remote first, succ")
 			conf.AddSuggest(addr)
 		}
 
