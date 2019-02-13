@@ -18,13 +18,19 @@ blocklist=[
     "**.ggpht.com",
     "**.googlevideo.com",
     "**.facebook.com", # facebook
-    "**.xx.fbcdn.net",
+    "**.fbcdn.net",
     "**.twitter.com", # twitter
     "**.twimg.com",
     "**.blogspot.com", # blogspot
     "**.appspot.com",
     "**.wikipedia.org", # wikipeida
     "*.cloudfront.net",
+    "**.amazon.com",
+    "**.amazonaws.com",
+    "*.githubusercontent.com",
+    "**.mozilla.com",
+    "**.mozilla.net",
+    "**.akadns.net",
 ]
 whitelist=[
     "iamp.*.*.*",

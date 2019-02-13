@@ -3,6 +3,7 @@ package dns
 import (
 	"net"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/golang/glog"
@@ -16,7 +17,7 @@ const colon = byte(':')
 
 func StartDNS(dnsServer, listenIP string) {
 	ip := net.ParseIP(listenIP)
-	suggest := &intelliSuggest{listenIP, 2 * time.Second, []string{"80", "443"}}
+	suggest := &intelliSuggest{listenIP, 2 * time.Second}
 	mem.DefaultCache = mem.New(time.Hour)
 	var dhcpCh chan struct{}
 	if dnsServer != "" {
@@ -93,11 +94,10 @@ func matchAndServe(w dns.ResponseWriter, r *dns.Msg, domain, listenIP, dnsServer
 type intelliSuggest struct {
 	listenIP string
 	timeout  time.Duration
-	ports    []string
 }
 
 func (i *intelliSuggest) GetOne(domain interface{}) (iface interface{}, e error) {
-	iface = struct{}{}
+	iface, e = struct{}{}, nil
 
 	// kill deadloop, for ugly wildcard setting dns setting
 	addr := strings.TrimSuffix(domain.(string), ".")
@@ -105,36 +105,33 @@ func (i *intelliSuggest) GetOne(domain interface{}) (iface interface{}, e error)
 		return
 	}
 
-	for _, port := range i.ports {
-		// give local dial a hand, make it not so easy to be added into suggestions
-		<-util.HTTPPing(net.JoinHostPort(addr, port), addr, i.timeout/50)
-		localCh := util.HTTPPing(net.JoinHostPort(addr, port), addr, i.timeout)
-		remoteCh := util.HTTPPing(net.JoinHostPort(i.listenIP, port), addr, i.timeout)
+	// give local dial a hand, make it not so easy to be added into suggestions
+	util.HTTPPing(addr, addr, util.Http, i.timeout/50)
 
-		select {
-		case err := <-localCh:
-			if err == nil {
-				glog.V(2).Infoln("PING", addr, "local first, succ")
-				continue
-			}
-			if e := <-remoteCh; e != nil {
-				glog.V(2).Infoln("PING", addr, "local first, all fail:", err)
-				continue
-			}
-			glog.V(2).Infoln("PING", addr, "local first, remote succ")
-			conf.AddSuggest(addr)
-
-		case err := <-remoteCh:
+	pings := []struct {
+		viaAddr string
+		port    util.Port
+	}{
+		{addr, util.Http},
+		{addr, util.Https},
+		{i.listenIP, util.Http},
+		{i.listenIP, util.Https},
+	}
+	var finish = new(uint32)
+	for idx := range pings {
+		go func(idx int) {
+			err := util.HTTPPing(pings[idx].viaAddr, addr, pings[idx].port, i.timeout)
 			if err != nil {
-				glog.V(2).Infoln("PING", addr, "remote first, fail:", err)
-				continue
+				if atomic.LoadUint32(finish) == 0 { // fails before first succ
+					glog.V(1).Infof("PING %s via %s fail: %s", addr, pings[idx].viaAddr, err)
+				}
+			} else if atomic.CompareAndSwapUint32(finish, 0, 1) { // first succ
+				if pings[idx].viaAddr == i.listenIP {
+					conf.AddSuggest(addr)
+					glog.Infof("added suggest domain: %s\t via: %s", addr, pings[idx].viaAddr)
+				}
 			}
-			glog.V(2).Infoln("PING", addr, "remote first, succ")
-			conf.AddSuggest(addr)
-		}
-
-		glog.Infof("added suggest domain: %s", addr)
-		return
+		}(idx)
 	}
 	return
 }
