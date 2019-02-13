@@ -10,36 +10,15 @@ import (
 )
 
 // HTTPPing try connect to a http(s) server with domain though the http addr
-func HTTPPing(tcpAddr, domain string, timeout time.Duration) <-chan error {
-	errCh := make(chan error)
-	go func() {
-		errCh <- httpPing(tcpAddr, domain, timeout)
-	}()
-	return errCh
-}
-
-func httpPing(tcpAddr, domain string, timeout time.Duration) error {
-	conn, err := net.DialTimeout("tcp", tcpAddr, timeout)
+func HTTPPing(viaHost, domain string, port Port, timeout time.Duration) (err error) {
+	conn, err := net.DialTimeout("tcp", port.JoinAddr(viaHost), timeout)
 	if err != nil {
 		return err
 	}
 	defer conn.Close()
 
-	host, port, err := net.SplitHostPort(tcpAddr)
-	if err != nil {
-		return err
-	}
-
-	var msg []byte
-	switch port {
-	case ":80":
-		msg = []byte("TRACE / HTTP/1.1\r\nHost: " + domain + "\r\n\r\n")
-	case ":443":
-		msg = NewClientHelloSNIMsg(domain)
-	}
-
 	conn.SetDeadline(time.Now().Add(timeout))
-	if _, err = conn.Write(msg); err != nil {
+	if _, err = conn.Write(port.pingMsg(domain)); err != nil {
 		return err
 	}
 
@@ -47,12 +26,43 @@ func httpPing(tcpAddr, domain string, timeout time.Duration) error {
 	// err -> io.EOF:	no such domain or connection refused
 	// err -> timeout:	tcp package has been dropped
 	_, err = conn.Read(make([]byte, 1))
-	if err == io.EOF && host == domain {
+	if err == io.EOF && viaHost == domain {
 		return nil
 	}
 	return err
 }
 
+// Port ==========================
+type Port uint16
+
+const (
+	Http Port = iota
+	Https
+)
+
+func (p Port) JoinAddr(addr string) string {
+	switch p {
+	case Http:
+		return addr + ":80"
+	case Https:
+		return addr + ":443"
+	default:
+		panic("invalid port")
+	}
+}
+
+func (p Port) pingMsg(domain string) []byte {
+	switch p {
+	case Http:
+		return []byte("TRACE / HTTP/1.1\r\nHost: " + domain + "\r\n\r\n")
+	case Https:
+		return NewClientHelloSNIMsg(domain)
+	default:
+		panic("invalid port")
+	}
+}
+
+// SNI ==========================
 type clientHelloSNI struct {
 	ContentType uint8
 	Version     uint16

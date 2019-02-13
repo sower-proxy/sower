@@ -35,7 +35,7 @@ func init() {
 
 func loadRules(name string, list []string) *util.Node {
 	rule := util.NewNodeFromRules(".", list...)
-	glog.V(2).Infof("load %s rule:\n%s", name, rule)
+	glog.V(3).Infof("load %s rule:\n%s", name, rule)
 	return rule
 }
 
