@@ -28,6 +28,8 @@ blocklist=[
     "**.amazon.com",
     "**.amazonaws.com",
     "*.githubusercontent.com",
+    "*.github.com",
+    "*.github.io",
     "**.mozilla.com",
     "**.mozilla.net",
     "**.akadns.net",
