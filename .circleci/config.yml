@@ -13,17 +13,21 @@ jobs:
             cp deploy/* .
             mkdir artifacts
       - run:
-          name: build linux Binary
+          name: Run Unit Test
+          command: |
+            make test
+      - run:
+          name: Build linux Binary
           command: |
             make build
             tar czvf artifacts/sower_linux_amd64.tar.gz sower sower.toml sower-client.service sower-server.service
       - run:
-          name: build macOS Binary
+          name: Build macOS Binary
           command: |
             GOOS=darwin GOARCH=amd64 make build
             tar czvf artifacts/sower_darwin_amd64.tar.gz sower sower.toml cc.wweir.sower.plist
       - run:
-          name: build Windows Binary
+          name: Build Windows Binary
           command: |
             GOOS=windows GOARCH=amd64 make build
             tar czvf artifacts/sower_windows_amd64.tar.gz sower sower.toml
@@ -38,7 +42,7 @@ jobs:
               ghr -t ${GITHUB_TOKEN} -u ${CIRCLE_PROJECT_USERNAME} -r ${CIRCLE_PROJECT_REPONAME} -c ${CIRCLE_SHA1} -delete ${VERSION%-*-*} artifacts/
             fi
       - run:
-          name: build docker image
+          name: Build Docker Image
           command: |
             if git log -1 --pretty='%s' | grep -oE '(^|\s)@release(\s|$)'; then
               docker login -u $DOCKER_USER -p $DOCKER_PASS

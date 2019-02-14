@@ -1,8 +1,9 @@
-package dns
+package util
 
 import (
 	"math/rand"
 	"net"
+	"runtime"
 
 	"github.com/golang/glog"
 	"github.com/wweir/netboot/dhcp4"
@@ -19,9 +20,14 @@ func GetDefaultDNSServer() string {
 		dhcp4.OptRequestedOptions: []byte{byte(dhcp4.OptDNSServers)},
 	}
 
+	NewConn := dhcp4.NewConn
+	if runtime.GOOS == "linux" {
+		NewConn = dhcp4.NewSnooperConn
+	}
+
 	ifaces := mustGetInterfaces()
 	for _, iface := range ifaces {
-		conn, err := dhcp4.NewConn(iface.IP.String() + ":68")
+		conn, err := NewConn(iface.IP.String() + ":68")
 		if err != nil { // maybe in use
 			glog.V(1).Infoln(err)
 			continue
