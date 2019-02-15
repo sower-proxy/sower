@@ -114,7 +114,7 @@ func watchConfigFile() {
 					}
 				}
 
-				glog.Infof("watch %s event: %v", Conf.ConfigFile, event)
+				glog.V(1).Infof("watch %s event: %v", Conf.ConfigFile, event)
 				for i := range OnRefreash {
 					if err := OnRefreash[i](); err != nil {
 						glog.Errorln(err)
