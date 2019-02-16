@@ -34,22 +34,23 @@ jobs:
       - run:
           name: Publish Release on GitHub
           command: |
-            if git log -1 --pretty='%s' | grep -oE '(^|\s)@release(\s|$)'; then
-              GHR_VERSION="$(curl -s "https://api.github.com/repos/tcnksm/ghr/releases/latest" | awk -F '"'  '/tag_name/{printf $4}')"
-              curl -SLf https://github.com/tcnksm/ghr/releases/download/"$GHR_VERSION"/ghr_"$GHR_VERSION"_linux_amd64.tar.gz | tar xzC /go/bin --strip-components=1
+            git describe --tags | grep - && exit
 
-              VERSION=$(git describe --tags)
-              ghr -t ${GITHUB_TOKEN} -u ${CIRCLE_PROJECT_USERNAME} -r ${CIRCLE_PROJECT_REPONAME} -c ${CIRCLE_SHA1} -delete ${VERSION%-*-*} artifacts/
-            fi
+            GHR_VERSION="$(curl -s "https://api.github.com/repos/tcnksm/ghr/releases/latest" | awk -F '"'  '/tag_name/{printf $4}')"
+            curl -SLf https://github.com/tcnksm/ghr/releases/download/"$GHR_VERSION"/ghr_"$GHR_VERSION"_linux_amd64.tar.gz | tar xzC /go/bin --strip-components=1
+
+            VERSION=$(git describe --tags)
+            ghr -t ${GITHUB_TOKEN} -u ${CIRCLE_PROJECT_USERNAME} -r ${CIRCLE_PROJECT_REPONAME} -c ${CIRCLE_SHA1} -delete ${VERSION%-*-*} artifacts/
       - run:
           name: Build Docker Image
           command: |
-            if git log -1 --pretty='%s' | grep -oE '(^|\s)@release(\s|$)'; then
-              docker login -u $DOCKER_USER -p $DOCKER_PASS
-              make image
-              VERSION=$(git describe --tags)
-              docker tag sower wweir/sower:${VERSION%-*-*}
-              docker push wweir/sower:${VERSION%-*-*}
-              docker tag sower wweir/sower:latest
-              docker push wweir/sower:latest
-            fi
+            git describe --tags | grep - && exit
+
+            docker login -u $DOCKER_USER -p $DOCKER_PASS
+            make image
+            VERSION=$(git describe --tags)
+            docker tag sower wweir/sower:${VERSION%-*-*}
+            docker push wweir/sower:${VERSION%-*-*}
+            docker tag sower wweir/sower:latest
+            docker push wweir/sower:latest
+

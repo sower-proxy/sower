@@ -14,15 +14,20 @@ import (
 
 func StartHttpProxy(netType, server, cipher, password, addr string) {
 	client := NewClient(netType)
-	if addr, err := net.ResolveTCPAddr("tcp", server); err != nil {
-		glog.Fatalln(err)
-	} else {
-		server = addr.String()
-	}
+	resolved := false
 
 	srv := &http.Server{
 		Addr: addr,
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !resolved {
+				if addr, err := net.ResolveTCPAddr("tcp", server); err != nil {
+					glog.Errorln(err)
+				} else {
+					server = addr.String()
+					resolved = true
+				}
+			}
+
 			if r.Method == http.MethodConnect {
 				httpsProxy(w, r, client, server, cipher, password)
 			} else {
