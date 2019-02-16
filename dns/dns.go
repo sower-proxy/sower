@@ -18,7 +18,7 @@ const colon = byte(':')
 func StartDNS(dnsServer, listenIP string) {
 	ip := net.ParseIP(listenIP)
 
-	suggest := &intelliSuggest{listenIP, time.Second}
+	suggest := &intelliSuggest{listenIP, 800 * time.Millisecond}
 	mem.DefaultCache = mem.New(time.Hour)
 
 	dhcpCh := make(chan struct{})
@@ -108,7 +108,7 @@ func (i *intelliSuggest) GetOne(domain interface{}) (iface interface{}, e error)
 	}
 
 	// give local dial a hand, make it not so easy to be added into suggestions
-	util.HTTPPing(addr, addr, util.Http, i.timeout/50)
+	util.HTTPPing(addr, addr, util.Http, i.timeout/20)
 
 	var (
 		pings = []struct {
