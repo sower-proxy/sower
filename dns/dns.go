@@ -10,7 +10,6 @@ import (
 	"github.com/miekg/dns"
 	mem "github.com/wweir/mem-go"
 	"github.com/wweir/sower/conf"
-	"github.com/wweir/sower/util"
 )
 
 const colon = byte(':')
@@ -28,7 +27,7 @@ func StartDNS(dnsServer, listenIP string) {
 		go func() {
 			for {
 				<-dhcpCh
-				host := util.GetDefaultDNSServer()
+				host := GetDefaultDNSServer()
 				if host == "" {
 					continue
 				}
@@ -108,24 +107,24 @@ func (i *intelliSuggest) GetOne(domain interface{}) (iface interface{}, e error)
 	}
 
 	// give local dial a hand, make it not so easy to be added into suggestions
-	util.HTTPPing(addr, addr, util.Http, i.timeout/20)
+	HTTPPing(addr, addr, Http, i.timeout/20)
 
 	var (
 		pings = []struct {
 			viaAddr string
-			port    util.Port
+			port    Port
 		}{
-			{addr, util.Http},
-			{addr, util.Https},
-			{i.listenIP, util.Http},
-			{i.listenIP, util.Https},
+			{addr, Http},
+			{addr, Https},
+			{i.listenIP, Http},
+			{i.listenIP, Https},
 		}
 		half  = int32(len(pings) / 2)
 		score = new(int32)
 	)
 	for idx := range pings {
 		go func(idx int) {
-			err := util.HTTPPing(pings[idx].viaAddr, addr, pings[idx].port, i.timeout)
+			err := HTTPPing(pings[idx].viaAddr, addr, pings[idx].port, i.timeout)
 			if err != nil {
 				// local ping fail
 				if pings[idx].viaAddr == addr {
