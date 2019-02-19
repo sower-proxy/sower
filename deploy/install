@@ -20,15 +20,16 @@ case "$(uname -s)" in
 		echo
 
 		curl -SLf https://github.com/wweir/sower/releases/download/$VERSION/sower_darwin_amd64.tar.gz | tar xzv
-
-		mv sower /usr/local/bin/
+		sudo mkdir -p /usr/local/bin/
+		sudo mv sower /usr/local/bin/
 
 		if [[ -r /usr/local/etc/sower.toml ]]; then
 			echo The config file already exists, keep the original file
 		else
 			sed -i~ "s/# server_addr=\"remote-server/server_addr=\"$ADDRESS/" sower.toml
 			sed -i~ "s/# clear_dns_cache/clear_dns_cache/" sower.toml
-			mv sower.toml /usr/local/etc/
+			sudo mkdir -p /usr/local/etc/
+			sudo mv sower.toml /usr/local/etc/
 		fi
 
 		echo
