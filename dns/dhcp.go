@@ -6,7 +6,7 @@ import (
 	"runtime"
 
 	"github.com/golang/glog"
-	"github.com/wweir/netboot/dhcp4"
+	"go.universe.tf/netboot/dhcp4"
 )
 
 var xid = make([]byte, 4)
