@@ -18,4 +18,5 @@
 .vscode
 .idea
 sower
+sower.exe*
 /sower.toml
