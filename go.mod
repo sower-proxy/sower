@@ -1,7 +1,7 @@
 module github.com/wweir/sower
 
 require (
-	github.com/bifurcation/mint v0.0.0-20181105071958-a14404e9a861 // indirect
+	github.com/bifurcation/mint v0.0.0-20181105071958-a14404e9a861 // lock version
 	github.com/cheekybits/genny v1.0.0 // indirect
 	github.com/golang/glog v0.0.0-20160126235308-23def4e6c14b
 	github.com/hashicorp/golang-lru v0.5.0 // indirect
@@ -17,11 +17,9 @@ require (
 	github.com/templexxx/xor v0.0.0-20181023030647-4e92f724b73b // indirect
 	github.com/tjfoc/gmsm v1.0.1 // indirect
 	github.com/ulule/deepcopier v0.0.0-20171107155558-ca99b135e50f // indirect
-	github.com/wweir/fsnotify v1.4.8
 	github.com/wweir/mem-go v0.0.0-20190109100331-8673ab596296
-	github.com/wweir/netboot v0.0.2
 	github.com/xtaci/kcp-go v5.0.7+incompatible
-	golang.org/x/crypto v0.0.0-20190222235706-ffb98f73852f
-	golang.org/x/net v0.0.0-20190213061140-3a22650c66bd // indirect
-	golang.org/x/sys v0.0.0-20190222171317-cd391775e71e
+	go.universe.tf/netboot v0.0.0-20190215013330-01f30467ac8e
+	golang.org/x/crypto v0.0.0-20190222235706-ffb98f73852f // lock version
+	golang.org/x/sys v0.0.0-20190222171317-cd391775e71e // indirect
 )

@@ -5,14 +5,12 @@ import (
 	"flag"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"sync"
 	"time"
 
 	"github.com/golang/glog"
 	toml "github.com/pelletier/go-toml"
-	"github.com/wweir/fsnotify"
 	"github.com/wweir/sower/util"
 )
 
@@ -79,39 +77,6 @@ func init() {
 			glog.Fatalln(err)
 		}
 	}
-	watchConfigFile()
-}
-
-func watchConfigFile() {
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		glog.Fatalln(err)
-	}
-	if err := watcher.Add(filepath.Dir(Conf.ConfigFile)); err != nil {
-		glog.Fatalln(err)
-	}
-
-	go func() {
-		for {
-			select {
-			case event := <-watcher.Events:
-				if event.Op == fsnotify.Rename {
-					if err := watcher.Add(Conf.ConfigFile); err != nil {
-						glog.Errorln(err)
-					}
-				}
-
-				glog.V(1).Infof("watch %s event: %v", Conf.ConfigFile, event)
-				for i := range OnRefreash {
-					if err := OnRefreash[i](); err != nil {
-						glog.Errorln(err)
-					}
-				}
-			case err := <-watcher.Errors:
-				glog.Fatalln(err)
-			}
-		}
-	}()
 }
 
 func AddSuggest(domain string) {
@@ -127,14 +92,23 @@ func AddSuggest(domain string) {
 		glog.Errorln(err)
 		return
 	}
-	defer f.Close()
 
 	if err := toml.NewEncoder(f).ArraysWithOneElementPerLine(true).Encode(Conf); err != nil {
 		glog.Errorln(err)
+		f.Close()
 		return
 	}
 
 	if err = os.Rename(Conf.ConfigFile+"~", Conf.ConfigFile); err != nil {
 		glog.Errorln(err)
+		f.Close()
+		return
+	}
+
+	// reload config
+	for i := range OnRefreash {
+		if err := OnRefreash[i](); err != nil {
+			glog.Fatalln(err)
+		}
 	}
 }
