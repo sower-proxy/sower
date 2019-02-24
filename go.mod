@@ -21,5 +21,5 @@ require (
 	github.com/xtaci/kcp-go v5.0.7+incompatible
 	go.universe.tf/netboot v0.0.0-20190215013330-01f30467ac8e
 	golang.org/x/crypto v0.0.0-20190222235706-ffb98f73852f // lock version
-	golang.org/x/sys v0.0.0-20190222171317-cd391775e71e // indirect
+	golang.org/x/sys v0.0.0-20190222171317-cd391775e71e
 )

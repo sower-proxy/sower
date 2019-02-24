@@ -98,10 +98,10 @@ func AddSuggest(domain string) {
 		f.Close()
 		return
 	}
+	f.Close()
 
 	if err = os.Rename(Conf.ConfigFile+"~", Conf.ConfigFile); err != nil {
 		glog.Errorln(err)
-		f.Close()
 		return
 	}
 
