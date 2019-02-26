@@ -106,9 +106,6 @@ func (i *intelliSuggest) GetOne(domain interface{}) (iface interface{}, e error)
 		return
 	}
 
-	// give local dial a hand, make it not so easy to be added into suggestions
-	HTTPPing(addr, addr, Http, i.timeout/20)
-
 	var (
 		pings = []struct {
 			viaAddr string

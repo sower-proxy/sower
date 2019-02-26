@@ -5,6 +5,7 @@ import (
 	"flag"
 	"os"
 	"os/exec"
+	"runtime"
 	"strconv"
 	"sync"
 	"time"
@@ -56,9 +57,18 @@ var OnRefreash = []func() error{
 	},
 	func() error {
 		if Conf.ClearDNSCache != "" {
-			ctx, _ := context.WithTimeout(context.TODO(), 5*time.Second)
-			if err := exec.CommandContext(ctx, "sh", "-c", Conf.ClearDNSCache).Run(); err != nil {
-				glog.Errorln(err)
+			ctx, cancel := context.WithTimeout(context.TODO(), 5*time.Second)
+			defer cancel()
+
+			switch runtime.GOOS {
+			case "windows":
+				if err := exec.CommandContext(ctx, "cmd", "/c", Conf.ClearDNSCache).Run(); err != nil {
+					glog.Errorln(err)
+				}
+			default:
+				if err := exec.CommandContext(ctx, "sh", "-c", Conf.ClearDNSCache).Run(); err != nil {
+					glog.Errorln(err)
+				}
 			}
 		}
 		return nil
