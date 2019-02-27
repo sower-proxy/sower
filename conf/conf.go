@@ -15,6 +15,7 @@ import (
 	"github.com/wweir/sower/util"
 )
 
+// Conf define the config items
 var Conf = struct {
 	ConfigFile string
 	NetType    string `toml:"net_type"`
@@ -34,19 +35,17 @@ var Conf = struct {
 	Suggestions []string `toml:"suggestions"`
 	Verbose     int      `toml:"verbose"`
 }{}
-var mu = &sync.Mutex{}
 
+// OnRefreash will be executed while init and write new config
 var OnRefreash = []func() error{
 	func() (err error) {
-		mu.Lock()
-		defer mu.Unlock()
-
 		f, err := os.OpenFile(Conf.ConfigFile, os.O_RDONLY, 0644)
 		if err != nil {
 			return err
 		}
 		defer f.Close()
 
+		//safe refresh config
 		file := Conf.ConfigFile
 		if err = toml.NewDecoder(f).Decode(&Conf); err != nil {
 			return err
@@ -62,13 +61,9 @@ var OnRefreash = []func() error{
 
 			switch runtime.GOOS {
 			case "windows":
-				if err := exec.CommandContext(ctx, "cmd", "/c", Conf.ClearDNSCache).Run(); err != nil {
-					glog.Errorln(err)
-				}
+				return exec.CommandContext(ctx, "cmd", "/c", Conf.ClearDNSCache).Run()
 			default:
-				if err := exec.CommandContext(ctx, "sh", "-c", Conf.ClearDNSCache).Run(); err != nil {
-					glog.Errorln(err)
-				}
+				return exec.CommandContext(ctx, "sh", "-c", Conf.ClearDNSCache).Run()
 			}
 		}
 		return nil
@@ -89,6 +84,10 @@ func init() {
 	}
 }
 
+// mu keep synchronized add rule(write), do not care read while write
+var mu = &sync.Mutex{}
+
+// AddSuggest add new domain into suggest rules
 func AddSuggest(domain string) {
 	mu.Lock()
 	defer mu.Unlock()
@@ -96,29 +95,30 @@ func AddSuggest(domain string) {
 	Conf.Suggestions = append(Conf.Suggestions, domain)
 	Conf.Suggestions = util.NewReverseSecSlice(Conf.Suggestions).Sort().Uniq()
 
-	// safe write
-	f, err := os.OpenFile(Conf.ConfigFile+"~", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
-	if err != nil {
-		glog.Errorln(err)
-		return
-	}
+	{ // safe write
+		f, err := os.OpenFile(Conf.ConfigFile+"~", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+		if err != nil {
+			glog.Errorln(err)
+			return
+		}
 
-	if err := toml.NewEncoder(f).ArraysWithOneElementPerLine(true).Encode(Conf); err != nil {
-		glog.Errorln(err)
+		if err := toml.NewEncoder(f).ArraysWithOneElementPerLine(true).Encode(Conf); err != nil {
+			glog.Errorln(err)
+			f.Close()
+			return
+		}
 		f.Close()
-		return
-	}
-	f.Close()
 
-	if err = os.Rename(Conf.ConfigFile+"~", Conf.ConfigFile); err != nil {
-		glog.Errorln(err)
-		return
+		if err = os.Rename(Conf.ConfigFile+"~", Conf.ConfigFile); err != nil {
+			glog.Errorln(err)
+			return
+		}
 	}
 
 	// reload config
 	for i := range OnRefreash {
 		if err := OnRefreash[i](); err != nil {
-			glog.Fatalln(err)
+			glog.Errorln(err)
 		}
 	}
 }

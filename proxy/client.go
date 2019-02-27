@@ -36,7 +36,6 @@ func StartClient(netType, server, cipher, password, listenIP string) {
 	glog.Infoln("Client started.")
 	for {
 		conn := <-connCh
-		glog.V(1).Infof("new conn from (%s) to (%s)", conn.RemoteAddr(), server)
 
 		if !resolved {
 			if addr, err := net.ResolveTCPAddr("tcp", server); err != nil {
@@ -46,6 +45,7 @@ func StartClient(netType, server, cipher, password, listenIP string) {
 				resolved = true
 			}
 		}
+		glog.V(1).Infof("new conn from (%s) to (%s)", conn.RemoteAddr(), server)
 
 		rc, err := client.Dial(server)
 		if err != nil {

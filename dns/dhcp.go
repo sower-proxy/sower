@@ -29,7 +29,7 @@ func GetDefaultDNSServer() string {
 	for _, iface := range ifaces {
 		conn, err := NewConn(iface.IP.String() + ":68")
 		if err != nil { // maybe in use
-			glog.V(1).Infoln(err)
+			glog.Errorln(err)
 			continue
 		}
 		defer conn.Close()

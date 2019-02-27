@@ -67,15 +67,10 @@ func matchAndServe(w dns.ResponseWriter, r *dns.Msg, domain, listenIP, dnsServer
 	dhcpCh chan struct{}, ipNet net.IP, suggest *intelliSuggest) {
 
 	inWriteList := whiteList.Match(domain)
-
 	if !inWriteList && (blockList.Match(domain) || suggestList.Match(domain)) {
 		glog.V(2).Infof("match %s suss", domain)
 		w.WriteMsg(localA(r, domain, ipNet))
 		return
-	}
-
-	if !inWriteList {
-		go mem.Remember(suggest, domain)
 	}
 
 	msg, err := dns.Exchange(r, dnsServer)
@@ -85,6 +80,12 @@ func matchAndServe(w dns.ResponseWriter, r *dns.Msg, domain, listenIP, dnsServer
 		default:
 		}
 	}
+
+	// trigger suggest logic except dhcp dns server error
+	if !inWriteList {
+		go mem.Remember(suggest, domain)
+	}
+
 	if msg == nil { // expose any response except nil
 		glog.V(1).Infof("get dns of %s fail: %s", domain, err)
 		return
