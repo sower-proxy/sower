@@ -2,10 +2,9 @@ version: 2
 jobs:
   build:
     docker:
-      - image: circleci/golang:1.11.4
+      - image: circleci/golang:1.12
     steps:
       - checkout # check out the code in the project directory
-      - setup_remote_docker # install docker in docker
       - run:
           name: Prepare Environment
           command: |
@@ -41,6 +40,8 @@ jobs:
 
             VERSION=$(git describe --tags)
             ghr -t ${GITHUB_TOKEN} -u ${CIRCLE_PROJECT_USERNAME} -r ${CIRCLE_PROJECT_REPONAME} -c ${CIRCLE_SHA1} -delete ${VERSION%-*-*} artifacts/
+
+      - setup_remote_docker # install docker in docker
       - run:
           name: Build Docker Image
           command: |
