@@ -8,7 +8,7 @@ dns_server=""                    # Keep empty for dynamic setting from net env
 client_ip="127.0.0.1"            # listen the IP, dns target is the IP
 # clear_dns_cache="killall -HUP mDNSResponder"
 blocklist=[
-    "**.google.com", # google
+    "**.google.*", # google
     "**.goo.gl",
     "**.googleusercontent.com",
     "**.googleapis.com",
@@ -28,11 +28,7 @@ blocklist=[
     "**.amazon.com",
     "**.amazonaws.com",
     "*.githubusercontent.com",
-    "*.github.com",
-    "*.github.io",
-    "**.mozilla.com",
-    "**.mozilla.net",
-    "**.akadns.net",
+    "*.github.*",
 ]
 whitelist=[
     "iamp.*.*.*",
@@ -42,5 +38,10 @@ whitelist=[
     "imap-mail.outlook.com",
     "**.qq.com",
     "**.baidu.com",
+    "*.aliyun.com",
+    "**.cn",
+    "**.icloud.com",
+    "**.163.com",
+    "**.weiyun.com",
 ]
 verbose=0
