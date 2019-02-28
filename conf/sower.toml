@@ -37,6 +37,8 @@ blocklist=[
 whitelist=[
     "iamp.*.*.*",
     "iamp.*.*",
+    "**.mail.*.*",
+    "**.mail.*.*.*",
     "imap-mail.outlook.com",
     "**.qq.com",
     "**.baidu.com",
