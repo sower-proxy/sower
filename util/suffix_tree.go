@@ -88,10 +88,14 @@ func (n *node) matchSecs(secs []string, fuzzNode bool) bool {
 	}
 
 	if n, ok := n.node[secs[length-1]]; ok {
-		return n.matchSecs(secs[:length-1], false)
+		if n.matchSecs(secs[:length-1], false) {
+			return true
+		}
 	}
 	if n, ok := n.node["*"]; ok {
-		return n.matchSecs(secs[:length-1], true)
+		if n.matchSecs(secs[:length-1], true) {
+			return true
+		}
 	}
 	if _, ok := n.node["**"]; ok {
 		return true
