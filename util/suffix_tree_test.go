@@ -39,11 +39,12 @@ func TestNode_Match(t *testing.T) {
 		},
 	}, {
 		"fuzz2",
-		NewNodeFromRules(".", "a.*.cc"),
+		NewNodeFromRules(".", "a.*.cc", "c.wweir.*"),
 		[]test{
 			{"wweir.cc", false},
 			{"a.wweir.cc", true},
 			{"b.wweir.cc", false},
+			{"c.wweir.cc", true},
 		},
 	}, {
 		"fuzz3",
@@ -56,13 +57,14 @@ func TestNode_Match(t *testing.T) {
 		},
 	}, {
 		"fuzz4",
-		NewNodeFromRules(".", "**.cc", "a.**.com"),
+		NewNodeFromRules(".", "**.cc", "a.**.com", "**.wweir.*"),
 		[]test{
 			{"wweir.cc", true},
 			{"a.wweir.cc", true},
 			{"a.b.wweir.cc", true},
-			{"a.wweir.com", true},
-			{"b.wweir.com", false},
+			{"a.fuzz.com", true},
+			{"b.fuzz.com", false},
+			{"www.wweir.com", true},
 		},
 	}}
 	for _, tt := range tests {
