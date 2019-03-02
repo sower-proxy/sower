@@ -8,17 +8,13 @@ succ_message(){
 	echo
 	echo ========    Installed sower to your system    ========
 	echo The config file is: /usr/local/etc/sower.toml
-	echo please set 127.0.0.1 as the first domain name server manually.
+	echo please set $IP as the first domain name server manually.
 }
 
 # main logic
 VERSION="$(curl -s "https://api.github.com/repos/wweir/sower/releases/latest" | awk -F '"'  '/tag_name/{printf $4}')"
 case "$(uname -s)" in
 	"Darwin")
-		printf "Please enter remote server adddress: "
-		read ADDRESS
-		echo
-
 		curl -SLf https://github.com/wweir/sower/releases/download/$VERSION/sower_darwin_amd64.tar.gz | tar xzv
 		sudo mkdir -p /usr/local/bin/
 		sudo mv sower /usr/local/bin/
@@ -26,8 +22,24 @@ case "$(uname -s)" in
 		if [[ -r /usr/local/etc/sower.toml ]]; then
 			echo The config file already exists, keep the original file
 		else
+			printf "Please enter remote server adddress: "
+			read ADDRESS
+			printf "Please enter remote server password (default: 12345678): "
+			read PASSWORD
+			if [[ -z $PASSWORD ]]; then
+				PASSWORD="12345678"
+			fi
+			printf "Please enter which IP do you wanna listen (default: 127.0.0.1):"
+			read IP
+			if [[ -z $IP ]]; then
+				IP="127.0.0.1"
+			fi
+			echo
+
 			sed -i~ "s/# server_addr=\"remote-server/server_addr=\"$ADDRESS/" sower.toml
+			sed -i~ "s/client_ip=\"127.0.0.1\"/client_ip=\"$IP\"/" sower.toml
 			sed -i~ "s/# clear_dns_cache/clear_dns_cache/" sower.toml
+			sed -i~ "s%bin/sower%bin/sower -p $PASSWORD%" sower-server.service
 			sudo mkdir -p /usr/local/etc/
 			sudo mv sower.toml /usr/local/etc/
 		fi
@@ -52,10 +64,6 @@ case "$(uname -s)" in
 
 		case "$SIDE" in
 			"c")
-				printf "Please enter remote server adddress: "
-				read ADDRESS
-				echo
-
 				curl -SLf https://github.com/wweir/sower/releases/download/$VERSION/sower_linux_amd64.tar.gz | tar xzv
 
 				sudo mv sower /usr/local/bin/
@@ -63,7 +71,22 @@ case "$(uname -s)" in
 				if [[ -r /usr/local/etc/sower.toml ]]; then
 					echo The config file already exists, keep the original file
 				else
+					printf "Please enter remote server adddress: "
+					read ADDRESS
+					printf "Please enter remote server password (default: 12345678): "
+					read PASSWORD
+					if [[ -z $PASSWORD ]]; then
+						PASSWORD="12345678"
+					fi
+					printf "Please enter which IP do you wanna listen (default: 127.0.0.1):"
+					read IP
+					if [[ -z $IP ]]; then
+						IP="127.0.0.1"
+					fi
+					echo
+
 					sed -i~ "s/# server_addr=\"remote-server/server_addr=\"$ADDRESS/" sower.toml
+					sed -i~ "s/client_ip=\"127.0.0.1\"/client_ip=\"$IP\"/" sower.toml
 					sudo mv sower.toml /usr/local/etc/
 				fi
 
@@ -75,8 +98,15 @@ case "$(uname -s)" in
 
 			"s")
 				curl -SLf https://github.com/wweir/sower/releases/download/$VERSION/sower_linux_amd64.tar.gz | tar xzv
+				printf "Please enter remote server password (default: 12345678): "
+				read PASSWORD
+				echo
+				if [[ -z $PASSWORD ]]; then
+					PASSWORD="12345678"
+				fi
 
 				sudo mv sower /usr/local/bin/
+				sed -i~ "s%bin/sower%bin/sower -p $PASSWORD%" sower-server.service
 				sudo mv sower-server.service /etc/systemd/system/
 				sudo systemctl enable sower-server
 				sudo systemctl start sower-server
