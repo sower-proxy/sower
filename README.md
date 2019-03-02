@@ -88,8 +88,8 @@ For more detail, see [透明代理 Sower 技术剖析](https://wweir.cc/post/%E9
 
 ## Todo
 - [x] authenticate
-- [ ] broker
+- [ ] broker(waiting for QUIC implementation to be stable)
 - [x] CI/CD
-- [ ] relay optimization
-- [ ] deploy script for all normal platform
+- [x] relay optimization
+- [x] deploy script for all normal platform
 - [x] dns rule intelligent suggestions
