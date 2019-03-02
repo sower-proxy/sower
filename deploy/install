@@ -5,6 +5,9 @@ cd /tmp/sower
 
 echo ========    Install sower to your system    ========
 succ_message(){
+	if [[ -z $IP ]]; then
+		IP=127.0.0.1
+	fi
 	echo
 	echo ========    Installed sower to your system    ========
 	echo The config file is: /usr/local/etc/sower.toml
