@@ -87,8 +87,8 @@ func init() {
 // mu keep synchronized add rule(write), do not care read while write
 var mu = &sync.Mutex{}
 
-// AddSuggest add new domain into suggest rules
-func AddSuggest(domain string) {
+// AddSuggestion add new domain into suggest rules
+func AddSuggestion(domain string) {
 	mu.Lock()
 	defer mu.Unlock()
 

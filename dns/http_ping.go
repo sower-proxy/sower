@@ -36,15 +36,15 @@ func HTTPPing(viaHost, domain string, port Port, timeout time.Duration) (err err
 type Port uint16
 
 const (
-	Http Port = iota
-	Https
+	HTTP Port = iota
+	HTTPS
 )
 
 func (p Port) JoinAddr(addr string) string {
 	switch p {
-	case Http:
+	case HTTP:
 		return addr + ":80"
-	case Https:
+	case HTTPS:
 		return addr + ":443"
 	default:
 		panic("invalid port")
@@ -53,9 +53,9 @@ func (p Port) JoinAddr(addr string) string {
 
 func (p Port) pingMsg(domain string) []byte {
 	switch p {
-	case Http:
+	case HTTP:
 		return []byte("TRACE / HTTP/1.1\r\nHost: " + domain + "\r\n\r\n")
-	case Https:
+	case HTTPS:
 		return NewClientHelloSNIMsg(domain)
 	default:
 		panic("invalid port")

@@ -4,9 +4,9 @@ password="12345678"
 server_port="5533"
 # server_addr="remote-server:5533" # replce it to remote server
 http_proxy=":8080"               # eg: 192.168.0.2:8080
-dns_server=""                    # Keep empty for dynamic setting from net env
+dns_server="223.5.5.5"                    # Keep empty for dynamic setting from net env
 client_ip="127.0.0.1"            # listen the IP, dns target is the IP
-# clear_dns_cache="killall -HUP mDNSResponder"
+# clear_dns_cache="pkill mDNSResponder"
 blocklist=[
     "**.google.*", # google
     "**.goo.gl",
@@ -31,10 +31,12 @@ blocklist=[
     "*.github.*",
 ]
 whitelist=[
-    "iamp.*.*.*",
     "iamp.*.*",
-    "**.mail.*.*",
-    "**.mail.*.*.*",
+    "iamp.*.*.*",
+    "smtp.*.*",
+    "smtp.*.*.*",
+    "pop.*.*",
+    "pop.*.*.*",
     "imap-mail.outlook.com",
     "**.qq.com",
     "**.baidu.com",
