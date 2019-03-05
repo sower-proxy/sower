@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -u -e
+set -e
 [[ -d /tmp/sower ]] || mkdir /tmp/sower
 cd /tmp/sower
 
@@ -42,7 +42,7 @@ case "$(uname -s)" in
 			sed -i~ "s/# server_addr=\"remote-server/server_addr=\"$ADDRESS/" sower.toml
 			sed -i~ "s/client_ip=\"127.0.0.1\"/client_ip=\"$IP\"/" sower.toml
 			sed -i~ "s/# clear_dns_cache/clear_dns_cache/" sower.toml
-			sed -i~ "s%bin/sower%bin/sower -p $PASSWORD%" sower-server.service
+			sed -i~ "s/\"12345678\"/\"$PASSWORD\"/" sower.toml
 			sudo mkdir -p /usr/local/etc/
 			sudo mv sower.toml /usr/local/etc/
 		fi
@@ -90,6 +90,7 @@ case "$(uname -s)" in
 
 					sed -i~ "s/# server_addr=\"remote-server/server_addr=\"$ADDRESS/" sower.toml
 					sed -i~ "s/client_ip=\"127.0.0.1\"/client_ip=\"$IP\"/" sower.toml
+					sed -i~ "s/\"12345678\"/\"$PASSWORD\"/" sower.toml
 					sudo mv sower.toml /usr/local/etc/
 				fi
 

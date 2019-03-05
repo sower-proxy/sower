@@ -17,7 +17,7 @@ const colon = byte(':')
 func StartDNS(dnsServer, listenIP string) {
 	ip := net.ParseIP(listenIP)
 
-	suggest := &intelliSuggest{listenIP, 800 * time.Millisecond}
+	suggest := &intelliSuggest{listenIP, time.Second}
 	mem.DefaultCache = mem.New(time.Hour)
 
 	dhcpCh := make(chan struct{})
@@ -81,14 +81,13 @@ func matchAndServe(w dns.ResponseWriter, r *dns.Msg, domain, listenIP, dnsServer
 		}
 	}
 
-	// trigger suggest logic except dhcp dns server error
-	if !inWriteList {
-		go mem.Remember(suggest, domain)
-	}
-
 	if msg == nil { // expose any response except nil
 		glog.V(1).Infof("get dns of %s fail: %s", domain, err)
 		return
+	} else if !inWriteList {
+		// trigger suggest logic while dns server OK
+		// avoid check while DNS setting not correct
+		go mem.Remember(suggest, domain)
 	}
 	w.WriteMsg(msg)
 }
@@ -108,41 +107,50 @@ func (i *intelliSuggest) GetOne(domain interface{}) (iface interface{}, e error)
 	}
 
 	var (
-		pings = []struct {
+		pings = [...]struct {
 			viaAddr string
 			port    Port
 		}{
-			{addr, Http},
-			{addr, Https},
-			{i.listenIP, Http},
-			{i.listenIP, Https},
+			{addr, HTTP},
+			{i.listenIP, HTTP},
+			{addr, HTTPS},
+			{i.listenIP, HTTPS},
 		}
-		half  = int32(len(pings) / 2)
-		score = new(int32)
+		protos = [...]*int32{new(int32) /*HTTP*/, new(int32) /*HTTPS*/}
+		score  = new(int32)
 	)
 	for idx := range pings {
 		go func(idx int) {
-			err := HTTPPing(pings[idx].viaAddr, addr, pings[idx].port, i.timeout)
-			if err != nil {
+			if err := HTTPPing(pings[idx].viaAddr, addr, pings[idx].port, i.timeout); err != nil {
 				// local ping fail
 				if pings[idx].viaAddr == addr {
 					atomic.AddInt32(score, 1)
+					glog.V(1).Infof("local ping %s fail", addr)
 				}
-			} else {
-				// remote ping succ
+
+				// remote ping faster
+			} else if atomic.CompareAndSwapInt32(protos[idx/2], 0, 1) {
 				if pings[idx].viaAddr == i.listenIP {
 					atomic.AddInt32(score, 1)
-
-					// local ping took longger than remote
-				} else if atomic.LoadInt32(score) >= half {
-					atomic.AddInt32(score, 1)
+					glog.V(1).Infof("remote ping %s faster", addr)
 				}
 			}
 
-			if atomic.LoadInt32(score) > half {
-				atomic.StoreInt32(score, 0) // avoid redo add action
-				conf.AddSuggest(addr)
-				glog.Infof("added suggest domain: %s", addr)
+			// check all remote pings are faster
+			if atomic.LoadInt32(score) == int32(len(protos)) {
+				for i := range protos {
+					if atomic.LoadInt32(protos[i]) != 1 {
+						return
+					}
+				}
+			}
+
+			// 1. local fail and remote success
+			// 2. all remote pings are faster
+			if atomic.LoadInt32(score) >= int32(len(protos)) {
+				atomic.StoreInt32(score, -1) // avoid readd the suggestion
+				conf.AddSuggestion(addr)
+				glog.Infof("suggested domain: %s with score: %d", addr, *score)
 			}
 		}(idx)
 	}
