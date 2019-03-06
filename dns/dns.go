@@ -116,8 +116,11 @@ func (i *intelliSuggest) GetOne(domain interface{}) (iface interface{}, e error)
 			{addr, HTTPS},
 			{i.listenIP, HTTPS},
 		}
-		protos = [...]*int32{new(int32) /*HTTP*/, new(int32) /*HTTPS*/}
-		score  = new(int32)
+		protos = [...]*int32{
+			new(int32), /*HTTP*/
+			new(int32), /*HTTPS*/
+		}
+		score = new(int32)
 	)
 	for idx := range pings {
 		go func(idx int) {
@@ -126,14 +129,18 @@ func (i *intelliSuggest) GetOne(domain interface{}) (iface interface{}, e error)
 				if pings[idx].viaAddr == addr {
 					atomic.AddInt32(score, 1)
 					glog.V(1).Infof("local ping %s fail", addr)
+				} else {
+					atomic.AddInt32(score, -1)
+					glog.V(1).Infof("remote ping %s fail", addr)
 				}
 
 				// remote ping faster
-			} else if atomic.CompareAndSwapInt32(protos[idx/2], 0, 1) {
-				if pings[idx].viaAddr == i.listenIP {
-					atomic.AddInt32(score, 1)
-					glog.V(1).Infof("remote ping %s faster", addr)
-				}
+			} else if atomic.CompareAndSwapInt32(protos[idx/2], 0, 1) && pings[idx].viaAddr == i.listenIP {
+				atomic.AddInt32(score, 1)
+				glog.V(1).Infof("remote ping %s faster", addr)
+
+			} else {
+				return // score change trigger add suggestion
 			}
 
 			// check all remote pings are faster
@@ -148,9 +155,9 @@ func (i *intelliSuggest) GetOne(domain interface{}) (iface interface{}, e error)
 			// 1. local fail and remote success
 			// 2. all remote pings are faster
 			if atomic.LoadInt32(score) >= int32(len(protos)) {
-				atomic.StoreInt32(score, -1) // avoid readd the suggestion
+				old := atomic.SwapInt32(score, -1) // avoid readd the suggestion
 				conf.AddSuggestion(addr)
-				glog.Infof("suggested domain: %s with score: %d", addr, *score)
+				glog.Infof("suggested domain: %s with score: %d", addr, old)
 			}
 		}(idx)
 	}
