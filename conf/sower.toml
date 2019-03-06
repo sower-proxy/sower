@@ -6,7 +6,7 @@ server_port="5533"
 http_proxy=":8080"               # eg: 192.168.0.2:8080
 dns_server="223.5.5.5"                    # Keep empty for dynamic setting from net env
 client_ip="127.0.0.1"            # listen the IP, dns target is the IP
-# clear_dns_cache="pkill mDNSResponder"
+# clear_dns_cache="pkill mDNSResponder"   # Windows: "ipconfig /flushdnss"
 blocklist=[
     "**.google.*", # google
     "**.goo.gl",
