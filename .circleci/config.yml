@@ -29,7 +29,7 @@ jobs:
           name: Build Windows Binary
           command: |
             GOOS=windows GOARCH=amd64 make build
-            tar czvf artifacts/sower_windows_amd64.tar.gz sower sower.toml
+            tar czvf artifacts/sower_windows_amd64.tar.gz sower.exe sower.toml
       - run:
           name: Publish Release on GitHub
           command: |
