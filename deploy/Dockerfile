@@ -1,5 +1,5 @@
 # Compile
-FROM golang:1.11-alpine AS compiler
+FROM golang:1.12-alpine AS compiler
 
 RUN apk add --no-cache git make
 

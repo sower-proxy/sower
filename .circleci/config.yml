@@ -40,18 +40,3 @@ jobs:
 
             VERSION=$(git describe --tags)
             ghr -t ${GITHUB_TOKEN} -u ${CIRCLE_PROJECT_USERNAME} -r ${CIRCLE_PROJECT_REPONAME} -c ${CIRCLE_SHA1} -delete ${VERSION%-*-*} artifacts/
-
-      - setup_remote_docker # install docker in docker
-      - run:
-          name: Build Docker Image
-          command: |
-            git describe --tags | grep - && exit
-
-            docker login -u $DOCKER_USER -p $DOCKER_PASS
-            make image
-            VERSION=$(git describe --tags)
-            docker tag sower wweir/sower:${VERSION%-*-*}
-            docker push wweir/sower:${VERSION%-*-*}
-            docker tag sower wweir/sower:latest
-            docker push wweir/sower:latest
-
