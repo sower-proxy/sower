@@ -3,18 +3,11 @@ package dns
 import "testing"
 
 func TestGetDefaultDNSServer(t *testing.T) {
-	t.Skip("skip for some enviroment not support dhcp")
+	t.Skip("skip for some enviroment not support dhcp and permission")
 
-	tests := []struct {
-		name string
-	}{{
-		"",
-	}}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := GetDefaultDNSServer(); got == "" {
-				t.Errorf("GetDefaultDNSServer() return empty")
-			}
-		})
+	if got, err := GetDefaultDNSServer(); err != nil {
+		t.Errorf("GetDefaultDNSServer() return error: %s", err)
+	} else {
+		t.Logf("GetDefaultDNSServer() return IP: %v", got)
 	}
 }
