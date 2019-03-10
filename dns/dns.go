@@ -27,8 +27,9 @@ func StartDNS(dnsServer, listenIP string) {
 		go func() {
 			for {
 				<-dhcpCh
-				host := GetDefaultDNSServer()
-				if host == "" {
+				host, err := GetDefaultDNSServer()
+				if err != nil {
+					glog.Errorln(err)
 					continue
 				}
 				// atomic action
