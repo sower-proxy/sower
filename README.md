@@ -25,13 +25,17 @@ After Deployed, please check your config file, it is placed in `/usr/local/etc/s
 Auto deploy script support Linux server side and masOS/Linux client side.
 
 ```shell
-$ bash -c "$(curl -s https://raw.githubusercontent.com/wweir/sower/master/.circleci/install)"
+$ bash -c "$(curl -sL https://git.io/fhhdp)"
 ```
 
 Then modify the configuration file as needed and set `127.0.0.1` as your first domain name server.
 In most situation, you just need to modify `/etc/resolv.conf`.
 
-If you wanna uninstall sower, change `install` into `uninstall` and rerun the command.
+If you wanna uninstall sower, run:
+
+```shell
+$ bash -c "$(curl -sL https://git.io/fhjer)"
+```
 
 ### Manually deploy
 1. Download the precompiled file from https://github.com/wweir/sower/releases
