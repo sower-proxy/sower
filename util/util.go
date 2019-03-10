@@ -2,8 +2,15 @@ package util
 
 import (
 	"errors"
+	"net"
 	"time"
 )
+
+// Iface is net interface address info
+type Iface struct {
+	net.HardwareAddr
+	net.IP
+}
 
 func WithTimeout(fn func() error, timeout time.Duration) error {
 	var okCh = make(chan struct{})

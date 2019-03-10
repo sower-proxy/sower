@@ -75,17 +75,20 @@ func matchAndServe(w dns.ResponseWriter, r *dns.Msg, domain, listenIP, dnsServer
 	}
 
 	msg, err := dns.Exchange(r, dnsServer)
-	if err != nil && dhcpCh != nil {
-		select {
-		case dhcpCh <- struct{}{}:
-		default:
+	if err != nil {
+		if dhcpCh != nil {
+			select {
+			case dhcpCh <- struct{}{}:
+			default:
+			}
 		}
-	}
-
-	if msg == nil { // expose any response except nil
+		return
+	} else if msg == nil { // expose any response except nil
 		glog.V(1).Infof("get dns of %s fail: %s", domain, err)
 		return
-	} else if !inWriteList {
+	}
+
+	if !inWriteList {
 		// trigger suggest logic while dns server OK
 		// avoid check while DNS setting not correct
 		go mem.Remember(suggest, domain)
