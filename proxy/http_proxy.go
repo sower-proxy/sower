@@ -9,11 +9,11 @@ import (
 	"time"
 
 	"github.com/golang/glog"
-	"github.com/wweir/sower/shadow"
+	"github.com/wweir/sower/proxy/shadow"
+	"github.com/wweir/sower/proxy/transport"
 )
 
-func StartHttpProxy(netType, server, cipher, password, addr string) {
-	client := NewClient(netType)
+func StartHttpProxy(tran transport.Transport, server, cipher, password, addr string) {
 	resolved := false
 
 	srv := &http.Server{
@@ -29,9 +29,9 @@ func StartHttpProxy(netType, server, cipher, password, addr string) {
 			}
 
 			if r.Method == http.MethodConnect {
-				httpsProxy(w, r, client, server, cipher, password)
+				httpsProxy(w, r, tran, server, cipher, password)
 			} else {
-				httpProxy(w, r, client, server, cipher, password)
+				httpProxy(w, r, tran, server, cipher, password)
 			}
 		}),
 		// Disable HTTP/2.
@@ -42,10 +42,12 @@ func StartHttpProxy(netType, server, cipher, password, addr string) {
 	glog.Fatalln(srv.ListenAndServe())
 }
 
-func httpProxy(w http.ResponseWriter, req *http.Request, client Client, server, cipher, password string) {
+func httpProxy(w http.ResponseWriter, req *http.Request,
+	tran transport.Transport, server, cipher, password string) {
+
 	roundTripper := &http.Transport{
 		DialContext: func(context.Context, string, string) (net.Conn, error) {
-			conn, err := client.Dial(server)
+			conn, err := tran.Dial(server)
 			if err != nil {
 				return nil, err
 			}
@@ -74,7 +76,9 @@ func httpProxy(w http.ResponseWriter, req *http.Request, client Client, server, 
 	io.Copy(w, resp.Body)
 }
 
-func httpsProxy(w http.ResponseWriter, r *http.Request, client Client, server, cipher, password string) {
+func httpsProxy(w http.ResponseWriter, r *http.Request,
+	tran transport.Transport, server, cipher, password string) {
+
 	// local conn
 	conn, _, err := w.(http.Hijacker).Hijack()
 	if err != nil {
@@ -90,7 +94,7 @@ func httpsProxy(w http.ResponseWriter, r *http.Request, client Client, server, c
 	}
 
 	// remote conn
-	rc, err := client.Dial(server)
+	rc, err := tran.Dial(server)
 	if err != nil {
 		conn.Close()
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)

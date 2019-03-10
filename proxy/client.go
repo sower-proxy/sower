@@ -4,33 +4,12 @@ import (
 	"net"
 
 	"github.com/golang/glog"
-	"github.com/wweir/sower/proxy/kcp"
-	"github.com/wweir/sower/proxy/quic"
-	"github.com/wweir/sower/proxy/tcp"
-	"github.com/wweir/sower/shadow"
+	"github.com/wweir/sower/proxy/shadow"
+	"github.com/wweir/sower/proxy/transport"
 )
 
-type Client interface {
-	Dial(server string) (net.Conn, error)
-}
-
-func NewClient(netType string) Client {
-	switch netType {
-	case QUIC.String():
-		return quic.NewClient()
-	case KCP.String():
-		return kcp.NewClient()
-	case TCP.String():
-		return tcp.NewClient()
-	default:
-		glog.Fatalln("invalid net type: " + netType)
-		return nil
-	}
-}
-
-func StartClient(netType, server, cipher, password, listenIP string) {
+func StartClient(tran transport.Transport, server, cipher, password, listenIP string) {
 	connCh := listenLocal(listenIP, []string{"80", "443"})
-	client := NewClient(netType)
 	resolved := false
 
 	glog.Infoln("Client started.")
@@ -47,7 +26,7 @@ func StartClient(netType, server, cipher, password, listenIP string) {
 		}
 		glog.V(1).Infof("new conn from (%s) to (%s)", conn.RemoteAddr(), server)
 
-		rc, err := client.Dial(server)
+		rc, err := tran.Dial(server)
 		if err != nil {
 			conn.Close()
 			glog.Errorln(err)

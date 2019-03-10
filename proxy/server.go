@@ -5,32 +5,12 @@ import (
 	"strings"
 
 	"github.com/golang/glog"
-	"github.com/wweir/sower/parse"
-	"github.com/wweir/sower/proxy/kcp"
-	"github.com/wweir/sower/proxy/quic"
-	"github.com/wweir/sower/proxy/tcp"
-	"github.com/wweir/sower/shadow"
+	"github.com/wweir/sower/proxy/parser"
+	"github.com/wweir/sower/proxy/shadow"
+	"github.com/wweir/sower/proxy/transport"
 )
 
-type Server interface {
-	Listen(port string) (<-chan net.Conn, error)
-}
-
-func NewServer(netType string) Server {
-	switch netType {
-	case QUIC.String():
-		return quic.NewServer()
-	case KCP.String():
-		return kcp.NewServer()
-	case TCP.String():
-		return tcp.NewServer()
-	default:
-		glog.Fatalln("invalid net type: " + netType)
-		return nil
-	}
-}
-
-func StartServer(netType, port, cipher, password string) {
+func StartServer(tran transport.Transport, port, cipher, password string) {
 	if port == "" {
 		glog.Fatalln("port must set")
 	}
@@ -38,7 +18,7 @@ func StartServer(netType, port, cipher, password string) {
 		port = ":" + port
 	}
 
-	connCh, err := NewServer(netType).Listen(port)
+	connCh, err := tran.Listen(port)
 	if err != nil {
 		glog.Fatalf("listen %v fail: %s", port, err)
 	}
@@ -53,7 +33,7 @@ func StartServer(netType, port, cipher, password string) {
 }
 
 func handle(conn net.Conn) {
-	conn, addr, err := parse.ParseAddr(conn)
+	conn, addr, err := parser.ParseAddr(conn)
 	if err != nil {
 		conn.Close()
 		glog.Warningln(err)
