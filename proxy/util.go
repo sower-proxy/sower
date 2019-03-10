@@ -10,15 +10,6 @@ import (
 	"github.com/golang/glog"
 )
 
-//go:generate stringer -type=netType $GOFILE
-type netType int
-
-const (
-	QUIC netType = iota
-	KCP
-	TCP
-)
-
 func relay(conn1, conn2 net.Conn) {
 	wg := &sync.WaitGroup{}
 	exitFlag := new(int32)

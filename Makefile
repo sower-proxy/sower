@@ -12,7 +12,7 @@ build:
 		"-X main.version=$(shell git describe --tags) \
 		 -X main.date=$(shell date +%Y-%m-%d)"
 image:
-	docker build -t sower -f deploy/Dockerfile .
+	docker build -t sower -f .circleci/Dockerfile .
 
 kill:
 	sudo pkill -9 sower || true

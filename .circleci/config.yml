@@ -9,7 +9,7 @@ jobs:
           name: Prepare Environment
           command: |
             cp conf/sower.toml .
-            cp deploy/* .
+            cp .circleci/* .
             mkdir artifacts
       - run:
           name: Run Unit Test
