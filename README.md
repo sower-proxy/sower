@@ -25,7 +25,7 @@ After Deployed, please check your config file, it is placed in `/usr/local/etc/s
 Auto deploy script support Linux server side and masOS/Linux client side.
 
 ```shell
-$ bash -c "$(curl -s https://raw.githubusercontent.com/wweir/sower/master/deploy/install)"
+$ bash -c "$(curl -s https://raw.githubusercontent.com/wweir/sower/master/.circleci/install)"
 ```
 
 Then modify the configuration file as needed and set `127.0.0.1` as your first domain name server.
