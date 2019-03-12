@@ -52,5 +52,9 @@ func GetDefaultDNSServer() (string, error) {
 
 	pack = dhcp4.Packet(buf[:n])
 	dnsBytes := pack.ParseOptions()[dhcp4.OptionDomainNameServer]
+	if len(dnsBytes) < 4 {
+		return "", errors.New("no DNS setting in upstream network device")
+	}
+
 	return net.IPv4(dnsBytes[0], dnsBytes[1], dnsBytes[2], dnsBytes[3]).String(), nil
 }
