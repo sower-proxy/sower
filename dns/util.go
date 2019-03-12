@@ -25,13 +25,13 @@ func init() {
 	whiteList.Add(host)
 	glog.V(1).Infoln("load config")
 
-	conf.OnRefreash = append(conf.OnRefreash, func() error {
+	conf.OnRefreash = append(conf.OnRefreash, func() (string, error) {
 		blockList = loadRules("block", conf.Conf.BlockList)
 		suggestList = loadRules("suggest", conf.Conf.Suggestions)
 		whiteList = loadRules("white", conf.Conf.WhiteList)
 		whiteList.Add(host)
 		glog.V(1).Infoln("reload config")
-		return nil
+		return "reload config", nil
 	})
 }
 

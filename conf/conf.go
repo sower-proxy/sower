@@ -37,36 +37,38 @@ var Conf = struct {
 }{}
 
 // OnRefreash will be executed while init and write new config
-var OnRefreash = []func() error{
-	func() (err error) {
+var OnRefreash = []func() (string, error){
+	func() (string, error) {
+		action := "load config"
 		f, err := os.OpenFile(Conf.ConfigFile, os.O_RDONLY, 0644)
 		if err != nil {
-			return err
+			return action, err
 		}
 		defer f.Close()
 
 		//safe refresh config
 		file := Conf.ConfigFile
 		if err = toml.NewDecoder(f).Decode(&Conf); err != nil {
-			return err
+			return action, err
 		}
 		Conf.ConfigFile = file
 
-		return flag.Set("v", strconv.Itoa(Conf.Verbose))
+		return action, flag.Set("v", strconv.Itoa(Conf.Verbose))
 	},
-	func() error {
+	func() (string, error) {
+		action := "clear dns cache"
 		if Conf.ClearDNSCache != "" {
 			ctx, cancel := context.WithTimeout(context.TODO(), 5*time.Second)
 			defer cancel()
 
 			switch runtime.GOOS {
 			case "windows":
-				return exec.CommandContext(ctx, "cmd", "/c", Conf.ClearDNSCache).Run()
+				return action, exec.CommandContext(ctx, "cmd", "/c", Conf.ClearDNSCache).Run()
 			default:
-				return exec.CommandContext(ctx, "sh", "-c", Conf.ClearDNSCache).Run()
+				return action, exec.CommandContext(ctx, "sh", "-c", Conf.ClearDNSCache).Run()
 			}
 		}
-		return nil
+		return action, nil
 	},
 }
 
@@ -78,8 +80,8 @@ func init() {
 		return
 	}
 	for i := range OnRefreash {
-		if err := OnRefreash[i](); err != nil {
-			glog.Fatalln(err)
+		if action, err := OnRefreash[i](); err != nil {
+			glog.Fatalln(action+":", err)
 		}
 	}
 }
@@ -117,8 +119,8 @@ func AddSuggestion(domain string) {
 
 	// reload config
 	for i := range OnRefreash {
-		if err := OnRefreash[i](); err != nil {
-			glog.Errorln(err)
+		if action, err := OnRefreash[i](); err != nil {
+			glog.Errorln(action+":", err)
 		}
 	}
 }
