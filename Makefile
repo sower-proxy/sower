@@ -3,7 +3,12 @@ SERVER:=127.0.0.1:5533
 default: test build
 
 generate:
+ifeq ("", "$(shell which stringer)")
+	@echo installing generator
+	go get -v golang.org/x/tools/cmd/stringer
+endif
 	go generate ./...
+
 test:
 	go vet ./...
 	go test ./...

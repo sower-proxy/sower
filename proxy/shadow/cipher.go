@@ -17,7 +17,16 @@ const (
 	AES_256_GCM
 	CHACHA20_IETF_POLY1305
 	XCHACHA20_IETF_POLY1305
+	cipherEnd
 )
+
+func ListCiphers() []string {
+	list := make([]string, 0, int(cipherEnd))
+	for i := cipherType(0); i < cipherEnd; i++ {
+		list = append(list, i.String())
+	}
+	return list
+}
 
 func pickCipher(cipherType, password string) (cipher.AEAD, error) {
 	var blockSize int

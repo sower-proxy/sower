@@ -9,15 +9,14 @@ import (
 	"github.com/golang/glog"
 	"github.com/miekg/dns"
 	mem "github.com/wweir/mem-go"
-	"github.com/wweir/sower/conf"
 )
 
 const colon = byte(':')
 
-func StartDNS(dnsServer, listenIP string) {
+func StartDNS(dnsServer, listenIP string, suggestCh chan<- string, suggestLevel string) {
 	ip := net.ParseIP(listenIP)
 
-	suggest := &intelliSuggest{listenIP, time.Second}
+	suggest := &intelliSuggest{suggestCh, parseSuggestLevel(suggestLevel), listenIP, time.Second}
 	mem.DefaultCache = mem.New(time.Hour)
 
 	dhcpCh := make(chan struct{})
@@ -97,12 +96,17 @@ func matchAndServe(w dns.ResponseWriter, r *dns.Msg, domain, listenIP, dnsServer
 }
 
 type intelliSuggest struct {
-	listenIP string
-	timeout  time.Duration
+	suggestCh    chan<- string
+	suggestLevel suggestLevel
+	listenIP     string
+	timeout      time.Duration
 }
 
 func (i *intelliSuggest) GetOne(domain interface{}) (iface interface{}, e error) {
 	iface, e = struct{}{}, nil
+	if i.suggestLevel == DISABLE {
+		return
+	}
 
 	// kill deadloop, for ugly wildcard setting dns setting
 	addr := strings.TrimSuffix(domain.(string), ".")
@@ -139,11 +143,14 @@ func (i *intelliSuggest) GetOne(domain interface{}) (iface interface{}, e error)
 				}
 
 				// remote ping faster
-			} else if atomic.CompareAndSwapInt32(protos[idx/2], 0, 1) && pings[idx].viaAddr == i.listenIP {
-				atomic.AddInt32(score, 1)
+			} else if pings[idx].viaAddr == i.listenIP {
+				if atomic.CompareAndSwapInt32(protos[idx/2], 0, 1) && i.suggestLevel == SPEEDUP {
+					atomic.AddInt32(score, 1)
+				}
 				glog.V(1).Infof("remote ping %s faster", addr)
 
 			} else {
+				atomic.CompareAndSwapInt32(protos[idx/2], 0, 2)
 				return // score change trigger add suggestion
 			}
 
@@ -160,7 +167,7 @@ func (i *intelliSuggest) GetOne(domain interface{}) (iface interface{}, e error)
 			// 2. all remote pings are faster
 			if atomic.LoadInt32(score) >= int32(len(protos)) {
 				old := atomic.SwapInt32(score, -1) // avoid readd the suggestion
-				conf.AddSuggestion(addr)
+				i.suggestCh <- addr
 				glog.Infof("suggested domain: %s with score: %d", addr, old)
 			}
 		}(idx)

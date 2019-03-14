@@ -4,9 +4,9 @@ package shadow
 
 import "strconv"
 
-const _cipherType_name = "AES_128_GCMAES_192_GCMAES_256_GCMCHACHA20_IETF_POLY1305XCHACHA20_IETF_POLY1305"
+const _cipherType_name = "AES_128_GCMAES_192_GCMAES_256_GCMCHACHA20_IETF_POLY1305XCHACHA20_IETF_POLY1305cipherEnd"
 
-var _cipherType_index = [...]uint8{0, 11, 22, 33, 55, 78}
+var _cipherType_index = [...]uint8{0, 11, 22, 33, 55, 78, 87}
 
 func (i cipherType) String() string {
 	if i < 0 || i >= cipherType(len(_cipherType_index)-1) {

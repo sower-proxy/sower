@@ -7,8 +7,9 @@ import (
 	"os/exec"
 	"runtime"
 	"strconv"
-	"sync"
 	"time"
+
+	"github.com/pkg/errors"
 
 	"github.com/golang/glog"
 	toml "github.com/pelletier/go-toml"
@@ -28,6 +29,7 @@ var Conf = struct {
 
 	DNSServer     string `toml:"dns_server"`
 	ClientIP      string `toml:"client_ip"`
+	SuggestLevel  string `toml:"suggest_level"`
 	ClearDNSCache string `toml:"clear_dns_cache"`
 
 	BlockList   []string `toml:"blocklist"`
@@ -36,8 +38,24 @@ var Conf = struct {
 	Verbose     int      `toml:"verbose"`
 }{}
 
-// OnRefreash will be executed while init and write new config
-var OnRefreash = []func() (string, error){
+func init() {
+	initArgs()
+
+	if _, err := os.Stat(Conf.ConfigFile); os.IsNotExist(err) {
+		glog.Warningln("no config file has been load:", Conf.ConfigFile)
+		return
+	}
+	for i := range refreshFns {
+		if action, err := refreshFns[i](); err != nil {
+			glog.Fatalln(action+":", err)
+		}
+	}
+
+	go addSuggestions()
+}
+
+// refreshFns will be executed while init and write new config
+var refreshFns = []func() (string, error){
 	func() (string, error) {
 		action := "load config"
 		f, err := os.OpenFile(Conf.ConfigFile, os.O_RDONLY, 0644)
@@ -63,64 +81,65 @@ var OnRefreash = []func() (string, error){
 
 			switch runtime.GOOS {
 			case "windows":
-				return action, exec.CommandContext(ctx, "cmd", "/c", Conf.ClearDNSCache).Run()
+				if out, err := exec.CommandContext(ctx, "cmd", "/c", Conf.ClearDNSCache).CombinedOutput(); err != nil {
+					return action, errors.Wrapf(err, "cmd: %s, output: %s, error", Conf.ClearDNSCache, out)
+				}
 			default:
-				return action, exec.CommandContext(ctx, "sh", "-c", Conf.ClearDNSCache).Run()
+				if out, err := exec.CommandContext(ctx, "sh", "-c", Conf.ClearDNSCache).CombinedOutput(); err != nil {
+					return action, errors.Wrapf(err, "cmd: %s, output: %s, error", Conf.ClearDNSCache, out)
+				}
 			}
 		}
 		return action, nil
 	},
 }
 
-func init() {
-	initArgs()
-
-	if _, err := os.Stat(Conf.ConfigFile); os.IsNotExist(err) {
-		glog.Warningln("no config file has been load:", Conf.ConfigFile)
-		return
-	}
-	for i := range OnRefreash {
-		if action, err := OnRefreash[i](); err != nil {
-			glog.Fatalln(action+":", err)
+// AddRefreshFn add refreshh function for reload config
+func AddRefreshFn(init bool, fn func() (string, error)) error {
+	if init {
+		if _, err := fn(); err != nil {
+			return err
 		}
 	}
+
+	refreshFns = append(refreshFns, fn)
+	return nil
 }
 
-// mu keep synchronized add rule(write), do not care read while write
-var mu = &sync.Mutex{}
+// SuggestCh add domain into suggestios
+var SuggestCh = make(chan string)
 
-// AddSuggestion add new domain into suggest rules
-func AddSuggestion(domain string) {
-	mu.Lock()
-	defer mu.Unlock()
+// addSuggestions add new domain into suggest rules
+func addSuggestions() {
+	for domain := range SuggestCh {
+		Conf.Suggestions = append(Conf.Suggestions, domain)
+		Conf.Suggestions = util.NewReverseSecSlice(Conf.Suggestions).Sort().Uniq()
 
-	Conf.Suggestions = append(Conf.Suggestions, domain)
-	Conf.Suggestions = util.NewReverseSecSlice(Conf.Suggestions).Sort().Uniq()
+		{ // safe write
+			f, err := os.OpenFile(Conf.ConfigFile+"~", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+			if err != nil {
+				glog.Errorln(err)
+				continue
+			}
 
-	{ // safe write
-		f, err := os.OpenFile(Conf.ConfigFile+"~", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
-		if err != nil {
-			glog.Errorln(err)
-			return
-		}
-
-		if err := toml.NewEncoder(f).ArraysWithOneElementPerLine(true).Encode(Conf); err != nil {
-			glog.Errorln(err)
+			if err := toml.NewEncoder(f).ArraysWithOneElementPerLine(true).Encode(Conf); err != nil {
+				glog.Errorln(err)
+				f.Close()
+				continue
+			}
 			f.Close()
-			return
-		}
-		f.Close()
 
-		if err = os.Rename(Conf.ConfigFile+"~", Conf.ConfigFile); err != nil {
-			glog.Errorln(err)
-			return
+			if err = os.Rename(Conf.ConfigFile+"~", Conf.ConfigFile); err != nil {
+				glog.Errorln(err)
+				continue
+			}
 		}
-	}
 
-	// reload config
-	for i := range OnRefreash {
-		if action, err := OnRefreash[i](); err != nil {
-			glog.Errorln(action+":", err)
+		// reload config
+		for i := range refreshFns {
+			if action, err := refreshFns[i](); err != nil {
+				glog.Errorln(action+":", err)
+			}
 		}
 	}
 }
