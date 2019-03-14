@@ -1,6 +1,8 @@
 package main
 
 import (
+	"net"
+
 	"github.com/golang/glog"
 	"github.com/wweir/sower/conf"
 	"github.com/wweir/sower/dns"
@@ -11,24 +13,30 @@ import (
 var version, date string
 
 func main() {
-	conf := conf.Conf
-	glog.Infof("Starting sower(%s %s): %v", version, date, conf)
+	cfg := &conf.Conf
+	glog.Infof("Starting sower(%s %s): %v", version, date, cfg)
 
-	tran, err := transport.GetTransport(conf.NetType)
+	tran, err := transport.GetTransport(cfg.NetType)
 	if err != nil {
 		glog.Exitln(err)
 	}
 
-	if conf.ServerAddr == "" {
-		proxy.StartServer(tran, conf.ServerPort, conf.Cipher, conf.Password)
+	if cfg.ServerAddr == "" {
+		proxy.StartServer(tran, cfg.ServerPort, cfg.Cipher, cfg.Password)
 
 	} else {
-		if conf.HTTPProxy != "" {
-			go proxy.StartHttpProxy(tran, conf.ServerAddr,
-				conf.Cipher, conf.Password, conf.HTTPProxy)
+		conf.AddRefreshFn(true, func() (string, error) {
+			host, _, _ := net.SplitHostPort(cfg.ServerAddr)
+			dns.LoadRules(cfg.BlockList, cfg.Suggestions, cfg.WhiteList, host)
+			return "load rules", nil
+		})
+
+		if cfg.HTTPProxy != "" {
+			go proxy.StartHttpProxy(tran, cfg.ServerAddr,
+				cfg.Cipher, cfg.Password, cfg.HTTPProxy)
 		}
 
-		go dns.StartDNS(conf.DNSServer, conf.ClientIP)
-		proxy.StartClient(tran, conf.ServerAddr, conf.Cipher, conf.Password, conf.ClientIP)
+		go dns.StartDNS(cfg.DNSServer, cfg.ClientIP, conf.SuggestCh, cfg.SuggestLevel)
+		proxy.StartClient(tran, cfg.ServerAddr, cfg.Cipher, cfg.Password, cfg.ClientIP)
 	}
 }

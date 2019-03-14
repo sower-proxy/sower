@@ -1,12 +1,13 @@
-net_type="TCP"
-cipher="AES_128_GCM"
+net_type="TCP"       # TCP, KCP, QUIC
+cipher="AES_128_GCM" # AES_128_GCM, AES_192_GCM, AES_256_GCM, CHACHA20_IETF_POLY1305, XCHACHA20_IETF_POLY1305
 password="12345678"
 server_port="5533"
 # server_addr="remote-server:5533" # replce it to remote server
 http_proxy=":8080"               # eg: 192.168.0.2:8080
-dns_server="223.5.5.5"                    # Keep empty for dynamic setting from net env
+dns_server="114.114.114.114"     # Keep empty for dynamic setting from net env
 client_ip="127.0.0.1"            # listen the IP, dns target is the IP
 # clear_dns_cache="pkill mDNSResponder"   # Windows: "ipconfig /flushdnss"
+suggest_level="SPEEDUP"          # DISABLE, BLOCK, SPEEDUP
 blocklist=[
     "**.google.*", # google
     "**.goo.gl",

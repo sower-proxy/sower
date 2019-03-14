@@ -14,7 +14,7 @@ require (
 	github.com/lucas-clemente/aes12 v0.0.0-20171027163421-cd47fb39b79f // indirect
 	github.com/lucas-clemente/quic-go v0.10.1
 	github.com/lucas-clemente/quic-go-certificates v0.0.0-20160823095156-d2f86524cced // indirect
-	github.com/miekg/dns v1.1.5
+	github.com/miekg/dns v1.1.6
 	github.com/pelletier/go-toml v1.2.0
 	github.com/pkg/errors v0.8.1
 	github.com/templexxx/cpufeat v0.0.0-20180724012125-cef66df7f161 // indirect
@@ -23,7 +23,7 @@ require (
 	github.com/ulule/deepcopier v0.0.0-20171107155558-ca99b135e50f // indirect
 	github.com/wweir/mem-go v0.0.0-20190109100331-8673ab596296
 	github.com/xtaci/kcp-go v5.0.7+incompatible
-	golang.org/x/crypto v0.0.0-20190308221718-c2843e01d9a2
-	golang.org/x/net v0.0.0-20190310014029-b774fd8d5c0f // indirect
+	golang.org/x/crypto v0.0.0-20190313024323-a1f597ede03a
+	golang.org/x/net v0.0.0-20190313220215-9f648a60d977 // indirect
 	golang.org/x/sys v0.0.0-20190228124157-a34e9553db1e
 )
