@@ -1,3 +1,4 @@
+export GO111MODULE=on
 SERVER:=127.0.0.1:5533
 
 default: test build
@@ -13,7 +14,7 @@ test:
 	go vet ./...
 	go test ./...
 build:
-	GO111MODULE=on go build -v -ldflags \
+	go build -v -ldflags \
 		"-X main.version=$(shell git describe --tags) \
 		 -X main.date=$(shell date +%Y-%m-%d)"
 image:
@@ -32,6 +33,6 @@ run: build kill
 	$(PWD)/sower -n TCP -v 1  &
 	sudo $(PWD)/sower &
 	@sleep 1
-	curl 127.0.0.1
+	curl localhost
 	@sleep 1
 	@sudo pkill -9 sower || true
