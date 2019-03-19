@@ -1,6 +1,7 @@
 package dns
 
 import (
+	"context"
 	"net"
 	"strings"
 	"sync/atomic"
@@ -73,7 +74,10 @@ func matchAndServe(w dns.ResponseWriter, r *dns.Msg, domain, listenIP, dnsServer
 		return
 	}
 
-	msg, err := dns.Exchange(r, dnsServer)
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	msg, err := dns.ExchangeContext(ctx, r, dnsServer)
 	if err != nil {
 		if dhcpCh != nil {
 			select {
@@ -81,9 +85,10 @@ func matchAndServe(w dns.ResponseWriter, r *dns.Msg, domain, listenIP, dnsServer
 			default:
 			}
 		}
+		glog.V(1).Infof("get dns of %s fail: %s", domain, err)
 		return
 	} else if msg == nil { // expose any response except nil
-		glog.V(1).Infof("get dns of %s fail: %s", domain, err)
+		glog.V(1).Infof("get dns of %s return empty", domain)
 		return
 	}
 
