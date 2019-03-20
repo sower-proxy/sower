@@ -29,11 +29,11 @@ func GetDefaultDNSServer() (string, error) {
 
 	var conn net.PacketConn
 	if runtime.GOOS == "windows" {
-		if conn, err = reuseport.ListenPacket("udp", iface.IP.String()+":68"); err != nil {
+		if conn, err = reuseport.ListenPacket("udp4", iface.IP.String()+":68"); err != nil {
 			return "", errors.Wrap(err, "listen dhcp")
 		}
 	} else {
-		if conn, err = reuseport.ListenPacket("udp", "0.0.0.0:68"); err != nil {
+		if conn, err = reuseport.ListenPacket("udp4", "0.0.0.0:68"); err != nil {
 			return "", errors.Wrap(err, "listen dhcp")
 		}
 	}

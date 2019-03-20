@@ -24,19 +24,7 @@ func StartDNS(dnsServer, listenIP string, suggestCh chan<- string, suggestLevel 
 	if dnsServer != "" {
 		dnsServer = net.JoinHostPort(dnsServer, "53")
 	} else {
-		go func() {
-			for {
-				<-dhcpCh
-				host, err := GetDefaultDNSServer()
-				if err != nil {
-					glog.Errorln(err)
-					continue
-				}
-				// atomic action
-				dnsServer = net.JoinHostPort(host, "53")
-				glog.Infoln("set dns server to", host)
-			}
-		}()
+		go dynamicSetUpstreamDNS(listenIP, &dnsServer, dhcpCh)
 		dhcpCh <- struct{}{}
 	}
 
@@ -64,6 +52,33 @@ func StartDNS(dnsServer, listenIP string, suggestCh chan<- string, suggestLevel 
 	glog.Fatalln(server.ListenAndServe())
 }
 
+func dynamicSetUpstreamDNS(listenIP string, dnsServer *string, dhcpCh <-chan struct{}) {
+	addr, _ := dns.ReverseAddr(listenIP)
+	msg := &dns.Msg{
+		MsgHdr: dns.MsgHdr{
+			Id:               dns.Id(),
+			RecursionDesired: false,
+		},
+		Question: []dns.Question{{addr, dns.TypeA, dns.ClassINET}},
+	}
+
+	for {
+		<-dhcpCh
+		if _, err := dns.Exchange(msg, *dnsServer); err == nil {
+			continue
+		}
+
+		host, err := GetDefaultDNSServer()
+		if err != nil {
+			glog.Errorln(err)
+			continue
+		}
+
+		// atomic action
+		*dnsServer = net.JoinHostPort(host, "53")
+		glog.Infoln("set dns server to", host)
+	}
+}
 func matchAndServe(w dns.ResponseWriter, r *dns.Msg, domain, listenIP, dnsServer string,
 	dhcpCh chan struct{}, ipNet net.IP, suggest *intelliSuggest) {
 
@@ -85,10 +100,10 @@ func matchAndServe(w dns.ResponseWriter, r *dns.Msg, domain, listenIP, dnsServer
 			default:
 			}
 		}
-		glog.V(1).Infof("get dns of %s fail: %s", domain, err)
+		glog.V(1).Infof("get dns of %s from %s fail: %s", domain, dnsServer, err)
 		return
 	} else if msg == nil { // expose any response except nil
-		glog.V(1).Infof("get dns of %s return empty", domain)
+		glog.V(1).Infof("get dns of %s from %s return empty", domain, dnsServer)
 		return
 	}
 
