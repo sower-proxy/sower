@@ -59,7 +59,11 @@ func dynamicSetUpstreamDNS(listenIP string, dnsServer *string, dhcpCh <-chan str
 			Id:               dns.Id(),
 			RecursionDesired: false,
 		},
-		Question: []dns.Question{{addr, dns.TypeA, dns.ClassINET}},
+		Question: []dns.Question{{
+			Name:   addr,
+			Qtype:  dns.TypeA,
+			Qclass: dns.ClassINET,
+		}},
 	}
 
 	for {
