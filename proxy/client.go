@@ -8,22 +8,14 @@ import (
 	"github.com/wweir/sower/proxy/transport"
 )
 
-func StartClient(tran transport.Transport, server, cipher, password, listenIP string) {
+func StartClient(tran transport.Transport, isSocks5 bool, server, cipher, password, listenIP string) {
 	connCh := listenLocal(listenIP, []string{"80", "443"})
-	resolved := false
 
 	glog.Infoln("Client started.")
 	for {
 		conn := <-connCh
 
-		if !resolved {
-			if addr, err := net.ResolveTCPAddr("tcp", server); err != nil {
-				glog.Errorln(err)
-			} else {
-				server = addr.String()
-				resolved = true
-			}
-		}
+		resolveAddr(&server)
 		glog.V(1).Infof("new conn from (%s) to (%s)", conn.RemoteAddr(), server)
 
 		rc, err := tran.Dial(server)
@@ -32,7 +24,15 @@ func StartClient(tran transport.Transport, server, cipher, password, listenIP st
 			glog.Errorln(err)
 			continue
 		}
-		rc = shadow.Shadow(rc, cipher, password)
+
+		if isSocks5 {
+			if rc, conn, err = buildSocks5Conn(rc, conn); err != nil {
+				glog.Errorln(err)
+				continue
+			}
+		} else {
+			rc = shadow.Shadow(rc, cipher, password)
+		}
 
 		go relay(conn, rc)
 	}
