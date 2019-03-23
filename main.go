@@ -31,12 +31,13 @@ func main() {
 			return "load rules", nil
 		})
 
+		isSocks5 := (cfg.NetType == "SOCKS5")
+
 		if cfg.HTTPProxy != "" {
-			go proxy.StartHttpProxy(tran, cfg.ServerAddr,
-				cfg.Cipher, cfg.Password, cfg.HTTPProxy)
+			go proxy.StartHttpProxy(tran, isSocks5, cfg.ServerAddr, cfg.Cipher, cfg.Password, cfg.HTTPProxy)
 		}
 
 		go dns.StartDNS(cfg.DNSServer, cfg.ClientIP, conf.SuggestCh, cfg.SuggestLevel)
-		proxy.StartClient(tran, cfg.ServerAddr, cfg.Cipher, cfg.Password, cfg.ClientIP)
+		proxy.StartClient(tran, isSocks5, cfg.ServerAddr, cfg.Cipher, cfg.Password, cfg.ClientIP)
 	}
 }

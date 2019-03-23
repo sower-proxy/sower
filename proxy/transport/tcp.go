@@ -9,11 +9,16 @@ import (
 
 type tcp struct {
 	DialTimeout time.Duration
+	isSocks5    bool
 }
 
 func init() {
 	transports["TCP"] = &tcp{
 		DialTimeout: 5 * time.Second,
+	}
+	transports["SOCKS5"] = &tcp{
+		DialTimeout: 5 * time.Second,
+		isSocks5:    true,
 	}
 }
 
@@ -27,7 +32,11 @@ func (t *tcp) Dial(server string) (net.Conn, error) {
 	return conn, nil
 }
 
-func (*tcp) Listen(port string) (<-chan net.Conn, error) {
+func (t *tcp) Listen(port string) (<-chan net.Conn, error) {
+	if t.isSocks5 {
+		panic("not support run as socks5 server")
+	}
+
 	ln, err := net.Listen("tcp", port)
 	if err != nil {
 		return nil, err

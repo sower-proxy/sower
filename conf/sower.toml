@@ -1,4 +1,4 @@
-net_type="TCP"       # TCP, KCP, QUIC
+net_type="TCP"       # TCP, KCP, QUIC, SOCKS5(client only)
 cipher="AES_128_GCM" # AES_128_GCM, AES_192_GCM, AES_256_GCM, CHACHA20_IETF_POLY1305, XCHACHA20_IETF_POLY1305
 password="12345678"
 server_port="5533"

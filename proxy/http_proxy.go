@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/golang/glog"
@@ -13,25 +14,16 @@ import (
 	"github.com/wweir/sower/proxy/transport"
 )
 
-func StartHttpProxy(tran transport.Transport, server, cipher, password, addr string) {
-	resolved := false
-
+func StartHttpProxy(tran transport.Transport, isSocks5 bool, server, cipher, password, addr string) {
 	srv := &http.Server{
 		Addr: addr,
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if !resolved {
-				if addr, err := net.ResolveTCPAddr("tcp", server); err != nil {
-					glog.Errorln(err)
-				} else {
-					server = addr.String()
-					resolved = true
-				}
-			}
+			resolveAddr(&server)
 
 			if r.Method == http.MethodConnect {
-				httpsProxy(w, r, tran, server, cipher, password)
+				httpsProxy(w, r, tran, isSocks5, server, cipher, password)
 			} else {
-				httpProxy(w, r, tran, server, cipher, password)
+				httpProxy(w, r, tran, isSocks5, server, cipher, password)
 			}
 		}),
 		// Disable HTTP/2.
@@ -43,20 +35,28 @@ func StartHttpProxy(tran transport.Transport, server, cipher, password, addr str
 }
 
 func httpProxy(w http.ResponseWriter, req *http.Request,
-	tran transport.Transport, server, cipher, password string) {
+	tran transport.Transport, isSocks5 bool, server, cipher, password string) {
 
 	roundTripper := &http.Transport{
-		DialContext: func(context.Context, string, string) (net.Conn, error) {
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
+
+	if isSocks5 {
+		roundTripper.Proxy = func(*http.Request) (*url.URL, error) {
+			return url.Parse("socks5://" + server)
+		}
+
+	} else {
+		roundTripper.DialContext = func(context.Context, string, string) (net.Conn, error) {
 			conn, err := tran.Dial(server)
 			if err != nil {
 				return nil, err
 			}
 			return shadow.Shadow(conn, cipher, password), nil
-		},
-		MaxIdleConns:          100,
-		IdleConnTimeout:       90 * time.Second,
-		TLSHandshakeTimeout:   10 * time.Second,
-		ExpectContinueTimeout: 1 * time.Second,
+		}
 	}
 
 	resp, err := roundTripper.RoundTrip(req)
@@ -77,7 +77,7 @@ func httpProxy(w http.ResponseWriter, req *http.Request,
 }
 
 func httpsProxy(w http.ResponseWriter, r *http.Request,
-	tran transport.Transport, server, cipher, password string) {
+	tran transport.Transport, isSocks5 bool, server, cipher, password string) {
 
 	// local conn
 	conn, _, err := w.(http.Hijacker).Hijack()
@@ -101,7 +101,15 @@ func httpsProxy(w http.ResponseWriter, r *http.Request,
 		glog.Errorln("serve https proxy, dial remote fail:", err)
 		return
 	}
-	rc = shadow.Shadow(rc, cipher, password)
+
+	if isSocks5 {
+		if rc, conn, err = buildSocks5Conn(rc, conn); err != nil {
+			glog.Errorln(err)
+			return
+		}
+	} else {
+		rc = shadow.Shadow(rc, cipher, password)
+	}
 
 	relay(rc, conn)
 }

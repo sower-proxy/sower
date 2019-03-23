@@ -15,7 +15,7 @@ import (
 
 func initArgs() {
 	flag.StringVar(&Conf.ConfigFile, "f", filepath.Dir(os.Args[0])+"/sower.toml", "config file location")
-	flag.StringVar(&Conf.NetType, "n", "TCP", "proxy net type: "+strings.Join(transport.ListTransports(), ","))
+	flag.StringVar(&Conf.NetType, "n", "TCP", "net type (socks5 client only): "+strings.Join(transport.ListTransports(), ","))
 	flag.StringVar(&Conf.Cipher, "C", "AES_128_GCM", "cipher type: "+strings.Join(shadow.ListCiphers(), ","))
 	flag.StringVar(&Conf.Password, "p", "12345678", "password")
 	flag.StringVar(&Conf.ServerPort, "P", "5533", "server mode listen port")
