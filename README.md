@@ -98,3 +98,5 @@ For more detail, see [透明代理 Sower 技术剖析](https://wweir.cc/post/%E9
 - [x] relay optimization
 - [x] deploy script for all normal platform
 - [x] dns rule intelligent suggestions
+- [x] use socks5 as upstream proxy
+- [ ] multi port http_proxy support
