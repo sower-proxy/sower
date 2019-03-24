@@ -14,7 +14,7 @@ test:
 	go vet ./...
 	go test ./...
 build:
-	go build -v -ldflags \
+	go build -ldflags \
 		"-X main.version=$(shell git describe --tags) \
 		 -X main.date=$(shell date +%Y-%m-%d)"
 image:
