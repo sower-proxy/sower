@@ -42,7 +42,7 @@ func StartDNS(dnsServer, listenIP string, suggestCh chan<- string, suggestLevel 
 
 		domain := r.Question[0].Name
 		if idx := strings.IndexByte(domain, colon); idx > 0 {
-			domain = domain[:idx]
+			domain = domain[:idx] // trim port
 		}
 
 		matchAndServe(w, r, domain, listenIP, dnsServer, dhcpCh, ip, suggest)
@@ -93,6 +93,18 @@ func matchAndServe(w dns.ResponseWriter, r *dns.Msg, domain, listenIP, dnsServer
 		return
 	}
 
+	if !inWriteList {
+		go func() {
+			ip, err := net.LookupIP(domain)
+			if err != nil || len(ip) == 0 {
+				glog.V(1).Infoln(ip, err)
+				return
+			}
+
+			mem.Remember(suggest, addr{domain, ip[0].String()})
+		}()
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 
@@ -111,11 +123,6 @@ func matchAndServe(w dns.ResponseWriter, r *dns.Msg, domain, listenIP, dnsServer
 		return
 	}
 
-	if !inWriteList {
-		// trigger suggest logic while dns server OK
-		// avoid check while DNS setting not correct
-		go mem.Remember(suggest, domain)
-	}
 	w.WriteMsg(msg)
 }
 
@@ -125,16 +132,23 @@ type intelliSuggest struct {
 	listenIP     string
 	timeout      time.Duration
 }
+type addr struct {
+	domain string
+	ip     string
+}
 
-func (i *intelliSuggest) GetOne(domain interface{}) (iface interface{}, e error) {
+func (i *intelliSuggest) GetOne(key interface{}) (iface interface{}, e error) {
 	iface, e = struct{}{}, nil
 	if i.suggestLevel == DISABLE {
 		return
 	}
 
+	domain := key.(addr).domain
+	ip := key.(addr).ip
+
 	// kill deadloop, for ugly wildcard setting dns setting
-	addr := strings.TrimSuffix(domain.(string), ".")
-	if len(strings.Split(addr, ".")) > 10 {
+	domain = strings.TrimSuffix(domain, ".")
+	if strings.Count(domain, ".") > 10 {
 		return
 	}
 
@@ -143,9 +157,9 @@ func (i *intelliSuggest) GetOne(domain interface{}) (iface interface{}, e error)
 			viaAddr string
 			port    Port
 		}{
-			{addr, HTTP},
+			{ip, HTTP},
 			{i.listenIP, HTTP},
-			{addr, HTTPS},
+			{ip, HTTPS},
 			{i.listenIP, HTTPS},
 		}
 		protos = [...]*int32{
@@ -156,14 +170,14 @@ func (i *intelliSuggest) GetOne(domain interface{}) (iface interface{}, e error)
 	)
 	for idx := range pings {
 		go func(idx int) {
-			if err := HTTPPing(pings[idx].viaAddr, addr, pings[idx].port, i.timeout); err != nil {
+			if err := HTTPPing(pings[idx].viaAddr, domain, pings[idx].port, i.timeout); err != nil {
 				// local ping fail
-				if pings[idx].viaAddr == addr {
+				if pings[idx].viaAddr == ip {
 					atomic.AddInt32(score, 1)
-					glog.V(1).Infof("local ping %s fail", addr)
+					glog.V(1).Infof("local ping %s fail", domain)
 				} else {
 					atomic.AddInt32(score, -1)
-					glog.V(1).Infof("remote ping %s fail", addr)
+					glog.V(1).Infof("remote ping %s fail", domain)
 				}
 
 				// remote ping faster
@@ -171,7 +185,7 @@ func (i *intelliSuggest) GetOne(domain interface{}) (iface interface{}, e error)
 				if atomic.CompareAndSwapInt32(protos[idx/2], 0, 1) && i.suggestLevel == SPEEDUP {
 					atomic.AddInt32(score, 1)
 				}
-				glog.V(1).Infof("remote ping %s faster", addr)
+				glog.V(1).Infof("remote ping %s faster", domain)
 
 			} else {
 				atomic.CompareAndSwapInt32(protos[idx/2], 0, 2)
@@ -191,8 +205,8 @@ func (i *intelliSuggest) GetOne(domain interface{}) (iface interface{}, e error)
 			// 2. all remote pings are faster
 			if atomic.LoadInt32(score) >= int32(len(protos)) {
 				old := atomic.SwapInt32(score, -1) // avoid readd the suggestion
-				i.suggestCh <- addr
-				glog.Infof("suggested domain: %s with score: %d", addr, old)
+				i.suggestCh <- domain
+				glog.Infof("suggested domain: %s with score: %d", domain, old)
 			}
 		}(idx)
 	}
