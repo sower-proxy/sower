@@ -18,7 +18,7 @@ succ_message(){
 VERSION="$(curl -s "https://api.github.com/repos/wweir/sower/releases/latest" | awk -F '"'  '/tag_name/{printf $4}')"
 case "$(uname -s)" in
 	"Darwin")
-		curl -SLf https://github.com/wweir/sower/releases/download/$VERSION/sower_darwin_amd64.tar.gz | tar xzv
+		curl -SLf https://github.com/wweir/sower/releases/download/$VERSION/sower-darwin-amd64.tar.gz | tar xzv
 		sudo mkdir -p /usr/local/bin/
 		sudo mv sower /usr/local/bin/
 
@@ -67,7 +67,7 @@ case "$(uname -s)" in
 
 		case "$SIDE" in
 			"c")
-				curl -SLf https://github.com/wweir/sower/releases/download/$VERSION/sower_linux_amd64.tar.gz | tar xzv
+				curl -SLf https://github.com/wweir/sower/releases/download/$VERSION/sower-linux-amd64.tar.gz | tar xzv
 
 				sudo mv sower /usr/local/bin/
 
@@ -101,7 +101,7 @@ case "$(uname -s)" in
 				;;
 
 			"s")
-				curl -SLf https://github.com/wweir/sower/releases/download/$VERSION/sower_linux_amd64.tar.gz | tar xzv
+				curl -SLf https://github.com/wweir/sower/releases/download/$VERSION/sower-linux-amd64.tar.gz | tar xzv
 				printf "Please enter remote server password (default: 12345678): "
 				read PASSWORD
 				echo
