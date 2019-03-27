@@ -3,11 +3,15 @@
 package conf
 
 import (
+	"context"
 	"flag"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/pkg/errors"
 	"github.com/wweir/sower/dns"
 	"github.com/wweir/sower/proxy/shadow"
 	"github.com/wweir/sower/proxy/transport"
@@ -30,4 +34,12 @@ func initArgs() {
 		flag.Set("logtostderr", "true")
 		flag.Parse()
 	}
+}
+
+func execute(cmd string) error {
+	ctx, cancel := context.WithTimeout(context.TODO(), 5*time.Second)
+	defer cancel()
+
+	out, err := exec.CommandContext(ctx, "sh", "-c", Conf.ClearDNSCache).CombinedOutput()
+	return errors.Wrapf(err, "cmd: %s, output: %s, error", Conf.ClearDNSCache, out)
 }

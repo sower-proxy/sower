@@ -3,14 +3,18 @@
 package conf
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/golang/glog"
+	"github.com/pkg/errors"
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/eventlog"
@@ -145,4 +149,29 @@ func (m *myservice) Execute(args []string, r <-chan svc.ChangeRequest, changes c
 			elog.Error(1, fmt.Sprintf("unexpected control request #%d", c))
 		}
 	}
+}
+
+func execute(cmd string) error {
+	ctx, cancel := context.WithTimeout(context.TODO(), 5*time.Second)
+	defer cancel()
+
+	var cmds []string
+	for _, cmd := range strings.Split(Conf.ClearDNSCache, " ") {
+		if cmd == "" {
+			continue
+		}
+		if strings.HasPrefix(cmd, "/") {
+			cmd = strings.Replace(cmd, "/", "-", 1)
+		}
+		cmds = append(cmds, cmd)
+	}
+
+	if len(cmds) != 0 {
+		return nil
+	}
+
+	command := exec.CommandContext(ctx, cmds[0], cmds[1:]...)
+	command.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	out, err := command.CombinedOutput()
+	return errors.Wrapf(err, "cmd: %s, output: %s, error", Conf.ClearDNSCache, out)
 }

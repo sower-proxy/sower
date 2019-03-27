@@ -4,9 +4,9 @@ password="12345678"
 server_port="5533"
 # server_addr="remote-server:5533" # replce it to remote server
 http_proxy=":8080"               # eg: 192.168.0.2:8080
-dns_server="114.114.114.114"     # Keep empty for dynamic setting from net env
+dns_server=""     # Keep empty for dynamic setting from net env
 client_ip="127.0.0.1"            # listen the IP, dns target is the IP
-# clear_dns_cache="pkill mDNSResponder"   # Windows: "ipconfig /flushdnss"
+# clear_dns_cache="pkill mDNSResponder || true"   # Windows: "ipconfig /flushdnss"
 suggest_level="SPEEDUP"          # DISABLE, BLOCK, SPEEDUP
 blocklist=[
     "**.google.*", # google

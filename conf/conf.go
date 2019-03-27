@@ -1,15 +1,9 @@
 package conf
 
 import (
-	"context"
 	"flag"
 	"os"
-	"os/exec"
-	"runtime"
 	"strconv"
-	"time"
-
-	"github.com/pkg/errors"
 
 	"github.com/golang/glog"
 	toml "github.com/pelletier/go-toml"
@@ -41,6 +35,9 @@ var Conf = struct {
 
 func init() {
 	initArgs()
+	if Conf.VersionOnly {
+		return
+	}
 
 	if _, err := os.Stat(Conf.ConfigFile); os.IsNotExist(err) {
 		glog.Warningln("no config file has been load:", Conf.ConfigFile)
@@ -77,19 +74,7 @@ var refreshFns = []func() (string, error){
 	func() (string, error) {
 		action := "clear dns cache"
 		if Conf.ClearDNSCache != "" {
-			ctx, cancel := context.WithTimeout(context.TODO(), 5*time.Second)
-			defer cancel()
-
-			switch runtime.GOOS {
-			case "windows":
-				if out, err := exec.CommandContext(ctx, "cmd", "/c", Conf.ClearDNSCache).CombinedOutput(); err != nil {
-					return action, errors.Wrapf(err, "cmd: %s, output: %s, error", Conf.ClearDNSCache, out)
-				}
-			default:
-				if out, err := exec.CommandContext(ctx, "sh", "-c", Conf.ClearDNSCache).CombinedOutput(); err != nil {
-					return action, errors.Wrapf(err, "cmd: %s, output: %s, error", Conf.ClearDNSCache, out)
-				}
-			}
+			return action, execute(Conf.ClearDNSCache)
 		}
 		return action, nil
 	},

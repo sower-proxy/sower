@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
 
@@ -16,7 +17,8 @@ var version, date string
 func main() {
 	cfg := &conf.Conf
 	if cfg.VersionOnly {
-		fmt.Printf("Version: %s %s  config: %v", version, date, cfg)
+		config, _ := json.MarshalIndent(cfg, "", "\t")
+		fmt.Printf("Version:\n\t%s %s\nConfig:\n%s", version, date, config)
 		return
 	}
 	glog.Infof("Starting sower(%s %s): %v", version, date, cfg)
