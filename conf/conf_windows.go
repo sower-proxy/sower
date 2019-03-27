@@ -21,12 +21,14 @@ const name = "sower"
 const cmdsAccepted = svc.AcceptStop | svc.AcceptShutdown | svc.AcceptPauseAndContinue
 
 func initArgs() {
-	flag.StringVar(&Conf.ConfigFile, "f", filepath.Dir(os.Args[0])+"/sower.toml", "config file location")
+	flag.StringVar(&Conf.ConfigFile, "f", filepath.Dir(os.Args[0])+"\\sower.toml", "config file location")
+	flag.BoolVar(&Conf.VersionOnly, "V", false, "print sower version")
 	install := flag.Bool("install", false, "install sower as a service")
 	uninstall := flag.Bool("uninstall", false, "uninstall sower from service list")
 
 	if !flag.Parsed() {
-		flag.Set("log_dir", filepath.Dir(os.Args[0]))
+		os.Mkdir("log", 0755)
+		flag.Set("log_dir", filepath.Dir(os.Args[0])+"/log")
 		flag.Parse()
 	}
 

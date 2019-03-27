@@ -24,6 +24,7 @@ func initArgs() {
 	flag.StringVar(&Conf.DNSServer, "d", "114.114.114.114", "client dns server")
 	flag.StringVar(&Conf.ClientIP, "c", "127.0.0.1", "client dns service redirect IP")
 	flag.StringVar(&Conf.SuggestLevel, "S", "SPEEDUP", "suggest level setting: "+strings.Join(dns.ListSuggestLevels(), ","))
+	flag.BoolVar(&Conf.VersionOnly, "V", false, "print sower version")
 
 	if !flag.Parsed() {
 		flag.Set("logtostderr", "true")

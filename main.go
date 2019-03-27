@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"net"
 
 	"github.com/golang/glog"
@@ -14,6 +15,10 @@ var version, date string
 
 func main() {
 	cfg := &conf.Conf
+	if cfg.VersionOnly {
+		fmt.Printf("Version: %s %s  config: %v", version, date, cfg)
+		return
+	}
 	glog.Infof("Starting sower(%s %s): %v", version, date, cfg)
 
 	tran, err := transport.GetTransport(cfg.NetType)

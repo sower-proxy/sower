@@ -36,6 +36,7 @@ var Conf = struct {
 	WhiteList   []string `toml:"whitelist"`
 	Suggestions []string `toml:"suggestions"`
 	Verbose     int      `toml:"verbose"`
+	VersionOnly bool     `toml:"-"`
 }{}
 
 func init() {
