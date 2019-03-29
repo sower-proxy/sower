@@ -29,9 +29,7 @@ func ParseAddr(conn net.Conn) (teeConn *util.TeeConn, addr string, err error) {
 		if err != nil {
 			return teeConn, "", err
 		}
-		if strings.Contains(host, ":") {
-			return teeConn, host, nil
-		}
+
 		return teeConn, host + ":443", nil
 	}
 

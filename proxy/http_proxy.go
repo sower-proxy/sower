@@ -34,7 +34,7 @@ func StartHttpProxy(tran transport.Transport, isSocks5 bool, server, cipher, pas
 	glog.Fatalln(srv.ListenAndServe())
 }
 
-func httpProxy(w http.ResponseWriter, req *http.Request,
+func httpProxy(w http.ResponseWriter, r *http.Request,
 	tran transport.Transport, isSocks5 bool, server, cipher, password string) {
 
 	roundTripper := &http.Transport{
@@ -55,11 +55,12 @@ func httpProxy(w http.ResponseWriter, req *http.Request,
 			if err != nil {
 				return nil, err
 			}
+
 			return shadow.Shadow(conn, cipher, password), nil
 		}
 	}
 
-	resp, err := roundTripper.RoundTrip(req)
+	resp, err := roundTripper.RoundTrip(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		glog.Errorln("serve https proxy, get remote data:", err)
@@ -96,8 +97,8 @@ func httpsProxy(w http.ResponseWriter, r *http.Request,
 	// remote conn
 	rc, err := tran.Dial(server)
 	if err != nil {
-		conn.Close()
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		conn.Close()
 		glog.Errorln("serve https proxy, dial remote fail:", err)
 		return
 	}
