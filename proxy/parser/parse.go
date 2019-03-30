@@ -27,7 +27,7 @@ type conn struct {
 	net.Conn
 }
 
-func NewAnyProtocol(c net.Conn, domain, port string) net.Conn {
+func NewOtherConn(c net.Conn, domain, port string) net.Conn {
 	return &conn{
 		typ:    OTHER,
 		domain: domain,
@@ -35,13 +35,13 @@ func NewAnyProtocol(c net.Conn, domain, port string) net.Conn {
 		Conn:   c,
 	}
 }
-func NewHttpProtocol(c net.Conn) net.Conn {
+func NewHttpConn(c net.Conn) net.Conn {
 	return &conn{
 		typ:  HTTP,
 		Conn: c,
 	}
 }
-func NewHttpsProtocol(c net.Conn, port string) net.Conn {
+func NewHttpsConn(c net.Conn, port string) net.Conn {
 	return &conn{
 		typ:  HTTPS,
 		port: port,
@@ -54,16 +54,19 @@ func (c *conn) Write(b []byte) (n int, err error) {
 		var pkg []byte
 		switch c.typ {
 		case OTHER:
+			// type + domain + ':' + port + data
 			pkg = make([]byte, 0, 1+len(c.domain)+1+len(c.port)+len(b))
 			pkg = append(pkg, OTHER)
 			pkg = append(pkg, byte(len(c.domain)+1+len(c.port)))
 			pkg = append(pkg, []byte(c.domain+":"+c.port)...)
 
 		case HTTP:
+			// type + data
 			pkg = make([]byte, 0, 1+len(b))
 			pkg = append(pkg, HTTP)
 
 		case HTTPS:
+			// type + port + data
 			pkg = make([]byte, 0, 1+2+len(b))
 			pkg = append(pkg, HTTPS)
 			port, _ := strconv.Atoi(c.port)
@@ -139,7 +142,7 @@ func ParseHttpsHost(conn net.Conn) (net.Conn, string, error) {
 	teeConn.StartOrReset()
 	defer teeConn.Stop()
 
-	domain, _, err := extractSNI(io.Reader(teeConn))
+	domain, _, err := extractSNI(teeConn)
 	if err != nil {
 		return teeConn, "", err
 	} else if domain == "" {
