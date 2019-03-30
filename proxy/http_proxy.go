@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"github.com/golang/glog"
+	"github.com/wweir/sower/proxy/parser"
 	"github.com/wweir/sower/proxy/shadow"
+	"github.com/wweir/sower/proxy/socks5"
 	"github.com/wweir/sower/proxy/transport"
 )
 
@@ -56,6 +58,7 @@ func httpProxy(w http.ResponseWriter, r *http.Request,
 				return nil, err
 			}
 
+			conn = parser.NewHttpProtocol(conn)
 			return shadow.Shadow(conn, cipher, password), nil
 		}
 	}
@@ -103,12 +106,19 @@ func httpsProxy(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
+	host, port, err := net.SplitHostPort(r.Host)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		conn.Close()
+		glog.Errorln("serve https proxy, dial remote fail:", err)
+		return
+	}
+
 	if isSocks5 {
-		if rc, conn, err = buildSocks5Conn(rc, conn); err != nil {
-			glog.Errorln(err)
-			return
-		}
+		rc = socks5.ToSocks5(rc, host, port)
+
 	} else {
+		rc = parser.NewHttpsProtocol(rc, port)
 		rc = shadow.Shadow(rc, cipher, password)
 	}
 

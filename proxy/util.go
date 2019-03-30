@@ -8,8 +8,6 @@ import (
 	"time"
 
 	"github.com/golang/glog"
-	"github.com/wweir/sower/proxy/parser"
-	"github.com/wweir/sower/proxy/socks5"
 )
 
 // race safe
@@ -24,24 +22,6 @@ func resolveAddr(server *string) {
 			resolved = true
 		}
 	}
-}
-
-func buildSocks5Conn(c, relay net.Conn) (net.Conn, net.Conn, error) {
-	conn, addr, err := parser.ParseAddr(relay)
-	if err != nil {
-		c.Close()
-		relay.Close()
-		return nil, nil, err
-	}
-
-	host, port, err := net.SplitHostPort(addr)
-	if err != nil {
-		c.Close()
-		relay.Close()
-		return nil, nil, err
-	}
-
-	return socks5.ToSocks5(c, host, port), conn, nil
 }
 
 func relay(conn1, conn2 net.Conn) {
