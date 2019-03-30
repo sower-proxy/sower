@@ -92,6 +92,7 @@ func httpsProxy(w http.ResponseWriter, r *http.Request,
 	conn.(*net.TCPConn).SetKeepAlive(true)
 
 	if _, err := conn.Write([]byte(r.Proto + " 200 Connection established\r\n\r\n")); err != nil {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		conn.Close()
 		glog.Errorln("serve https proxy, write data fail:", err)
 		return
@@ -118,8 +119,8 @@ func httpsProxy(w http.ResponseWriter, r *http.Request,
 		rc = socks5.ToSocks5(rc, host, port)
 
 	} else {
-		rc = parser.NewHttpsProtocol(rc, port)
 		rc = shadow.Shadow(rc, cipher, password)
+		rc = parser.NewHttpsProtocol(rc, port)
 	}
 
 	relay(rc, conn)

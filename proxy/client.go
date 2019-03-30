@@ -35,30 +35,38 @@ func StartClient(tran transport.Transport, isSocks5 bool, server, cipher, passwo
 			continue
 		}
 
-		if !isSocks5 {
-			rc = shadow.Shadow(rc, cipher, password)
-
-		} else if isHttp {
-			conn, host, port, err := parser.ParseHttpAddr(conn)
+		switch {
+		case isSocks5 && isHttp:
+			c, host, port, err := parser.ParseHttpAddr(conn)
 			if err != nil {
-				conn.Close()
+				c.Close()
 				rc.Close()
 				glog.Errorln(err)
 				continue
 			}
 
+			conn = c
 			rc = socks5.ToSocks5(rc, host, port)
 
-		} else {
-			conn, host, err := parser.ParseHttpsHost(conn)
+		case isSocks5 && !isHttp:
+			c, host, err := parser.ParseHttpsHost(conn)
 			if err != nil {
-				conn.Close()
+				c.Close()
 				rc.Close()
 				glog.Errorln(err)
 				continue
 			}
 
+			conn = c
 			rc = socks5.ToSocks5(rc, host, "443")
+
+		case !isSocks5 && isHttp:
+			rc = shadow.Shadow(rc, cipher, password)
+			rc = parser.NewHttpProtocol(rc)
+
+		case !isSocks5 && !isHttp:
+			rc = shadow.Shadow(rc, cipher, password)
+			rc = parser.NewHttpsProtocol(rc, "443")
 		}
 
 		go relay(conn, rc)

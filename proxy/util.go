@@ -18,6 +18,7 @@ func resolveAddr(server *string) {
 		if addr, err := net.ResolveTCPAddr("tcp", *server); err != nil {
 			glog.Errorln(err)
 		} else {
+			glog.Infof("remote server (%s)=>(%s)", *server, addr)
 			*server = addr.String()
 			resolved = true
 		}

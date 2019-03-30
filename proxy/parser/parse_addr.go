@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	ANY byte = iota
+	OTHER byte = iota
 	HTTP
 	HTTPS
 )
@@ -29,7 +29,7 @@ type conn struct {
 
 func NewAnyProtocol(c net.Conn, domain, port string) net.Conn {
 	return &conn{
-		typ:    ANY,
+		typ:    OTHER,
 		domain: domain,
 		port:   port,
 		Conn:   c,
@@ -53,9 +53,9 @@ func (c *conn) Write(b []byte) (n int, err error) {
 	if !c.init {
 		var pkg []byte
 		switch c.typ {
-		case ANY:
+		case OTHER:
 			pkg = make([]byte, 0, 1+len(c.domain)+1+len(c.port)+len(b))
-			pkg = append(pkg, ANY)
+			pkg = append(pkg, OTHER)
 			pkg = append(pkg, byte(len(c.domain)+1+len(c.port)))
 			pkg = append(pkg, []byte(c.domain+":"+c.port)...)
 
@@ -85,7 +85,7 @@ func ParseAddr(conn net.Conn) (net.Conn, string, string, error) {
 	}
 
 	switch buf[0] {
-	case ANY:
+	case OTHER:
 		if _, err := io.ReadFull(conn, buf); err != nil {
 			return conn, "", "", err
 		}
@@ -142,6 +142,8 @@ func ParseHttpsHost(conn net.Conn) (net.Conn, string, error) {
 	domain, _, err := extractSNI(io.Reader(teeConn))
 	if err != nil {
 		return teeConn, "", err
+	} else if domain == "" {
+		return teeConn, "", errors.New("ClientHello did not present an SNI extension")
 	}
 
 	return teeConn, domain, nil
