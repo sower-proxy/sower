@@ -58,8 +58,8 @@ func httpProxy(w http.ResponseWriter, r *http.Request,
 				return nil, err
 			}
 
-			conn = parser.NewHttpProtocol(conn)
-			return shadow.Shadow(conn, cipher, password), nil
+			conn = shadow.Shadow(conn, cipher, password)
+			return parser.NewHttpConn(conn), nil
 		}
 	}
 
@@ -120,7 +120,7 @@ func httpsProxy(w http.ResponseWriter, r *http.Request,
 
 	} else {
 		rc = shadow.Shadow(rc, cipher, password)
-		rc = parser.NewHttpsProtocol(rc, port)
+		rc = parser.NewHttpsConn(rc, port)
 	}
 
 	relay(rc, conn)

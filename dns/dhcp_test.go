@@ -1,9 +1,18 @@
 package dns
 
-import "testing"
+import (
+	"runtime"
+	"testing"
+)
 
 func TestGetDefaultDNSServer(t *testing.T) {
-	t.Skip("skip for some enviroment not support dhcp and permission")
+	switch runtime.GOOS {
+	case "windows":
+	case "darwin":
+	default:
+		t.Skip("skip for some enviroment not support dhcp and permission set")
+		return
+	}
 
 	if got, err := GetDefaultDNSServer(); err != nil {
 		t.Errorf("GetDefaultDNSServer() return error: %s", err)

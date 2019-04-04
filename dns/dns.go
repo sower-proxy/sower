@@ -10,14 +10,15 @@ import (
 	"github.com/golang/glog"
 	"github.com/miekg/dns"
 	mem "github.com/wweir/mem-go"
+	"github.com/wweir/sower/util"
 )
 
 const colon = byte(':')
 
-func StartDNS(dnsServer, listenIP string, suggestCh chan<- string, suggestLevel string) {
+func StartDNS(dnsServer, listenIP string, suggestCh chan<- string, level string) {
 	ip := net.ParseIP(listenIP)
 
-	suggest := &intelliSuggest{suggestCh, parseSuggestLevel(suggestLevel), listenIP, time.Second}
+	suggest := &intelliSuggest{suggestCh, parseSuggestLevel(level), listenIP, time.Second}
 	mem.DefaultCache = mem.New(time.Hour)
 
 	dhcpCh := make(chan struct{})
@@ -93,18 +94,7 @@ func matchAndServe(w dns.ResponseWriter, r *dns.Msg, domain, listenIP, dnsServer
 		return
 	}
 
-	if !inWriteList {
-		go func() {
-			ip, err := net.LookupIP(domain)
-			if err != nil || len(ip) == 0 {
-				glog.V(1).Infoln(ip, err)
-				return
-			}
-
-			mem.Remember(suggest, addr{domain, ip[0].String()})
-		}()
-	}
-
+	go mem.Remember(suggest, domain)
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 
@@ -127,40 +117,39 @@ func matchAndServe(w dns.ResponseWriter, r *dns.Msg, domain, listenIP, dnsServer
 }
 
 type intelliSuggest struct {
-	suggestCh    chan<- string
-	suggestLevel suggestLevel
-	listenIP     string
-	timeout      time.Duration
-}
-type addr struct {
-	domain string
-	ip     string
+	suggestCh chan<- string
+	level     level
+	listenIP  string
+	timeout   time.Duration
 }
 
 func (i *intelliSuggest) GetOne(key interface{}) (iface interface{}, e error) {
 	iface, e = struct{}{}, nil
-	if i.suggestLevel == DISABLE {
+	if i.level == DISABLE {
 		return
 	}
 
-	domain := key.(addr).domain
-	ip := key.(addr).ip
-
 	// kill deadloop, for ugly wildcard setting dns setting
-	domain = strings.TrimSuffix(domain, ".")
+	domain := strings.TrimSuffix(key.(string), ".")
 	if strings.Count(domain, ".") > 10 {
+		return
+	}
+
+	ip, err := net.LookupIP(domain)
+	if err != nil || len(ip) == 0 {
+		glog.V(1).Infoln(domain, ip, err)
 		return
 	}
 
 	var (
 		pings = [...]struct {
 			viaAddr string
-			port    Port
+			port    util.Port
 		}{
-			{ip, HTTP},
-			{i.listenIP, HTTP},
-			{ip, HTTPS},
-			{i.listenIP, HTTPS},
+			{ip[0].String(), util.HTTP},
+			{i.listenIP, util.HTTP},
+			{ip[0].String(), util.HTTPS},
+			{i.listenIP, util.HTTPS},
 		}
 		protos = [...]*int32{
 			new(int32), /*HTTP*/
@@ -170,19 +159,19 @@ func (i *intelliSuggest) GetOne(key interface{}) (iface interface{}, e error) {
 	)
 	for idx := range pings {
 		go func(idx int) {
-			if err := HTTPPing(pings[idx].viaAddr, domain, pings[idx].port, i.timeout); err != nil {
+			if err := util.HTTPPing(pings[idx].viaAddr, domain, pings[idx].port, i.timeout); err != nil {
 				// local ping fail
-				if pings[idx].viaAddr == ip {
-					atomic.AddInt32(score, 1)
-					glog.V(1).Infof("local ping %s fail", domain)
-				} else {
+				if pings[idx].viaAddr == i.listenIP {
 					atomic.AddInt32(score, -1)
 					glog.V(1).Infof("remote ping %s fail", domain)
+				} else {
+					atomic.AddInt32(score, 1)
+					glog.V(1).Infof("local ping %s fail", domain)
 				}
 
 				// remote ping faster
 			} else if pings[idx].viaAddr == i.listenIP {
-				if atomic.CompareAndSwapInt32(protos[idx/2], 0, 1) && i.suggestLevel == SPEEDUP {
+				if atomic.CompareAndSwapInt32(protos[idx/2], 0, 1) && i.level == SPEEDUP {
 					atomic.AddInt32(score, 1)
 				}
 				glog.V(1).Infof("remote ping %s faster", domain)
