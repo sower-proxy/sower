@@ -32,12 +32,14 @@ func NewOtherConn(c net.Conn, domain, port string) net.Conn {
 		typ:    OTHER,
 		domain: domain,
 		port:   port,
+		init:   true,
 		Conn:   c,
 	}
 }
 func NewHttpConn(c net.Conn) net.Conn {
 	return &conn{
 		typ:  HTTP,
+		init: true,
 		Conn: c,
 	}
 }
@@ -45,36 +47,43 @@ func NewHttpsConn(c net.Conn, port string) net.Conn {
 	return &conn{
 		typ:  HTTPS,
 		port: port,
+		init: true,
 		Conn: c,
 	}
 }
 
 func (c *conn) Write(b []byte) (n int, err error) {
-	if !c.init {
+	if c.init {
 		var pkg []byte
+		var prefixLen int
 		switch c.typ {
 		case OTHER:
 			// type + domain + ':' + port + data
-			pkg = make([]byte, 0, 1+len(c.domain)+1+len(c.port)+len(b))
+			prefixLen = 1 + len(c.domain) + 1 + len(c.port)
+			pkg = make([]byte, 0, prefixLen+len(b))
 			pkg = append(pkg, OTHER)
 			pkg = append(pkg, byte(len(c.domain)+1+len(c.port)))
 			pkg = append(pkg, []byte(c.domain+":"+c.port)...)
 
 		case HTTP:
 			// type + data
-			pkg = make([]byte, 0, 1+len(b))
+			prefixLen = 1
+			pkg = make([]byte, 0, prefixLen+len(b))
 			pkg = append(pkg, HTTP)
 
 		case HTTPS:
 			// type + port + data
-			pkg = make([]byte, 0, 1+2+len(b))
+			prefixLen = 1 + 2
+			pkg = make([]byte, 0, prefixLen+len(b))
 			pkg = append(pkg, HTTPS)
 			port, _ := strconv.Atoi(c.port)
 			pkg = append(pkg, byte(port>>8), byte(port))
 		}
 
-		c.init = true
-		return c.Conn.Write(append(pkg, b...))
+		c.init = false
+		n, err := c.Conn.Write(append(pkg, b...))
+		// n should larger than prefix length, if not, err is not nil
+		return n - prefixLen, err
 	}
 
 	return c.Conn.Write(b)
@@ -111,9 +120,10 @@ func ParseAddr(conn net.Conn) (net.Conn, string, string, error) {
 		if _, err := io.ReadFull(conn, buf); err != nil {
 			return conn, "", "", err
 		}
+		port := strconv.Itoa(int(buf[0])<<8 + int(buf[1]))
 
 		conn, domain, err := ParseHttpsHost(conn)
-		return conn, domain, strconv.Itoa(int(buf[0])<<8 + int(buf[1])), err
+		return conn, domain, port, err
 
 	default:
 		return conn, "", "", errors.Errorf("not supported type (%v)", buf[0])

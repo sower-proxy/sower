@@ -24,7 +24,7 @@ kill:
 	sudo pkill -9 sower || true
 
 client: build kill
-	sudo $(PWD)/sower -f '' -s 127.0.0.1:5533 -H "127.0.0.1:8080"
+	sudo $(PWD)/sower -s 127.0.0.1:5533 -H "127.0.0.1:8080"
 
 server: build
 	$(PWD)/sower -f ''
