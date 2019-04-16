@@ -8,11 +8,11 @@ import (
 	"golang.org/x/crypto/chacha20poly1305"
 )
 
-//go:generate stringer -type=cipherType $GOFILE
-type cipherType int
+//go:generate stringer -type=typ $GOFILE
+type typ int
 
 const (
-	AES_128_GCM cipherType = iota
+	AES_128_GCM typ = iota
 	AES_192_GCM
 	AES_256_GCM
 	CHACHA20_IETF_POLY1305
@@ -22,15 +22,15 @@ const (
 
 func ListCiphers() []string {
 	list := make([]string, 0, int(cipherEnd))
-	for i := cipherType(0); i < cipherEnd; i++ {
+	for i := typ(0); i < cipherEnd; i++ {
 		list = append(list, i.String())
 	}
 	return list
 }
 
-func pickCipher(cipherType, password string) (cipher.AEAD, error) {
+func pickCipher(typ, password string) (cipher.AEAD, error) {
 	var blockSize int
-	switch cipherType {
+	switch typ {
 	case AES_128_GCM.String():
 		blockSize = 16
 	case AES_192_GCM.String():
@@ -44,7 +44,7 @@ func pickCipher(cipherType, password string) (cipher.AEAD, error) {
 		return chacha20poly1305.NewX(genKey(password, 256))
 
 	default:
-		return nil, errors.New("do not support cipher type: " + cipherType)
+		return nil, errors.New("do not support cipher type: " + typ)
 	}
 
 	// aes gcm

@@ -71,7 +71,7 @@ func (c *conn) Write(b []byte) (n int, err error) {
 	}
 
 	// BigEndian
-	c.writeBuf[0], c.writeBuf[1] = byte((dataSize&0xFF00)>>8), byte(dataSize&0xFF)
+	c.writeBuf[0], c.writeBuf[1] = byte(dataSize>>8), byte(dataSize)
 
 	c.aead.Seal(c.writeBuf[:0], c.encryptNonce(), c.writeBuf[:2], nil)
 	c.aead.Seal(c.writeBuf[:2+c.aead.Overhead()], c.encryptNonce(), b[:dataSize], nil)

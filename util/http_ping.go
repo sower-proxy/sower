@@ -1,4 +1,4 @@
-package dns
+package util
 
 import (
 	"bytes"
@@ -18,7 +18,7 @@ func HTTPPing(viaHost, domain string, port Port, timeout time.Duration) (err err
 	defer conn.Close()
 
 	conn.SetDeadline(time.Now().Add(timeout))
-	if _, err = conn.Write(port.pingMsg(domain)); err != nil {
+	if _, err = conn.Write(port.PingMsg(domain)); err != nil {
 		return err
 	}
 
@@ -51,7 +51,7 @@ func (p Port) JoinAddr(addr string) string {
 	}
 }
 
-func (p Port) pingMsg(domain string) []byte {
+func (p Port) PingMsg(domain string) []byte {
 	switch p {
 	case HTTP:
 		return []byte("TRACE / HTTP/1.1\r\nHost: " + domain + "\r\n\r\n")

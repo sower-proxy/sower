@@ -14,7 +14,7 @@ func StartServer(tran transport.Transport, port, cipher, password string) {
 	if port == "" {
 		glog.Fatalln("port must set")
 	}
-	if !strings.Contains(port, ":") {
+	if !strings.HasPrefix(port, ":") {
 		port = ":" + port
 	}
 
@@ -25,23 +25,21 @@ func StartServer(tran transport.Transport, port, cipher, password string) {
 
 	glog.Infoln("Server started.")
 	for {
-		conn := <-connCh
-		conn = shadow.Shadow(conn, cipher, password)
-
-		go handle(conn)
+		go handle(<-connCh, cipher, password)
 	}
 }
 
-func handle(conn net.Conn) {
-	conn, addr, err := parser.ParseAddr(conn)
+func handle(conn net.Conn, cipher, password string) {
+	conn = shadow.Shadow(conn, cipher, password)
+	conn, host, port, err := parser.ParseAddr(conn)
 	if err != nil {
 		conn.Close()
 		glog.Warningln(err)
 		return
 	}
-	glog.V(1).Infof("new conn from %s to %s", conn.RemoteAddr(), addr)
+	glog.V(1).Infof("new conn from %s to %s:%s", conn.RemoteAddr(), host, port)
 
-	rc, err := net.Dial("tcp", addr)
+	rc, err := net.Dial("tcp", net.JoinHostPort(host, port))
 	if err != nil {
 		conn.Close()
 		glog.Warningln(err)

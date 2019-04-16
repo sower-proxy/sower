@@ -1,11 +1,18 @@
 package util
 
 import (
+	"runtime"
 	"testing"
 )
 
 func TestPickInterface(t *testing.T) {
-	t.Skip("skip for some enviroment not have net interface")
+	switch runtime.GOOS {
+	case "windows":
+	case "darwin":
+	default:
+		t.Skip("skip for some enviroment not have net interface")
+		return
+	}
 
 	got, err := PickInterface()
 	if err != nil {

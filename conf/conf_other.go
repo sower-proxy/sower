@@ -23,11 +23,11 @@ func initArgs() {
 	flag.StringVar(&Conf.Cipher, "C", "AES_128_GCM", "cipher type: "+strings.Join(shadow.ListCiphers(), ","))
 	flag.StringVar(&Conf.Password, "p", "12345678", "password")
 	flag.StringVar(&Conf.ServerPort, "P", "5533", "server mode listen port")
-	flag.StringVar(&Conf.ServerAddr, "s", "", "server IP (run in CLIENT MODE if set)")
+	flag.StringVar(&Conf.ServerAddr, "s", "", "server IP (run in CLIENT mode if set)")
 	flag.StringVar(&Conf.HTTPProxy, "H", "", "http proxy listen addr")
 	flag.StringVar(&Conf.DNSServer, "d", "114.114.114.114", "client dns server")
 	flag.StringVar(&Conf.ClientIP, "c", "127.0.0.1", "client dns service redirect IP")
-	flag.StringVar(&Conf.SuggestLevel, "S", "SPEEDUP", "suggest level setting: "+strings.Join(dns.ListSuggestLevels(), ","))
+	flag.StringVar(&Conf.SuggestLevel, "l", "SPEEDUP", "suggest level setting: "+strings.Join(dns.ListSuggestLevels(), ","))
 	flag.BoolVar(&Conf.VersionOnly, "V", false, "print sower version")
 
 	if !flag.Parsed() {

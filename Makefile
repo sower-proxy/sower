@@ -24,15 +24,20 @@ kill:
 	sudo pkill -9 sower || true
 
 client: build kill
-	sudo $(PWD)/sower
+	sudo $(PWD)/sower -s 127.0.0.1:5533 -H "127.0.0.1:8080"
 
-server: build kill
-	$(PWD)/sower -n TCP -v 1
+server: build
+	$(PWD)/sower -f ''
 
 run: build kill
-	$(PWD)/sower -n TCP -v 1  &
-	sudo $(PWD)/sower &
+	$(PWD)/sower -f '' &
+	sudo $(PWD)/sower -f '' -s 127.0.0.1:5533 -H "127.0.0.1:8080" &
+
 	@sleep 1
-	curl localhost
+	HTTP_PROXY=http://127.0.0.1:8080 curl http://baidu.com || true
+	@echo
+	HTTPS_PROXY=http://127.0.0.1:8080 curl https://baidu.com || true
+	@echo
+
 	@sleep 1
 	@sudo pkill -9 sower || true

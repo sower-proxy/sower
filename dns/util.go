@@ -46,11 +46,11 @@ func localA(r *dns.Msg, domain string, localIP net.IP) *dns.Msg {
 	return m
 }
 
-//go:generate stringer -type=suggestLevel $GOFILE
-type suggestLevel int32
+//go:generate stringer -type=level $GOFILE
+type level int32
 
 const (
-	DISABLE suggestLevel = iota
+	DISABLE level = iota
 	BLOCK
 	SPEEDUP
 	levelEnd
@@ -58,19 +58,19 @@ const (
 
 func ListSuggestLevels() []string {
 	list := make([]string, 0, int(levelEnd))
-	for i := suggestLevel(0); i < levelEnd; i++ {
+	for i := level(0); i < levelEnd; i++ {
 		list = append(list, i.String())
 	}
 	return list
 }
 
-func parseSuggestLevel(level string) suggestLevel {
-	for i := suggestLevel(0); i < levelEnd; i++ {
-		if level == i.String() {
+func parseSuggestLevel(suggestLevel string) level {
+	for i := level(0); i < levelEnd; i++ {
+		if suggestLevel == i.String() {
 			return i
 		}
 	}
 
-	glog.Exitln("invalid suggest level: " + level)
+	glog.Exitln("invalid suggest level: " + suggestLevel)
 	return levelEnd
 }

@@ -4,19 +4,15 @@ import (
 	"encoding/binary"
 	"io"
 	"net"
+	"strconv"
 
 	"github.com/pkg/errors"
 )
 
 func ToSocks5(c net.Conn, domain, port string) net.Conn {
-	switch port {
-	case "80":
-		return &conn{init: make(chan struct{}), Conn: c, domain: domain, port: []byte{0x00, 0x50}}
-	case "443":
-		return &conn{init: make(chan struct{}), Conn: c, domain: domain, port: []byte{0x01, 0xbb}}
-	default:
-		panic("invalid port: " + port)
-	}
+	num, _ := strconv.Atoi(port)
+	bytes := []byte{byte(num >> 8), byte(num)}
+	return &conn{init: make(chan struct{}), Conn: c, domain: domain, port: bytes}
 }
 
 type conn struct {
