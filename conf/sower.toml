@@ -2,12 +2,12 @@ net_type="TCP"       # TCP, KCP, QUIC, SOCKS5(client only)
 cipher="AES_128_GCM" # AES_128_GCM, AES_192_GCM, AES_256_GCM, CHACHA20_IETF_POLY1305, XCHACHA20_IETF_POLY1305
 password="12345678"
 server_port="5533"
-# server_addr="remote-server:5533" # replce it to remote server
-http_proxy=":8080"               # eg: 192.168.0.2:8080
-dns_server=""     # Keep empty for dynamic setting from net env
-client_ip="127.0.0.1"            # listen the IP, dns target is the IP
+# server_addr="remote-server"   # replce it to remote server
+http_proxy=":8080"              # eg: 192.168.0.2:8080
+dns_server=""                   # Keep empty for dynamic setting from net env
+client_ip="127.0.0.1"           # listen the IP, dns target is the IP
 # clear_dns_cache="pkill mDNSResponder || true"   # Windows: "ipconfig /flushdnss"
-suggest_level="SPEEDUP"          # DISABLE, BLOCK, SPEEDUP
+suggest_level="SPEEDUP"         # DISABLE, BLOCK, SPEEDUP
 blocklist=[
     "**.google.*", # google
     "**.goo.gl",
@@ -33,8 +33,8 @@ blocklist=[
 ]
 whitelist=[
     "**.in-addr.arpa",
-    "iamp.*.*",
-    "iamp.*.*.*",
+    "imap.*.*",
+    "imap.*.*.*",
     "smtp.*.*",
     "smtp.*.*.*",
     "pop.*.*",

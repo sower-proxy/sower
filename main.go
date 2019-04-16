@@ -33,18 +33,18 @@ func main() {
 
 	} else {
 		conf.AddRefreshFn(true, func() (string, error) {
-			host, _, _ := net.SplitHostPort(cfg.ServerAddr)
-			dns.LoadRules(cfg.BlockList, cfg.Suggestions, cfg.WhiteList, host)
+			dns.LoadRules(cfg.BlockList, cfg.Suggestions, cfg.WhiteList, cfg.ServerAddr)
 			return "load rules", nil
 		})
 
 		isSocks5 := (cfg.NetType == "SOCKS5")
+		serverAddr := net.JoinHostPort(cfg.ServerAddr, cfg.ServerPort)
 
 		if cfg.HTTPProxy != "" {
-			go proxy.StartHttpProxy(tran, isSocks5, cfg.ServerAddr, cfg.Cipher, cfg.Password, cfg.HTTPProxy)
+			go proxy.StartHttpProxy(tran, isSocks5, serverAddr, cfg.Cipher, cfg.Password, cfg.HTTPProxy)
 		}
 
 		go dns.StartDNS(cfg.DNSServer, cfg.ClientIP, conf.SuggestCh, cfg.SuggestLevel)
-		proxy.StartClient(tran, isSocks5, cfg.ServerAddr, cfg.Cipher, cfg.Password, cfg.ClientIP)
+		proxy.StartClient(tran, isSocks5, serverAddr, cfg.Cipher, cfg.Password, cfg.ClientIP)
 	}
 }
