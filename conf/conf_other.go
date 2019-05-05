@@ -18,7 +18,8 @@ import (
 )
 
 func initArgs() {
-	flag.StringVar(&Conf.ConfigFile, "f", filepath.Dir(os.Args[0])+"/sower.toml", "config file location")
+	cfgFile, _ := filepath.Abs(filepath.Join(filepath.Dir(os.Args[0]), "sower.toml"))
+	flag.StringVar(&Conf.ConfigFile, "f", cfgFile, "config file location")
 	flag.StringVar(&Conf.NetType, "n", "TCP", "net type (socks5 client only): "+strings.Join(transport.ListTransports(), ","))
 	flag.StringVar(&Conf.Cipher, "C", "AES_128_GCM", "cipher type: "+strings.Join(shadow.ListCiphers(), ","))
 	flag.StringVar(&Conf.Password, "p", "12345678", "password")
