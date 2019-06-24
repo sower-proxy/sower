@@ -30,6 +30,7 @@ func initArgs() {
 	flag.BoolVar(&Conf.VersionOnly, "V", false, "print sower version")
 	install := flag.Bool("install", false, "install sower as a service")
 	uninstall := flag.Bool("uninstall", false, "uninstall sower from service list")
+	exePath,_:=filepath.Abs(os.Args[0])
 
 	if !flag.Parsed() {
 		os.Mkdir("log", 0755)
@@ -45,7 +46,7 @@ func initArgs() {
 				s.Close()
 				return fmt.Errorf("service %s already exists", name)
 			}
-			s, err = m.CreateService(name, os.Args[0], mgr.Config{
+			s, err = m.CreateService(name,  exePath, mgr.Config{
 				DisplayName: "Sower Proxy",
 				StartType:   windows.SERVICE_AUTO_START,
 			})
