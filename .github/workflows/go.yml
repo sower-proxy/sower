@@ -1,5 +1,7 @@
 name: Go
 on: [push]
+branches:
+- master
 jobs:
 
   build:
@@ -16,6 +18,20 @@ jobs:
         go-version: 1.13
       id: go
 
-    - name: Install goreleaser
-      run: go get github.com/goreleaser/goreleaser
-      
+    - name: build matrix
+      run: |
+            GOOS=linux GOARCH=amd64 make build
+            tar czvf artifacts/sower-linux-amd64.tar.gz sower sower.toml sower-client.service sower-server.service
+            GOOS=linux GOARCH=386 make build
+            tar czvf artifacts/sower-linux-386.tar.gz sower sower.toml sower-client.service sower-server.service
+            GOOS=linux GOARCH=arm make build
+            tar czvf artifacts/sower-linux-arm.tar.gz sower sower.toml sower-client.service sower-server.service
+            GOOS=linux GOARCH=arm64 make build
+            tar czvf artifacts/sower-linux-arm64.tar.gz sower sower.toml sower-client.service sower-server.service
+            GOOS=linux GOARCH=mips make build
+            tar czvf artifacts/sower-linux-mips.tar.gz sower sower.toml sower-client.service sower-server.service
+            GOOS=linux GOARCH=mipsle make build
+            tar czvf artifacts/sower-linux-mipsle.tar.gz sower sower.toml sower-client.service sower-server.service
+            
+            GOOS=darwin GOARCH=amd64 make build
+            tar czvf artifacts/sower-darwin-amd64.tar.gz sower sower.toml cc.wweir.sower.plist
