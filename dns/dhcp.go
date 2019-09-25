@@ -38,7 +38,7 @@ func GetDefaultDNSServer() (string, error) {
 		}
 	}
 	defer conn.Close()
-	conn.SetDeadline(time.Now().Add(time.Second))
+	conn.SetDeadline(time.Now().Add(3 * time.Second))
 
 	if _, err := conn.WriteTo([]byte(pack), broadcastAddr); err != nil {
 		return "", errors.Wrap(err, "write broadcast")

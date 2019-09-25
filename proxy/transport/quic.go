@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/tls"
@@ -110,7 +111,7 @@ func (s *quicTran) Listen(port string) (<-chan net.Conn, error) {
 	connCh := make(chan net.Conn)
 	go func() {
 		for {
-			sess, err := ln.Accept()
+			sess, err := ln.Accept(context.Background())
 			if err != nil {
 				glog.Fatalln(err)
 			}
@@ -125,7 +126,7 @@ func accept(sess quic.Session, connCh chan<- net.Conn) {
 	defer sess.Close()
 
 	for {
-		stream, err := sess.AcceptStream()
+		stream, err := sess.AcceptStream(context.Background())
 		if err != nil {
 			glog.Errorln(err)
 			return
