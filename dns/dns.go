@@ -23,7 +23,7 @@ func StartDNS(dnsServer, listenIP string, suggestCh chan<- string, level string)
 
 	dhcpCh := make(chan struct{})
 	if dnsServer != "" {
-		if !strings.ContainsRune(dnsServer, ':') {
+		if _, _, err := net.SplitHostPort(dnsServer); err != nil {
 			dnsServer = net.JoinHostPort(dnsServer, "53")
 		}
 	} else {
