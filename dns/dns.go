@@ -23,7 +23,9 @@ func StartDNS(dnsServer, listenIP string, suggestCh chan<- string, level string)
 
 	dhcpCh := make(chan struct{})
 	if dnsServer != "" {
-		dnsServer = net.JoinHostPort(dnsServer, "53")
+		if !strings.ContainsRune(dnsServer, ':') {
+			dnsServer = net.JoinHostPort(dnsServer, "53")
+		}
 	} else {
 		go dynamicSetUpstreamDNS(listenIP, &dnsServer, dhcpCh)
 		dhcpCh <- struct{}{}
