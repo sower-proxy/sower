@@ -1,6 +1,6 @@
 # sower
 [![GitHub release](http://img.shields.io/github/release/wweir/sower.svg?style=popout)](https://github.com/wweir/sower/releases)
-[![CircleCI](https://img.shields.io/circleci/token/64114421aab286b6e918741071535250a5273f06/project/github/wweir/sower/master.svg?style=popout)](https://circleci.com/gh/wweir/sower)
+[![Actions Status](https://github.com/wweir/sower/workflows/Go/badge.svg)](https://github.com/wweir/sower/actions)
 [![Docker Cloud Build Status](https://img.shields.io/docker/cloud/build/wweir/sower.svg?style=popout)](https://hub.docker.com/r/wweir/sower)
 [![GitHub issue](https://img.shields.io/github/issues/wweir/sower.svg?style=popout)](https://github.com/wweir/sower/issues)
 [![GitHub star](https://img.shields.io/github/stars/wweir/sower.svg?style=popout)](https://github.com/wweir/sower/stargazers)
