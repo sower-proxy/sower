@@ -3,30 +3,27 @@ package dns
 import (
 	"net"
 
-	"github.com/golang/glog"
 	"github.com/miekg/dns"
+	"github.com/wweir/sower/conf"
 	"github.com/wweir/sower/util"
+	"github.com/wweir/utils/log"
 )
 
-var (
-	blockList   *util.Node
-	suggestList *util.Node
-	whiteList   *util.Node
-)
+var blockList *util.Node
+var suggestList *util.Node
+var whiteList *util.Node
 
-// LoadRules init rules from config
-func LoadRules(blocklist, suggestions, whitelist []string, host string) {
-	blockList = loadRules("block", blocklist)
-	suggestList = loadRules("suggest", suggestions)
-	whiteList = loadRules("white", whitelist)
-	whiteList.Add(host)
-	glog.V(1).Infoln("reloaded config")
-}
+func init() {
+	reloadFn := func() error {
+		whiteList = util.NewNodeFromRules(".", conf.Conf.Router.DirectList...)
+		blockList = util.NewNodeFromRules(".", conf.Conf.Router.ProxyList...)
+		suggestList = util.NewNodeFromRules(".", conf.Conf.Router.DynamicList...)
+		log.Infow("reload config rules")
+		return nil
+	}
 
-func loadRules(name string, list []string) *util.Node {
-	rule := util.NewNodeFromRules(".", list...)
-	glog.V(3).Infof("load %s rule:\n%s", name, rule)
-	return rule
+	reloadFn()
+	conf.AddReloadConfigHook("reload rules", reloadFn)
 }
 
 func localA(r *dns.Msg, domain string, localIP net.IP) *dns.Msg {
@@ -44,33 +41,4 @@ func localA(r *dns.Msg, domain string, localIP net.IP) *dns.Msg {
 		}}
 	}
 	return m
-}
-
-//go:generate stringer -type=level $GOFILE
-type level int32
-
-const (
-	DISABLE level = iota
-	BLOCK
-	SPEEDUP
-	levelEnd
-)
-
-func ListSuggestLevels() []string {
-	list := make([]string, 0, int(levelEnd))
-	for i := level(0); i < levelEnd; i++ {
-		list = append(list, i.String())
-	}
-	return list
-}
-
-func parseSuggestLevel(suggestLevel string) level {
-	for i := level(0); i < levelEnd; i++ {
-		if suggestLevel == i.String() {
-			return i
-		}
-	}
-
-	glog.Exitln("invalid suggest level: " + suggestLevel)
-	return levelEnd
 }

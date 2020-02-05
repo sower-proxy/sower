@@ -2,11 +2,10 @@ package socks5
 
 import (
 	"encoding/binary"
+	"fmt"
 	"io"
 	"net"
 	"strconv"
-
-	"github.com/pkg/errors"
 )
 
 func ToSocks5(c net.Conn, domain, port string) net.Conn {
@@ -75,7 +74,7 @@ func (c *conn) Write(b []byte) (n int, err error) {
 		switch resp.REP {
 		case 0x00:
 		default:
-			return 0, errors.Errorf("socks5 handshake fail, return code: %d", resp.REP)
+			return 0, fmt.Errorf("socks5 handshake fail, return code: %d", resp.REP)
 		}
 
 		switch resp.ATYP {

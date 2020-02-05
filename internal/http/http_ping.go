@@ -1,4 +1,4 @@
-package util
+package http
 
 import (
 	"bytes"
@@ -6,49 +6,46 @@ import (
 	"encoding/binary"
 	"io"
 	"net"
+	"strconv"
 	"time"
 )
 
-// HTTPPing try connect to a http(s) server with domain though the http addr
-func HTTPPing(viaHost, domain string, port Port, timeout time.Duration) (err error) {
-	conn, err := net.DialTimeout("tcp", port.JoinAddr(viaHost), timeout)
+// Port ==========================
+type Port uint16
+
+const HTTP Port = 80
+const HTTPS Port = 443
+
+// Ping try connect to a http(s) server with domain though the http addr
+func (p Port) Ping(domain string, timeout time.Duration) error {
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(domain, p.String()), timeout)
 	if err != nil {
 		return err
 	}
 	defer conn.Close()
 
+	return p.PingWithConn(domain, conn, timeout)
+}
+
+// PingWithConn try connect to a http(s) server with domain though the http addr
+func (p Port) PingWithConn(domain string, conn net.Conn, timeout time.Duration) error {
 	conn.SetDeadline(time.Now().Add(timeout))
-	if _, err = conn.Write(port.PingMsg(domain)); err != nil {
+	if _, err := conn.Write(p.PingMsg(domain)); err != nil {
 		return err
 	}
 
 	// err -> nil:		read something succ
 	// err -> io.EOF:	no such domain or connection refused
 	// err -> timeout:	tcp package has been dropped
-	_, err = conn.Read(make([]byte, 1))
-	if err == io.EOF && viaHost == domain {
+	_, err := conn.Read(make([]byte, 1))
+	if err == nil || err == io.EOF {
 		return nil
 	}
 	return err
 }
 
-// Port ==========================
-type Port uint16
-
-const (
-	HTTP Port = iota
-	HTTPS
-)
-
-func (p Port) JoinAddr(addr string) string {
-	switch p {
-	case HTTP:
-		return addr + ":80"
-	case HTTPS:
-		return addr + ":443"
-	default:
-		panic("invalid port")
-	}
+func (p Port) String() string {
+	return strconv.Itoa(int(p))
 }
 
 func (p Port) PingMsg(domain string) []byte {

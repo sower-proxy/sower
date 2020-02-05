@@ -15,8 +15,8 @@ test:
 	go test ./...
 build:
 	go build -ldflags \
-		"-X main.version=$(shell git describe --tags) \
-		 -X main.date=$(shell date +%Y-%m-%d)"
+		"-X conf.version=$(shell git describe --tags) \
+		 -X conf.date=$(shell date +%Y-%m-%d)"
 image:
 	docker build -t sower -f .github/Dockerfile .
 

@@ -1,4 +1,4 @@
-package dns
+package net
 
 import (
 	"math/rand"
@@ -9,14 +9,13 @@ import (
 	"github.com/krolaw/dhcp4"
 	"github.com/libp2p/go-reuseport"
 	"github.com/pkg/errors"
-	"github.com/wweir/sower/util"
 )
 
 var xid = make([]byte, 4)
 var broadcastAddr, _ = net.ResolveUDPAddr("udp", "255.255.255.255:67")
 
 func GetDefaultDNSServer() (string, error) {
-	iface, err := util.PickInterface()
+	iface, err := PickInternetInterface()
 	if err != nil {
 		return "", errors.Wrap(err, "pick interface")
 	}

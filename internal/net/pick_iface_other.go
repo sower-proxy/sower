@@ -1,14 +1,14 @@
 // +build !windows
 
-package util
+package net
 
 import (
 	"errors"
 	"net"
 )
 
-// PickInterface pick the first active net interface
-func PickInterface() (*Iface, error) {
+// PickInternetInterface pick the first active net interface
+func PickInternetInterface() (*Iface, error) {
 	ifaces, err := net.Interfaces()
 	if err != nil {
 		return nil, err

@@ -1,14 +1,18 @@
-net_type="TCP"       # TCP, KCP, QUIC, SOCKS5(client only)
-cipher="AES_128_GCM" # AES_128_GCM, AES_192_GCM, AES_256_GCM, CHACHA20_IETF_POLY1305, XCHACHA20_IETF_POLY1305
-password="12345678"
-server_port="5533"
-# server_addr="remote-server"   # replce it to remote server
-http_proxy=":8080"              # eg: 192.168.0.2:8080
-dns_server=""                   # eg: 223.5.5.5:53, Keep empty for dynamic setting from net env
-client_ip="127.0.0.1"           # listen the IP, dns target is the IP
-# clear_dns_cache="pkill mDNSResponder || true"   # Windows: "ipconfig /flushdnss"
-suggest_level="SPEEDUP"         # DISABLE, BLOCK, SPEEDUP
-blocklist=[
+[upstream]
+socks5="127.0.0.1:1080"
+dns="" # eg: 223.5.5.5, keep empty to get it from network environment
+
+[downstream]
+serve_ip="127.0.0.1"
+http_proxy="" # eg: :8080, 127.0.0.1:8080, keep empty to disable it
+
+[router.port_mapping]
+# 2222="aaa.bbb.cc:22"
+
+[router]
+flush_dns_cmd="" # Platform-related, keep empty to use default command
+proxy_level=2 # dynamic detect level, (0~4), more bigger more harder to be proxy
+proxy_list=[
     "**.google.*", # google
     "**.goo.gl",
     "**.googleusercontent.com",
@@ -31,7 +35,7 @@ blocklist=[
     "*.githubusercontent.com",
     "*.github.*",
 ]
-whitelist=[
+direct_list=[
     "**.in-addr.arpa",
     "imap.*.*",
     "imap.*.*.*",
@@ -48,4 +52,3 @@ whitelist=[
     "**.163.com",
     "**.weiyun.com",
 ]
-verbose=0

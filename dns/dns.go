@@ -1,35 +1,37 @@
 package dns
 
+/*
+ * Deep integration with package conf: github.com/wweir/sower/conf
+ */
 import (
 	"context"
+	"fmt"
 	"net"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/golang/glog"
 	"github.com/miekg/dns"
-	mem "github.com/wweir/mem-go"
-	"github.com/wweir/sower/util"
+	"github.com/wweir/sower/conf"
+	"github.com/wweir/sower/internal/http"
+	internal_net "github.com/wweir/sower/internal/net"
+	"github.com/wweir/sower/internal/socks5"
+	"github.com/wweir/utils/log"
+	"github.com/wweir/utils/mem"
 )
 
-const colon = byte(':')
-
-func StartDNS(dnsServer, listenIP string, suggestCh chan<- string, level string) {
-	ip := net.ParseIP(listenIP)
-
-	suggest := &intelliSuggest{suggestCh, parseSuggestLevel(level), listenIP, time.Second}
-	mem.DefaultCache = mem.New(time.Hour)
-
-	dhcpCh := make(chan struct{})
-	if dnsServer != "" {
-		if _, _, err := net.SplitHostPort(dnsServer); err != nil {
-			dnsServer = net.JoinHostPort(dnsServer, "53")
-		}
-	} else {
-		go dynamicSetUpstreamDNS(listenIP, &dnsServer, dhcpCh)
-		dhcpCh <- struct{}{}
+func ServeDNS() {
+	serveIP := net.ParseIP(conf.Conf.Downstream.ServeIP)
+	if conf.Conf.Downstream.ServeIP == "" || serveIP.String() != conf.Conf.Downstream.ServeIP {
+		log.Fatalw("invalid listen ip", "ip", conf.Conf.Downstream.ServeIP)
 	}
+	dnsServer, err := PickUpstreamDNS(serveIP.String(), conf.Conf.Upstream.DNS)
+	if err != nil {
+		log.Fatalw("")
+	}
+
+	d := &detect{proxy: conf.Conf.Upstream.Socks5}
 
 	dns.HandleFunc(".", func(w dns.ResponseWriter, r *dns.Msg) {
 		// *Msg r has an TSIG record and it was validated
@@ -44,162 +46,126 @@ func StartDNS(dnsServer, listenIP string, suggestCh chan<- string, level string)
 		}
 
 		domain := r.Question[0].Name
-		if idx := strings.IndexByte(domain, colon); idx > 0 {
+		if idx := strings.IndexByte(domain, ':'); idx > 0 {
 			domain = domain[:idx] // trim port
 		}
 
-		matchAndServe(w, r, domain, listenIP, dnsServer, dhcpCh, ip, suggest)
+		if err := matchAndServe(w, r, serveIP, d, domain, dnsServer); err != nil {
+			server, err := PickUpstreamDNS(serveIP.String(), dnsServer)
+			if err != nil {
+				log.Errorw("detect upstream dns fail", "err", err)
+			} else {
+				dnsServer = server
+			}
+		}
 	})
 
-	server := &dns.Server{Addr: net.JoinHostPort(listenIP, "53"), Net: "udp"}
-	glog.Fatalln(server.ListenAndServe())
+	server := &dns.Server{Addr: ":53", Net: "udp"}
+	log.Fatalw("dns serve fail", "err", server.ListenAndServe())
 }
 
-func dynamicSetUpstreamDNS(listenIP string, dnsServer *string, dhcpCh <-chan struct{}) {
-	addr, _ := dns.ReverseAddr(listenIP)
-	msg := &dns.Msg{
-		MsgHdr: dns.MsgHdr{
-			Id:               dns.Id(),
-			RecursionDesired: false,
-		},
-		Question: []dns.Question{{
-			Name:   addr,
-			Qtype:  dns.TypeA,
-			Qclass: dns.ClassINET,
-		}},
+func PickUpstreamDNS(listenIP string, dnsServer string) (string, error) {
+	if dnsServer == "" {
+		return internal_net.GetDefaultDNSServer()
 	}
 
-	for {
-		<-dhcpCh
-		if _, err := dns.Exchange(msg, *dnsServer); err == nil {
-			continue
-		}
-
-		host, err := GetDefaultDNSServer()
-		if err != nil {
-			glog.Errorln(err)
-			continue
-		}
-
-		// atomic action
-		*dnsServer = net.JoinHostPort(host, "53")
-		glog.Infoln("set dns server to", host)
+	if _, port, err := net.SplitHostPort(dnsServer); err != nil {
+		return "", fmt.Errorf("parse upstream dns(%s) server fail: %w", dnsServer, err)
+	} else if port == "" {
+		return net.JoinHostPort(dnsServer, "53"), nil
 	}
+	return dnsServer, nil
 }
-func matchAndServe(w dns.ResponseWriter, r *dns.Msg, domain, listenIP, dnsServer string,
-	dhcpCh chan struct{}, ipNet net.IP, suggest *intelliSuggest) {
 
-	inWriteList := whiteList.Match(domain)
-	if !inWriteList && (blockList.Match(domain) || suggestList.Match(domain)) {
-		glog.V(2).Infof("match %s suss", domain)
-		w.WriteMsg(localA(r, domain, ipNet))
-		return
+const timeout = 200 * time.Millisecond
+
+func matchAndServe(w dns.ResponseWriter, r *dns.Msg, serveIP net.IP, d *detect, domain, dnsServer string) error {
+	if (!whiteList.Match(domain)) &&
+		(blockList.Match(domain) || suggestList.Match(domain)) {
+		w.WriteMsg(localA(r, domain, serveIP))
+		return nil
 	}
 
-	go mem.Remember(suggest, domain)
-	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	if err := mem.Remember(d, domain); err != nil {
+		panic(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	msg, err := dns.ExchangeContext(ctx, r, dnsServer)
-	if err != nil {
-		if dhcpCh != nil {
-			select {
-			case dhcpCh <- struct{}{}:
-			default:
-			}
-		}
-		glog.V(1).Infof("get dns of %s from %s fail: %s", domain, dnsServer, err)
-		return
-	} else if msg == nil { // expose any response except nil
-		glog.V(1).Infof("get dns of %s from %s return empty", domain, dnsServer)
-		return
+	if err != nil || msg == nil {
+		return err
 	}
 
 	w.WriteMsg(msg)
+	return nil
 }
 
-type intelliSuggest struct {
-	suggestCh chan<- string
-	level     level
-	listenIP  string
-	timeout   time.Duration
+type detect struct {
+	proxy string
+	port  http.Port
 }
 
-func (i *intelliSuggest) GetOne(key interface{}) (iface interface{}, e error) {
-	iface, e = struct{}{}, nil
-	if i.level == DISABLE {
-		return
-	}
-
-	// kill deadloop, for ugly wildcard setting dns setting
+func (d *detect) Get(key interface{}) error {
+	// break deadloop, for ugly wildcard setting dns setting
 	domain := strings.TrimSuffix(key.(string), ".")
 	if strings.Count(domain, ".") > 10 {
-		return
+		return nil
 	}
 
-	ip, err := net.LookupIP(domain)
-	if err != nil || len(ip) == 0 {
-		glog.V(1).Infoln(domain, ip, err)
-		return
+	wg := sync.WaitGroup{}
+	httpScore, httpsScore := new(int32), new(int32)
+	for _, ping := range [...]detect{{"", http.HTTP}, {"", http.HTTPS}} {
+		wg.Add(1)
+		go func(ping detect) {
+			defer wg.Done()
+
+			if err := ping.port.Ping(domain, timeout); err != nil {
+				return
+			}
+
+			switch ping.port {
+			case http.HTTP:
+				if !atomic.CompareAndSwapInt32(httpScore, 0, 2) {
+					atomic.AddInt32(httpScore, 1)
+				}
+			case http.HTTPS:
+				if !atomic.CompareAndSwapInt32(httpsScore, 0, 2) {
+					atomic.AddInt32(httpScore, 1)
+				}
+			}
+		}(ping)
 	}
+	for _, ping := range [...]detect{{d.proxy, http.HTTP}, {d.proxy, http.HTTPS}} {
+		wg.Add(1)
+		go func(ping detect) {
+			defer wg.Done()
 
-	var (
-		pings = [...]struct {
-			viaAddr string
-			port    util.Port
-		}{
-			{ip[0].String(), util.HTTP},
-			{i.listenIP, util.HTTP},
-			{ip[0].String(), util.HTTPS},
-			{i.listenIP, util.HTTPS},
-		}
-		protos = [...]*int32{
-			new(int32), /*HTTP*/
-			new(int32), /*HTTPS*/
-		}
-		score = new(int32)
-	)
-	for idx := range pings {
-		go func(idx int) {
-			if err := util.HTTPPing(pings[idx].viaAddr, domain, pings[idx].port, i.timeout); err != nil {
-				// local ping fail
-				if pings[idx].viaAddr == i.listenIP {
-					atomic.AddInt32(score, -1)
-					glog.V(1).Infof("remote ping %s fail", domain)
-				} else {
-					atomic.AddInt32(score, 1)
-					glog.V(1).Infof("local ping %s fail", domain)
-				}
-
-				// remote ping faster
-			} else if pings[idx].viaAddr == i.listenIP {
-				if atomic.CompareAndSwapInt32(protos[idx/2], 0, 1) && i.level == SPEEDUP {
-					atomic.AddInt32(score, 1)
-				}
-				glog.V(1).Infof("remote ping %s faster", domain)
-
+			if conn, err := net.Dial("tcp", ping.proxy); err != nil {
+				return
 			} else {
-				atomic.CompareAndSwapInt32(protos[idx/2], 0, 2)
-				return // score change trigger add suggestion
-			}
-
-			// check all remote pings are faster
-			if atomic.LoadInt32(score) == int32(len(protos)) {
-				for i := range protos {
-					if atomic.LoadInt32(protos[i]) != 1 {
-						return
-					}
+				conn = socks5.ToSocks5(conn, domain, ping.port.String())
+				if err := ping.port.PingWithConn(domain, conn, timeout); err != nil {
+					return
 				}
 			}
 
-			// 1. local fail and remote success
-			// 2. all remote pings are faster
-			if atomic.LoadInt32(score) >= int32(len(protos)) {
-				old := atomic.SwapInt32(score, -1) // avoid readd the suggestion
-				i.suggestCh <- domain
-				glog.Infof("suggested domain: %s with score: %d", domain, old)
+			switch ping.port {
+			case http.HTTP:
+				if !atomic.CompareAndSwapInt32(httpScore, 0, -2) {
+					atomic.AddInt32(httpScore, -1)
+				}
+			case http.HTTPS:
+				if !atomic.CompareAndSwapInt32(httpsScore, 0, -2) {
+					atomic.AddInt32(httpScore, -1)
+				}
 			}
-		}(idx)
+		}(ping)
 	}
-	return
+
+	wg.Wait()
+	if int(*httpScore+*httpsScore) >= conf.Conf.Router.ProxyLevel {
+		conf.AddDynamic(domain)
+	}
+	return nil
 }
