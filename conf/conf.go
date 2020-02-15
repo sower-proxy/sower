@@ -58,21 +58,12 @@ var (
 		Server *server `toml:"server"`
 		Client *client `toml:"client"`
 	}{"", &Server, &Client}
-	Password string
+	Password      string
+	installCmd    string
+	uninstallFlag bool
 )
 
 func init() {
-	var err error
-	defer func() {
-		if timeout, err = time.ParseDuration(Client.Router.DetectTimeout); err != nil {
-			log.Fatalw("parse dynamic detect timeout", "val", Client.Router.DetectTimeout, "err", err)
-		}
-
-		log.Infow("start", "version", version, "date", date, "conf", &conf)
-		passwordData = []byte(Password)
-	}()
-
-	flag.StringVar(&conf.file, "f", "", "config file, rewrite all other parameters if set")
 	flag.StringVar(&Password, "passwd", "", "password, use domain if not set")
 	flag.StringVar(&Server.Relay, "s", "", "relay to http service, eg: 127.0.0.1:8080")
 	flag.StringVar(&Server.CertFile, "s_cert", "", "tls cert file, empty to auto get cert")
@@ -83,11 +74,30 @@ func init() {
 	flag.StringVar(&Client.DNS.Relay, "dns_relay", "", "dns relay server ip, keep empty to dynamic detect")
 	flag.IntVar(&Client.Router.DetectLevel, "level", 2, "dynamic rule detect level: 0~4")
 	flag.StringVar(&Client.Router.DetectTimeout, "timeout", "300ms", "dynamic rule detect timeout")
-
+	flag.BoolVar(&uninstallFlag, "uninstall", false, "uninstall service")
 	Init() // execute platform init logic
+
 	if !flag.Parsed() {
 		flag.Parse()
 	}
+	if uninstallFlag {
+		uninstall()
+		os.Exit(0)
+	}
+	if installCmd != "" {
+		install()
+		os.Exit(0)
+	}
+
+	var err error
+	defer func() {
+		if timeout, err = time.ParseDuration(Client.Router.DetectTimeout); err != nil {
+			log.Fatalw("parse dynamic detect timeout", "val", Client.Router.DetectTimeout, "err", err)
+		}
+
+		log.Infow("start", "version", version, "date", date, "conf", &conf)
+		passwordData = []byte(Password)
+	}()
 
 	if conf.file == "" {
 		return

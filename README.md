@@ -5,7 +5,28 @@
 [![GitHub issue](https://img.shields.io/github/issues/wweir/sower.svg?style=popout)](https://github.com/wweir/sower/issues)
 [![GitHub star](https://img.shields.io/github/stars/wweir/sower.svg?style=popout)](https://github.com/wweir/sower/stargazers)
 [![GitHub license](https://img.shields.io/github/license/wweir/sower.svg?style=popout)](LICENSE)
-
+```
+  relay   <--+       +-> target
+http service |       |   service
+     +-------+-------+----+
+     |    sower server    |
+     +----^-----^---------+
+          80   443
+301 http -+     +----- https
+to https        |     service
+                |
+            protected
+             by tls
+  dns <---+     |    +--> direct
+ relay    |     |    |   request
+     +----+-----+----+----+
+     |    sower client    |
+     +----^--^----^---^---+
+          |  |    |   |
+    dns --+  +    +   +-- port
+            80  http(s)  forward
+           443  proxy
+```
 # **In refactor**
 
 中文介绍见 [Wiki](https://github.com/wweir/sower/wiki)

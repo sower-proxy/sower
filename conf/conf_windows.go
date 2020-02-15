@@ -23,51 +23,18 @@ import (
 const name = "sower"
 const cmdsAccepted = svc.AcceptStop | svc.AcceptShutdown | svc.AcceptPauseAndContinue
 
-func Init() {
-	exePath, _ := filepath.Abs(os.Args[0])
+var execFile, _ = filepath.Abs(os.Args[0])
+var execDir, _ = filepath.Abs(filepath.Dir(execFile))
 
-	install := flag.Bool("i", false, "install sower as a service")
-	uninstall := flag.Bool("u", false, "uninstall sower from service list")
+func Init() {
+	flag.StringVar(&conf.file, "f", filepath.Join(execDir, "sower.toml"), "config file, rewrite all other parameters if set")
+	flag.StringVar(&installCmd, "install", "", "install service with cmd")
 	flag.StringVar(&Client.DNS.FlushCmd, "flush_dns", "ipconfig /flushdnss", "flush dns command")
 	flag.Parse()
 
 	switch {
-	case *install:
-		mgrDo(func(m *mgr.Mgr) error {
-			s, err := m.OpenService(name)
-			if err == nil {
-				s.Close()
-				return fmt.Errorf("service %s already exists", name)
-			}
-			s, err = m.CreateService(name, exePath, mgr.Config{
-
-				DisplayName: "Sower Proxy",
-				StartType:   windows.SERVICE_AUTO_START,
-			})
-			if err != nil {
-				return err
-			}
-			defer s.Close()
-			err = eventlog.InstallAsEventCreate(name, eventlog.Error|eventlog.Warning|eventlog.Info)
-			if err != nil {
-				s.Delete()
-				return fmt.Errorf("SetupEventLogSource() failed: %s", err)
-			}
-
-			return s.Start()
-		})
-		os.Exit(0)
-
-	case *uninstall:
-		serviceDo(func(s *mgr.Service) error {
-			err := s.Delete()
-			if err != nil {
-				return err
-			}
-			return eventlog.Remove(name)
-		})
-		os.Exit(0)
-
+	case installCmd != "":
+	case uninstallFlag:
 	default:
 		os.Chdir(filepath.Dir(os.Args[0]))
 		if active, err := svc.IsAnInteractiveSession(); err != nil {
@@ -90,7 +57,39 @@ func Init() {
 		}
 	}
 }
+func install() {
+	mgrDo(func(m *mgr.Mgr) error {
+		s, err := m.OpenService(name)
+		if err == nil {
+			s.Close()
+			return fmt.Errorf("service %s already exists", name)
+		}
+		s, err = m.CreateService(name, execFile, mgr.Config{
+			DisplayName: "Sower Proxy",
+			StartType:   windows.SERVICE_AUTO_START,
+		})
+		if err != nil {
+			return err
+		}
+		defer s.Close()
+		err = eventlog.InstallAsEventCreate(name, eventlog.Error|eventlog.Warning|eventlog.Info)
+		if err != nil {
+			s.Delete()
+			return fmt.Errorf("SetupEventLogSource() failed: %s", err)
+		}
 
+		return s.Start()
+	})
+}
+func uninstall() {
+	serviceDo(func(s *mgr.Service) error {
+		err := s.Delete()
+		if err != nil {
+			return err
+		}
+		return eventlog.Remove(name)
+	})
+}
 func serviceDo(fn func(*mgr.Service) error) {
 	mgrDo(func(m *mgr.Mgr) error {
 		s, err := m.OpenService(name)
