@@ -1,17 +1,28 @@
-[upstream]
-socks5="127.0.0.1:1080"
-dns="" # eg: 223.5.5.5, keep empty to get it from network environment
+# [server]
+# relay="127.0.0.1:8080"
+# cert_file=""
+# key_file=""
+# cert_email="abc@email.com"
 
-[downstream]
-serve_ip="127.0.0.1"
-http_proxy="" # eg: :8080, 127.0.0.1:8080, keep empty to disable it
 
-[router.port_mapping]
-# 2222="aaa.bbb.cc:22"
+[client]
+address="aa.bb.cc"
 
-[router]
-flush_dns_cmd="" # Platform-related, keep empty to use default command
-proxy_level=2 # dynamic detect level, (0~4), more bigger more harder to be proxy
+[client.http_proxy]
+address=":8080"
+
+[client.dns]
+redirect_ip="127.0.0.1"
+relay="" # empty to dynamic detect
+flush_cmd="" # macOS: pkill mDNSResponder || true, Windows: ipconfig /flushdnss
+
+# [client.router.port_mapping]
+# ":2222"="aa.bb.cc:22"
+
+[client.router]
+detect_level=2 # 0~4, the bigger the harder to add
+detect_timeout="300ms"
+
 proxy_list=[
     "**.google.*", # google
     "**.goo.gl",

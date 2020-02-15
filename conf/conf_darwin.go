@@ -11,16 +11,16 @@ import (
 )
 
 func Init() {
-	flag.StringVar(&Conf.Router.FlushDNSCmd, "flush_dns", "pkill mDNSResponder || true", "flush dns command")
+	flag.StringVar(&Client.DNS.FlushCmd, "flush_dns", "pkill mDNSResponder || true", "flush dns command")
 }
 
 func execute(cmd string) error {
 	ctx, cancel := context.WithTimeout(context.TODO(), 5*time.Second)
 	defer cancel()
 
-	out, err := exec.CommandContext(ctx, "sh", "-c", Conf.Router.FlushDNSCmd).CombinedOutput()
+	out, err := exec.CommandContext(ctx, "sh", "-c", Client.DNS.FlushCmd).CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("cmd: %s, err: %s, output: %s", Conf.Router.FlushDNSCmd, err, out)
+		return fmt.Errorf("cmd: %s, err: %s, output: %s", Client.DNS.FlushCmd, err, out)
 	}
 	return nil
 }

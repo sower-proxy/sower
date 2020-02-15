@@ -8,6 +8,7 @@ require (
 	github.com/miekg/dns v1.1.27
 	github.com/pelletier/go-toml v1.6.0
 	github.com/pkg/errors v0.9.1
-	github.com/wweir/utils v0.0.0-20200201061343-d44781e298da
-	golang.org/x/sys v0.0.0-20200202164722-d101bd2416d5
+	github.com/wweir/utils v0.0.0-20200214114658-f6f356a08736
+	golang.org/x/crypto v0.0.0-20200214034016-1d94cc7ab1c6
+	golang.org/x/sys v0.0.0-20190924154521-2837fb4f24fe
 )

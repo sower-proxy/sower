@@ -6,6 +6,8 @@
 [![GitHub star](https://img.shields.io/github/stars/wweir/sower.svg?style=popout)](https://github.com/wweir/sower/stargazers)
 [![GitHub license](https://img.shields.io/github/license/wweir/sower.svg?style=popout)](LICENSE)
 
+# **In refactor**
+
 中文介绍见 [Wiki](https://github.com/wweir/sower/wiki)
 
 The sower is a cross-platform intelligent transparent proxy tool base on DNS solution.

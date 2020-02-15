@@ -4,11 +4,45 @@ import (
 	"flag"
 	"os"
 	"sync"
+	"time"
 
 	toml "github.com/pelletier/go-toml"
 	"github.com/wweir/sower/util"
 	"github.com/wweir/utils/log"
 )
+
+type client struct {
+	Address string `toml:"address"`
+
+	HTTPProxy struct {
+		Address string `toml:"address"`
+	} `toml:"http_proxy"`
+
+	DNS struct {
+		RedirectIP string `toml:"redirect_ip"`
+		Relay      string `toml:"relay"`
+		FlushCmd   string `toml:"flush_cmd"`
+	} `toml:"dns"`
+
+	Router struct {
+		PortMapping   map[string]string `toml:"port_mapping"`
+		DetectLevel   int               `toml:"detect_level"`
+		DetectTimeout string            `toml:"detect_timeout"`
+
+		ProxyList    []string   `toml:"proxy_list"`
+		DirectList   []string   `toml:"direct_list"`
+		DynamicList  []string   `toml:"dynamic_list"`
+		DirectRules  *util.Node `toml:"-"`
+		ProxyRules   *util.Node `toml:"-"`
+		DynamicRules *util.Node `toml:"-"`
+	} `toml:"router"`
+}
+type server struct {
+	Relay     string `toml:"relay"`
+	CertFile  string `toml:"cert_file"`
+	KeyFile   string `toml:"key_file"`
+	CertEmail string `toml:"cert_email"`
+}
 
 var (
 	version, date string
@@ -17,54 +51,53 @@ var (
 	flushMu   = sync.Mutex{}
 	flushCh   = make(chan struct{})
 
-	// Conf define the config items
-	Conf = struct {
-		ConfigFile string
-
-		Upstream struct {
-			Socks5 string `toml:"socks5"`
-			DNS    string `toml:"dns"`
-		} `toml:"upstream"`
-
-		Downstream struct {
-			ServeIP   string `toml:"serve_ip"`
-			HTTPProxy string `toml:"http_proxy"`
-		} `toml:"downstream"`
-
-		Router struct {
-			FlushDNSCmd string `toml:"flush_dns_cmd"`
-			ProxyLevel  int    `toml:"proxy_level"`
-
-			PortMapping map[string]string `toml:"port_mapping"`
-			ProxyList   []string          `toml:"proxy_list"`
-			DirectList  []string          `toml:"direct_list"`
-			DynamicList []string          `toml:"dynamic_list"`
-		} `toml:"router"`
-	}{}
+	Server = server{}
+	Client = client{}
+	conf   = struct {
+		file   string
+		Server *server `toml:"server"`
+		Client *client `toml:"client"`
+	}{"", &Server, &Client}
+	Password string
 )
 
 func init() {
-	flag.StringVar(&Conf.ConfigFile, "f", "", "config file, keep empty for dynamic detect proxy rule")
-	flag.StringVar(&Conf.Upstream.Socks5, "socks5", "127.0.0.1:1080", "upstream socks5 address")
-	flag.StringVar(&Conf.Upstream.DNS, "dns", "", "upstream dns ip, keep empty to dynamic detect")
-	flag.StringVar(&Conf.Downstream.ServeIP, "serve", "127.0.0.1", "serve on address")
-	flag.StringVar(&Conf.Downstream.HTTPProxy, "http_proxy", "", "serve http proxy, eg: 127.0.0.1:8080")
-	flag.IntVar(&Conf.Router.ProxyLevel, "level", 2, "dynamic proxy level: 0~4")
+	var err error
+	defer func() {
+		if timeout, err = time.ParseDuration(Client.Router.DetectTimeout); err != nil {
+			log.Fatalw("parse dynamic detect timeout", "val", Client.Router.DetectTimeout, "err", err)
+		}
+
+		log.Infow("start", "version", version, "date", date, "conf", &conf)
+		passwordData = []byte(Password)
+	}()
+
+	flag.StringVar(&conf.file, "f", "", "config file, rewrite all other parameters if set")
+	flag.StringVar(&Password, "passwd", "", "password, use domain if not set")
+	flag.StringVar(&Server.Relay, "s", "", "relay to http service, eg: 127.0.0.1:8080")
+	flag.StringVar(&Server.CertFile, "s_cert", "", "tls cert file, empty to auto get cert")
+	flag.StringVar(&Server.KeyFile, "s_key", "", "tls key file, empty to auto get cert")
+	flag.StringVar(&Client.Address, "c", "", "remote server, eg: aa.bb.cc") // TODO: socks5://127.0.0.1:1080
+	flag.StringVar(&Client.HTTPProxy.Address, "http_proxy", ":8080", "http proxy, empty to disable")
+	flag.StringVar(&Client.DNS.RedirectIP, "dns_redirect", "", "redirect ip, eg: 127.0.0.1, empty to disable dns")
+	flag.StringVar(&Client.DNS.Relay, "dns_relay", "", "dns relay server ip, keep empty to dynamic detect")
+	flag.IntVar(&Client.Router.DetectLevel, "level", 2, "dynamic rule detect level: 0~4")
+	flag.StringVar(&Client.Router.DetectTimeout, "timeout", "300ms", "dynamic rule detect timeout")
 
 	Init() // execute platform init logic
 	if !flag.Parsed() {
 		flag.Parse()
 	}
 
-	if _, err := os.Stat(Conf.ConfigFile); err == nil {
-		for i := range loadConfigFns {
-			if err := loadConfigFns[i].fn(); err != nil {
-				log.Fatalw("load config", "config", Conf.ConfigFile, "step", loadConfigFns[i].step, "err", err)
-			}
-		}
+	if conf.file == "" {
+		return
 	}
 
-	log.Infow("start", "version", version, "date", date, "config", Conf)
+	for i := range loadConfigFns {
+		if err = loadConfigFns[i].fn(); err != nil {
+			log.Fatalw("load config", "config", conf.file, "step", loadConfigFns[i].step, "err", err)
+		}
+	}
 }
 
 // refreshFns will be executed while init and write new config
@@ -72,66 +105,39 @@ var loadConfigFns = []struct {
 	step string
 	fn   func() error
 }{{"load_config", func() error {
-	f, err := os.OpenFile(Conf.ConfigFile, os.O_RDONLY, 0644)
+	f, err := os.OpenFile(conf.file, os.O_RDONLY, 0644)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
 
-	//safe refresh config
-	file := Conf.ConfigFile
-	if err = toml.NewDecoder(f).Decode(&Conf); err != nil {
-		return err
-	}
-	Conf.ConfigFile = file
+	return toml.NewDecoder(f).Decode(&conf)
+
+}}, {"load_rules", func() error {
+	Client.Router.DirectRules = util.NewNodeFromRules(Client.Router.DirectList...)
+	Client.Router.ProxyRules = util.NewNodeFromRules(Client.Router.ProxyList...)
+	Client.Router.DynamicRules = util.NewNodeFromRules(Client.Router.DynamicList...)
 	return nil
 
 }}, {"flush_dns", func() error {
-	if Conf.Router.FlushDNSCmd != "" {
-		return execute(Conf.Router.FlushDNSCmd)
+	if Client.DNS.FlushCmd != "" {
+		return execute(Client.DNS.FlushCmd)
 	}
 	return nil
 }}}
 
-// AddReloadConfigHook add hook function for reload config
-func AddReloadConfigHook(step string, fn func() error) {
-	loadConfigFns = append(loadConfigFns, struct {
-		step string
-		fn   func() error
-	}{step, fn})
-}
-
-// AddDynamic add new domain into dynamic list
-func AddDynamic(domain string) {
-	flushMu.Lock()
-	Conf.Router.DynamicList = append(Conf.Router.DynamicList, domain)
-	Conf.Router.DynamicList = util.NewReverseSecSlice(Conf.Router.DynamicList).Sort().Uniq()
-	flushMu.Unlock()
-
-	flushOnce.Do(func() {
-		if Conf.ConfigFile != "" {
-			go flushConf()
-		}
-	})
-
-	select {
-	case flushCh <- struct{}{}:
-	default:
-	}
-}
-
 func flushConf() {
 	for range flushCh {
 		// safe write
-		if Conf.ConfigFile != "" {
-			f, err := os.OpenFile(Conf.ConfigFile+"~", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+		if conf.file != "" {
+			f, err := os.OpenFile(conf.file+"~", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 			if err != nil {
 				log.Errorw("flush config", "step", "flush", "err", err)
 				continue
 			}
 
 			flushMu.Lock()
-			if err := toml.NewEncoder(f).ArraysWithOneElementPerLine(true).Encode(Conf); err != nil {
+			if err := toml.NewEncoder(f).ArraysWithOneElementPerLine(true).Encode(conf); err != nil {
 				log.Errorw("flush config", "step", "flush", "err", err)
 				flushMu.Unlock()
 				f.Close()
@@ -140,7 +146,7 @@ func flushConf() {
 			flushMu.Unlock()
 			f.Close()
 
-			if err = os.Rename(Conf.ConfigFile+"~", Conf.ConfigFile); err != nil {
+			if err = os.Rename(conf.file+"~", conf.file); err != nil {
 				log.Errorw("flush config", "step", "flush", "err", err)
 				continue
 			}

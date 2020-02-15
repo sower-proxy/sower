@@ -15,14 +15,14 @@ func TestNode_Match(t *testing.T) {
 		tests []test
 	}{{
 		"simple",
-		NewNodeFromRules(".", "a.wweir.cc", "b.wweir.cc"),
+		NewNodeFromRules("a.wweir.cc", "b.wweir.cc"),
 		[]test{
 			{"a.wweir.cc", true},
 			{"b.wweir.cc", true},
 		},
 	}, {
 		"parent",
-		NewNodeFromRules(".", "wweir.cc", "a.wweir.cc"),
+		NewNodeFromRules("wweir.cc", "a.wweir.cc"),
 		[]test{
 			{"wweir.cc", true},
 			{"a.wweir.cc", true},
@@ -30,7 +30,7 @@ func TestNode_Match(t *testing.T) {
 		},
 	}, {
 		"fuzz1",
-		NewNodeFromRules(".", "wweir.cc", "a.wweir.cc", "*.wweir.cc"),
+		NewNodeFromRules("wweir.cc", "a.wweir.cc", "*.wweir.cc"),
 		[]test{
 			{"wweir.cc", true},
 			{"a.wweir.cc", true},
@@ -39,7 +39,7 @@ func TestNode_Match(t *testing.T) {
 		},
 	}, {
 		"fuzz2",
-		NewNodeFromRules(".", "a.*.cc", "c.wweir.*"),
+		NewNodeFromRules("a.*.cc", "c.wweir.*"),
 		[]test{
 			{"wweir.cc", false},
 			{"a.wweir.cc", true},
@@ -48,7 +48,7 @@ func TestNode_Match(t *testing.T) {
 		},
 	}, {
 		"fuzz3",
-		NewNodeFromRules(".", "*.*.cc", "iamp.*.*"),
+		NewNodeFromRules("*.*.cc", "iamp.*.*"),
 		[]test{
 			{"wweir.cc", false},
 			{"a.wweir.cc", true},
@@ -57,7 +57,7 @@ func TestNode_Match(t *testing.T) {
 		},
 	}, {
 		"fuzz4",
-		NewNodeFromRules(".", "**.cc", "a.**.com", "**.wweir.*"),
+		NewNodeFromRules("**.cc", "a.**.com", "**.wweir.*"),
 		[]test{
 			{"wweir.cc", true},
 			{"a.wweir.cc", true},

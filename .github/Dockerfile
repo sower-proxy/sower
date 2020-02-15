@@ -4,7 +4,7 @@ FROM golang:1.13-alpine AS compiler
 RUN apk add --no-cache git make
 
 # enable go modules
-WORKDIR /workdir
+WORKDIR /src
 COPY . .
 
 # do not worry about downloading dependency, sower will fix this.

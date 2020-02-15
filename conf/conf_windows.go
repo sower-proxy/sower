@@ -25,12 +25,10 @@ const cmdsAccepted = svc.AcceptStop | svc.AcceptShutdown | svc.AcceptPauseAndCon
 
 func Init() {
 	exePath, _ := filepath.Abs(os.Args[0])
-	logFile := filepath.Join(filepath.Dir(exePath), name+".log")
 
 	install := flag.Bool("i", false, "install sower as a service")
 	uninstall := flag.Bool("u", false, "uninstall sower from service list")
-	logFile := flag.String("log", logFile, name+" log file path")
-	flag.StringVar(&Conf.Router.FlushDNSCmd, "flush_dns", "ipconfig /flushdnss", "flush dns command")
+	flag.StringVar(&Client.DNS.FlushCmd, "flush_dns", "ipconfig /flushdnss", "flush dns command")
 	flag.Parse()
 
 	switch {
@@ -42,6 +40,7 @@ func Init() {
 				return fmt.Errorf("service %s already exists", name)
 			}
 			s, err = m.CreateService(name, exePath, mgr.Config{
+
 				DisplayName: "Sower Proxy",
 				StartType:   windows.SERVICE_AUTO_START,
 			})
@@ -153,7 +152,7 @@ func execute(cmd string) error {
 	defer cancel()
 
 	var cmds []string
-	for _, cmd := range strings.Split(Conf.ClearDNSCache, " ") {
+	for _, cmd := range strings.Split(Client.DNS.FlushCmd, " ") {
 		if cmd == "" {
 			continue
 		}
@@ -170,7 +169,7 @@ func execute(cmd string) error {
 	command := exec.CommandContext(ctx, cmds[0], cmds[1:]...)
 	command.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	if out, err := command.CombinedOutput(); err != nil {
-		return fmt.Errorf("cmd: %s, output: %s, err: %w", Conf.ClearDNSCache, out, err)
+		return fmt.Errorf("cmd: %s, output: %s, err: %w", Client.DNS.FlushCmd, out, err)
 	}
 	return nil
 }

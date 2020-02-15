@@ -8,7 +8,7 @@
   <array>
 	  <string>/usr/local/bin/sower</string>
     <string>-f</string>
-    <string>/usr/local/etc/sower.toml</string>
+    <string>/etc/sower/sower.toml</string>
   </array>
   <key>KeepAlive</key>
   <true/>

@@ -9,6 +9,6 @@ WantedBy=multi-user.target
 Type=simple
 User=nobody
 WorkingDirectory=/tmp
-ExecStart=/usr/local/bin/sower -n TCP -v 1
+ExecStart=/usr/local/bin/sower -s 127.0.0.1:8080
 RestartSec=3
 Restart=on-failure
