@@ -25,18 +25,21 @@ var timeout time.Duration
 
 // ShouldProxy check if the domain shoule request though proxy
 func ShouldProxy(domain string) bool {
-	if Client.Router.DirectRules.Match(domain) {
-		return false
-	}
-	if Client.Router.ProxyRules.Match(domain) {
+	if domain == Client.Address {
 		return true
 	}
-	if Client.Router.DynamicRules.Match(domain) {
+	if Client.Router.directRules.Match(domain) {
+		return false
+	}
+	if Client.Router.proxyRules.Match(domain) {
+		return true
+	}
+	if Client.Router.dynamicRules.Match(domain) {
 		return true
 	}
 
 	cache.Remember(detect, domain)
-	return Client.Router.DynamicRules.Match(domain)
+	return Client.Router.dynamicRules.Match(domain)
 }
 
 func (d *dynamic) Get(key interface{}) (err error) {
@@ -116,7 +119,7 @@ func addDynamic(domain string) {
 	flushMu.Lock()
 	Client.Router.DynamicList = util.NewReverseSecSlice(
 		append(Client.Router.DynamicList, domain)).Sort().Uniq()
-	Client.Router.DynamicRules = util.NewNodeFromRules(Client.Router.DynamicList...)
+	Client.Router.dynamicRules = util.NewNodeFromRules(Client.Router.DynamicList...)
 	flushMu.Unlock()
 
 	flushOnce.Do(func() {

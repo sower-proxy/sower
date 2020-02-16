@@ -62,7 +62,7 @@ func uninstall() {
 	os.RemoveAll("/etc/sower")
 }
 func execute(cmd string) error {
-	ctx, cancel := context.WithTimeout(context.TODO(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.TODO(), 5*time.Second)
 	defer cancel()
 
 	out, err := exec.CommandContext(ctx, "sh", "-c", cmd).CombinedOutput()

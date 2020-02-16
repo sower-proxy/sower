@@ -94,9 +94,9 @@ func httpsProxy(w http.ResponseWriter, r *http.Request, serverAddr string, passw
 
 	var rc net.Conn
 	if conf.ShouldProxy(host) {
-		rc, err = tls.Dial("tcp", serverAddr, &tls.Config{})
+		rc, err = tls.Dial("tcp", net.JoinHostPort(serverAddr, "443"), &tls.Config{})
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusServiceUnavailable)
+			conn.Write([]byte("sower: tls dial: " + err.Error()))
 			conn.Close()
 			return
 		}
@@ -105,11 +105,12 @@ func httpsProxy(w http.ResponseWriter, r *http.Request, serverAddr string, passw
 	} else {
 		rc, err = net.Dial("tcp", net.JoinHostPort(host, strconv.Itoa(int(port))))
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusServiceUnavailable)
+			conn.Write([]byte("sower: tcp dial: " + err.Error()))
 			conn.Close()
 			return
 		}
 	}
+	defer rc.Close()
 
 	relay(conn, rc)
 }

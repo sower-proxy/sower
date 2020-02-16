@@ -18,10 +18,10 @@ type head struct {
 	length   byte
 }
 
-func StartClient(password, serverAddr, httpProxy, dnsRedirectIP string, forwardMap map[string]string) {
+func StartClient(password, serverAddr, httpProxy, dnsServeIP string, forwards map[string]string) {
 	passwordData := []byte(password)
 	if httpProxy != "" {
-		startHTTPProxy(httpProxy, serverAddr, passwordData)
+		go startHTTPProxy(httpProxy, serverAddr, passwordData)
 	}
 
 	relayToRemote := func(tgtType byte, lnAddr string, host string, port uint16) {
@@ -38,23 +38,26 @@ func StartClient(password, serverAddr, httpProxy, dnsRedirectIP string, forwardM
 			}
 
 			go func(conn net.Conn) {
-				rc, err := tls.Dial("tcp", serverAddr, &tls.Config{})
+				defer conn.Close()
+
+				rc, err := tls.Dial("tcp", net.JoinHostPort(serverAddr, "443"), &tls.Config{})
 				if err != nil {
-					log.Errorw("tls dial", "addr", serverAddr, "err", err)
+					log.Errorw("tls dial", "addr", net.JoinHostPort(serverAddr, "443"), "err", err)
 					return
 				}
+				defer rc.Close()
 
 				relay(conn, _http.NewTgtConn(rc, passwordData, tgtType, host, port))
 			}(conn)
 		}
 	}
 
-	if dnsRedirectIP != "" {
-		go relayToRemote(_http.TGT_HTTP, dnsRedirectIP+":http", "", 80)
-		go relayToRemote(_http.TGT_HTTPS, dnsRedirectIP+":http", "", 443)
+	if dnsServeIP != "" {
+		go relayToRemote(_http.TGT_HTTP, dnsServeIP+":http", "", 80)
+		go relayToRemote(_http.TGT_HTTPS, dnsServeIP+":https", "", 443)
 	}
 
-	for from, to := range forwardMap {
+	for from, to := range forwards {
 		go func(from, to string) {
 			host, portStr, err := net.SplitHostPort(to)
 			if err != nil {
@@ -70,6 +73,7 @@ func StartClient(password, serverAddr, httpProxy, dnsRedirectIP string, forwardM
 		}(from, to)
 	}
 
+	select {}
 }
 
 func StartServer(relayTarget, password, certFile, keyFile, email string) {
@@ -78,12 +82,16 @@ func StartServer(relayTarget, password, certFile, keyFile, email string) {
 		Cache:  autocert.DirCache(configDir), //folder for storing certificates
 		Email:  email,
 	}
-	tlsConf := &tls.Config{GetCertificate: certManager.GetCertificate}
+	tlsConf := &tls.Config{
+		GetCertificate: certManager.GetCertificate,
+		MinVersion:     tls.VersionTLS12,
+	}
 	if certFile != "" && keyFile != "" {
 		if cert, err := tls.LoadX509KeyPair(certFile, keyFile); err != nil {
 			log.Fatalw("load certificate", "cert", certFile, "key", keyFile, "err", err)
 		} else {
-			tlsConf = &tls.Config{Certificates: []tls.Certificate{cert}}
+			tlsConf.GetCertificate = nil
+			tlsConf.Certificates = []tls.Certificate{cert}
 		}
 	}
 
