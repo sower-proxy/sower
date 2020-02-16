@@ -11,28 +11,28 @@
 
 The sower is a cross-platform intelligent transparent proxy tool.
 
-The first time you visit a new website, the sower will detect if the domain in the block list and add it in the dynamic detect list. So, you do not need to care about the rules, sower will handle it in an intelligent way.
+The first time you visit a new website, the sower will detect if the domain is accessible and add it in the dynamic detect list. So, you do not need to care about the rules, sower will handle it intelligently.
 
-Sower provider both http_proxy/https_proxy and dns-based proxy. All these kinds of proxy support intelligent router. You can also port-forward any tcp request to remote, such as: ssh / smtp / pop3.
+Sower provider both http_proxy/https_proxy and DNS-based proxy. All these kinds of proxy support intelligent router. You can also port-forward any TCP request to remote, such as SSH / SMTP / POP3.
 
-You are able to enjoy it by setting http_proxy or your DNS without any other settings.
+You can enjoy it by setting http_proxy or your DNS without any other settings.
 
-If you already have another proxy solution, you can use it's socks5(h) service as parent proxy to enjoy sower's intelligent router.
+If you already have another proxy solution, you can use it's socks5(h) service as a parent proxy to enjoy the sower's intelligent router.
 
 
 ## Installation
 To enjoy the sower, you need to deploy sower on both server-side and client-side.
 
-Installation script has been integrated into sower. You can install sower as system service by running `./sower -install 'xxx'`
+The installation script has been integrated into the sower. You can install sower as system service by running `./sower -install 'xxx'`
 
 ## Server
-*If you already have another proxy solution with socks5h support, you can skip server side.*
+*If you already have another proxy solution with socks5h support, you can skip server-side.*
 
-At server-side, sower run just like a web server proxy.
-It redirect http request to https, and proxy https requests to the setted upstream http service.
-You can use your own certificate or use the auto generated certificate by sower.
+At the server-side, the sower runs just like a web server proxy.
+It redirects HTTP requests to HTTPS and proxy https requests to the upstream HTTP service.
+You can use your certificate or use the auto-generated certificate by the sower.
 
-What you must set is the upstream http service. You can set it by parameter `-s`, eg:
+What you must set is the upstream HTTP service. You can set it by parameter `-s`, eg:
 ``` shell
 # sower -s 127.0.0.1:8080
 ```
@@ -44,15 +44,15 @@ The easiest way to run it is:
 ```
 But a configuration file is recommended to persist dynamic rules in client side.
 
-There are 3 kinds of proxy solutions, they are: http(s)_proxy / dns-based proxy / port-forward.
+There are 3 kinds of proxy solutions, they are HTTP(S)_PROXY / DNS-based proxy / port-forward.
 
 ### HTTP(S)_PROXY
-An http(s)_proxy listening on `:8080` is setted by deault if you run sower as client mode.
+An HTTP(S)_PROXY listening on `:8080` is set by default if you run sower as client mode.
 
-### dns-based proxy
-You can set the `serve_ip` field in `dns` section in configuration file to start dns-based proxy. You should also set the value of `serve_ip` as your default DNS in OS.
+### DNS-based proxy
+You can set the `serve_ip` field in the `dns` section in the configuration file to start the DNS-based proxy. You should also set the value of `serve_ip` as your default DNS in OS.
 
-If you want to enjoy the full experience provided by sower, you can take sower as your private DNS on long running server and setting it as your default DNS in you router.
+If you want to enjoy the full experience provided by the sower, you can take sower as your private DNS on a long-running server and set it as your default DNS in your router.
 
 ### port-forward
 The port-forward can be only setted in configuration file, you can set it in section `client.router.port_mapping`, eg:
