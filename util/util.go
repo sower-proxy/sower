@@ -1,30 +1,19 @@
 package util
 
 import (
-	"errors"
 	"net"
-	"time"
+	"strconv"
 )
 
-// Iface is net interface address info
-type Iface struct {
-	net.HardwareAddr
-	net.IP
-}
-
-func WithTimeout(fn func() error, timeout time.Duration) error {
-	var okCh = make(chan struct{})
-	var err error
-
-	go func() {
-		err = fn()
-		close(okCh)
-	}()
-
-	select {
-	case <-okCh:
-		return err
-	case <-time.After(timeout):
-		return errors.New("timeout: " + timeout.String())
+func ParseHostPort(addr string, defaultPort uint16) (string, uint16) {
+	h, p, err := net.SplitHostPort(addr)
+	if err != nil {
+		if defaultPort == 0 {
+			panic("parse port fail with no default, addr: " + addr)
+		}
+		return addr, defaultPort
 	}
+
+	pNum, _ := strconv.ParseUint(p, 10, 16)
+	return h, uint16(pNum)
 }

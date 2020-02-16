@@ -14,11 +14,8 @@ type node struct {
 	node map[string]*node
 }
 
-func NewNode(sep string) *Node {
-	return &Node{node{node: map[string]*node{}}, sep, &sync.RWMutex{}}
-}
-func NewNodeFromRules(sep string, rules ...string) *Node {
-	n := NewNode(sep)
+func NewNodeFromRules(rules ...string) *Node {
+	n := &Node{node{node: map[string]*node{}}, ".", &sync.RWMutex{}}
 	for i := range rules {
 		n.Add(rules[i])
 	}
@@ -69,6 +66,9 @@ func (n *node) add(secs []string) {
 }
 
 func (n *Node) Match(item string) bool {
+	if n == nil {
+		return false
+	}
 	return n.matchSecs(strings.Split(n.trim(item), n.sep), false)
 }
 

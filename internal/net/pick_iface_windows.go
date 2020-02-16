@@ -1,6 +1,6 @@
 // +build windows
 
-package util
+package net
 
 import (
 	"bytes"
@@ -11,8 +11,8 @@ import (
 	"unsafe"
 )
 
-// PickInterface pick the first active net interface
-func PickInterface() (*Iface, error) {
+// PickInternetInterface pick the first active net interface
+func PickInternetInterface() (*Iface, error) {
 	list, err := getAdapterList()
 	if err != nil {
 		return nil, err

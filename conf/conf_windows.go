@@ -13,8 +13,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/golang/glog"
-	"github.com/pkg/errors"
+	"github.com/wweir/utils/log"
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/eventlog"
@@ -24,71 +23,33 @@ import (
 const name = "sower"
 const cmdsAccepted = svc.AcceptStop | svc.AcceptShutdown | svc.AcceptPauseAndContinue
 
-func initArgs() {
-	cfgFile, _ := filepath.Abs(filepath.Join(filepath.Dir(os.Args[0]), "sower.toml"))
-	flag.StringVar(&Conf.ConfigFile, "f", cfgFile, "config file location")
-	flag.BoolVar(&Conf.VersionOnly, "V", false, "print sower version")
-	install := flag.Bool("install", false, "install sower as a service")
-	uninstall := flag.Bool("uninstall", false, "uninstall sower from service list")
-	exePath,_:=filepath.Abs(os.Args[0])
+var execFile, _ = filepath.Abs(os.Args[0])
+var execDir, _ = filepath.Abs(filepath.Dir(execFile))
 
-	if !flag.Parsed() {
-		os.Mkdir("log", 0755)
-		flag.Set("log_dir", filepath.Dir(os.Args[0])+"/log")
-		flag.Parse()
-	}
+func Init() {
+	flag.StringVar(&conf.file, "f", filepath.Join(execDir, "sower.toml"), "config file, rewrite all other parameters if set")
+	flag.StringVar(&installCmd, "install", "", "install service with cmd")
+	flag.StringVar(&Client.DNS.FlushCmd, "flush_dns", "ipconfig /flushdnss", "flush dns command")
+	flag.Parse()
 
 	switch {
-	case *install:
-		mgrDo(func(m *mgr.Mgr) error {
-			s, err := m.OpenService(name)
-			if err == nil {
-				s.Close()
-				return fmt.Errorf("service %s already exists", name)
-			}
-			s, err = m.CreateService(name,  exePath, mgr.Config{
-				DisplayName: "Sower Proxy",
-				StartType:   windows.SERVICE_AUTO_START,
-			})
-			if err != nil {
-				return err
-			}
-			defer s.Close()
-			err = eventlog.InstallAsEventCreate(name, eventlog.Error|eventlog.Warning|eventlog.Info)
-			if err != nil {
-				s.Delete()
-				return fmt.Errorf("SetupEventLogSource() failed: %s", err)
-			}
-
-			return s.Start()
-		})
-		os.Exit(0)
-
-	case *uninstall:
-		serviceDo(func(s *mgr.Service) error {
-			err := s.Delete()
-			if err != nil {
-				return err
-			}
-			return eventlog.Remove(name)
-		})
-		os.Exit(0)
-
+	case installCmd != "":
+	case uninstallFlag:
 	default:
 		os.Chdir(filepath.Dir(os.Args[0]))
 		if active, err := svc.IsAnInteractiveSession(); err != nil {
-			glog.Exitf("failed to determine if we are running in an interactive session: %v", err)
+			log.Fatalf("failed to determine if we are running in an interactive session: %v", err)
 		} else if !active {
 			go func() {
 				elog, err := eventlog.Open(name)
 				if err != nil {
-					glog.Exitln(err)
+					log.Fatalw("install service", "err", err)
 				}
 				defer elog.Close()
 
 				if err := svc.Run(name, &myservice{}); err != nil {
 					elog.Error(1, fmt.Sprintf("%s service failed: %v", name, err))
-					glog.Exitln(err)
+					log.Fatalw("install service", "err", err)
 				}
 				elog.Info(1, fmt.Sprintf("winsvc.RunAsService: %s service stopped", name))
 				os.Exit(0)
@@ -96,7 +57,39 @@ func initArgs() {
 		}
 	}
 }
+func install() {
+	mgrDo(func(m *mgr.Mgr) error {
+		s, err := m.OpenService(name)
+		if err == nil {
+			s.Close()
+			return fmt.Errorf("service %s already exists", name)
+		}
+		s, err = m.CreateService(name, execFile, mgr.Config{
+			DisplayName: "Sower Proxy",
+			StartType:   windows.SERVICE_AUTO_START,
+		})
+		if err != nil {
+			return err
+		}
+		defer s.Close()
+		err = eventlog.InstallAsEventCreate(name, eventlog.Error|eventlog.Warning|eventlog.Info)
+		if err != nil {
+			s.Delete()
+			return fmt.Errorf("SetupEventLogSource() failed: %s", err)
+		}
 
+		return s.Start()
+	})
+}
+func uninstall() {
+	serviceDo(func(s *mgr.Service) error {
+		err := s.Delete()
+		if err != nil {
+			return err
+		}
+		return eventlog.Remove(name)
+	})
+}
 func serviceDo(fn func(*mgr.Service) error) {
 	mgrDo(func(m *mgr.Mgr) error {
 		s, err := m.OpenService(name)
@@ -110,12 +103,12 @@ func serviceDo(fn func(*mgr.Service) error) {
 func mgrDo(fn func(m *mgr.Mgr) error) {
 	m, err := mgr.Connect()
 	if err != nil {
-		glog.Exitln(err)
+		log.Fatalw("install service", "err", err)
 	}
 	defer m.Disconnect()
 
 	if err := fn(m); err != nil {
-		glog.Fatalln(err)
+		log.Fatalw("install service", "err", err)
 	}
 }
 
@@ -124,7 +117,7 @@ type myservice struct{}
 func (m *myservice) Execute(args []string, r <-chan svc.ChangeRequest, changes chan<- svc.Status) (ssec bool, errno uint32) {
 	elog, err := eventlog.Open(name)
 	if err != nil {
-		glog.Errorln(err)
+		log.Errorw("install service", "err", err)
 		return
 	}
 	defer elog.Close()
@@ -158,7 +151,7 @@ func execute(cmd string) error {
 	defer cancel()
 
 	var cmds []string
-	for _, cmd := range strings.Split(Conf.ClearDNSCache, " ") {
+	for _, cmd := range strings.Split(Client.DNS.FlushCmd, " ") {
 		if cmd == "" {
 			continue
 		}
@@ -174,6 +167,8 @@ func execute(cmd string) error {
 
 	command := exec.CommandContext(ctx, cmds[0], cmds[1:]...)
 	command.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-	out, err := command.CombinedOutput()
-	return errors.Wrapf(err, "cmd: %s, output: %s, error", Conf.ClearDNSCache, out)
+	if out, err := command.CombinedOutput(); err != nil {
+		return fmt.Errorf("cmd: %s, output: %s, err: %w", Client.DNS.FlushCmd, out, err)
+	}
+	return nil
 }

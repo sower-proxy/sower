@@ -1,28 +1,31 @@
 package proxy
 
 import (
+	"crypto/tls"
 	"io"
 	"net"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/golang/glog"
+	"github.com/wweir/sower/internal/http"
+	"github.com/wweir/sower/internal/socks5"
 )
 
-// race safe
-var resolved = false
-
-func resolveAddr(server *string) {
-	if !resolved {
-		if addr, err := net.ResolveTCPAddr("tcp", *server); err != nil {
-			glog.Errorln(err)
-		} else {
-			glog.Infof("remote server (%s)=>(%s)", *server, addr)
-			*server = addr.String()
-			resolved = true
+func dial(serverAddr string, password []byte, tgtType byte, domain string, port uint16) (net.Conn, error) {
+	if addr, ok := socks5.IsSocks5Schema(serverAddr); ok {
+		conn, err := net.Dial("tcp", addr)
+		if err != nil {
+			return nil, err
 		}
+		return socks5.ToSocks5(conn, domain, port), nil
 	}
+
+	conn, err := tls.Dial("tcp", net.JoinHostPort(serverAddr, "443"), &tls.Config{})
+	if err != nil {
+		return nil, err
+	}
+	return http.NewTgtConn(conn, password, tgtType, domain, port), nil
 }
 
 func relay(conn1, conn2 net.Conn) {
@@ -35,18 +38,13 @@ func relay(conn1, conn2 net.Conn) {
 }
 
 func redirect(dst, src net.Conn, wg *sync.WaitGroup, exitFlag *int32) {
-	if _, err := io.Copy(dst, src); err != nil {
-		glog.V(1).Infof("%s<>%s -> %s<>%s: %s", src.RemoteAddr(), src.LocalAddr(), dst.LocalAddr(), dst.RemoteAddr(), err)
-	}
+	io.Copy(dst, src)
 
 	if atomic.CompareAndSwapInt32(exitFlag, 0, 1) {
 		// wakeup blocked goroutine
 		now := time.Now()
 		src.SetDeadline(now)
 		dst.SetDeadline(now)
-	} else {
-		src.Close()
-		dst.Close()
 	}
 
 	wg.Done()

@@ -6,26 +6,23 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/url"
+	"strconv"
 	"time"
 
-	"github.com/golang/glog"
-	"github.com/wweir/sower/proxy/parser"
-	"github.com/wweir/sower/proxy/shadow"
-	"github.com/wweir/sower/proxy/socks5"
-	"github.com/wweir/sower/proxy/transport"
+	"github.com/wweir/sower/conf"
+	_http "github.com/wweir/sower/internal/http"
+	"github.com/wweir/sower/util"
+	"github.com/wweir/utils/log"
 )
 
-func StartHttpProxy(tran transport.Transport, isSocks5 bool, server, cipher, password, addr string) {
+func startHTTPProxy(httpProxyAddr, serverAddr string, password []byte) {
 	srv := &http.Server{
-		Addr: addr,
+		Addr: httpProxyAddr,
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			resolveAddr(&server)
-
 			if r.Method == http.MethodConnect {
-				httpsProxy(w, r, tran, isSocks5, server, cipher, password)
+				httpsProxy(w, r, serverAddr, password)
 			} else {
-				httpProxy(w, r, tran, isSocks5, server, cipher, password)
+				httpProxy(w, r, serverAddr, password)
 			}
 		}),
 		// Disable HTTP/2.
@@ -33,40 +30,22 @@ func StartHttpProxy(tran transport.Transport, isSocks5 bool, server, cipher, pas
 		IdleTimeout:  90 * time.Second,
 	}
 
-	glog.Fatalln(srv.ListenAndServe())
+	go log.Fatalw("serve http proxy", "addr", httpProxyAddr, "err", srv.ListenAndServe())
 }
 
-func httpProxy(w http.ResponseWriter, r *http.Request,
-	tran transport.Transport, isSocks5 bool, server, cipher, password string) {
+func httpProxy(w http.ResponseWriter, r *http.Request, serverAddr string, password []byte) {
+	host, port := util.ParseHostPort(r.Host, 80)
 
-	roundTripper := &http.Transport{
-		MaxIdleConns:          100,
-		IdleConnTimeout:       90 * time.Second,
-		TLSHandshakeTimeout:   10 * time.Second,
-		ExpectContinueTimeout: 1 * time.Second,
-	}
-
-	if isSocks5 {
-		roundTripper.Proxy = func(*http.Request) (*url.URL, error) {
-			return url.Parse("socks5://" + server)
-		}
-
-	} else {
-		roundTripper.DialContext = func(context.Context, string, string) (net.Conn, error) {
-			conn, err := tran.Dial(server)
-			if err != nil {
-				return nil, err
-			}
-
-			conn = shadow.Shadow(conn, cipher, password)
-			return parser.NewHttpConn(conn), nil
+	roundTripper := &http.Transport{}
+	if conf.ShouldProxy(host) {
+		roundTripper.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return dial(serverAddr, password, _http.TGT_HTTP, host, port)
 		}
 	}
 
 	resp, err := roundTripper.RoundTrip(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
-		glog.Errorln("serve https proxy, get remote data:", err)
 		return
 	}
 	defer resp.Body.Close()
@@ -80,10 +59,9 @@ func httpProxy(w http.ResponseWriter, r *http.Request,
 	io.Copy(w, resp.Body)
 }
 
-func httpsProxy(w http.ResponseWriter, r *http.Request,
-	tran transport.Transport, isSocks5 bool, server, cipher, password string) {
+func httpsProxy(w http.ResponseWriter, r *http.Request, serverAddr string, password []byte) {
+	host, port := util.ParseHostPort(r.Host, 443)
 
-	// local conn
 	conn, _, err := w.(http.Hijacker).Hijack()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
@@ -94,34 +72,21 @@ func httpsProxy(w http.ResponseWriter, r *http.Request,
 	if _, err := conn.Write([]byte(r.Proto + " 200 Connection established\r\n\r\n")); err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		conn.Close()
-		glog.Errorln("serve https proxy, write data fail:", err)
 		return
 	}
 
-	// remote conn
-	rc, err := tran.Dial(server)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
-		conn.Close()
-		glog.Errorln("serve https proxy, dial remote fail:", err)
-		return
-	}
-
-	host, port, err := net.SplitHostPort(r.Host)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
-		conn.Close()
-		glog.Errorln("serve https proxy, dial remote fail:", err)
-		return
-	}
-
-	if isSocks5 {
-		rc = socks5.ToSocks5(rc, host, port)
-
+	var rc net.Conn
+	if conf.ShouldProxy(host) {
+		rc, err = dial(serverAddr, password, _http.TGT_HTTPS, host, port)
 	} else {
-		rc = shadow.Shadow(rc, cipher, password)
-		rc = parser.NewHttpsConn(rc, port)
+		rc, err = net.Dial("tcp", net.JoinHostPort(host, strconv.Itoa(int(port))))
 	}
+	if err != nil {
+		conn.Write([]byte("sower dial " + serverAddr + " fail: " + err.Error()))
+		conn.Close()
+		return
+	}
+	defer rc.Close()
 
-	relay(rc, conn)
+	relay(conn, rc)
 }

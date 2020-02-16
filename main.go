@@ -1,50 +1,30 @@
 package main
 
 import (
-	"encoding/json"
+	"flag"
 	"fmt"
-	"net"
 
-	"github.com/golang/glog"
 	"github.com/wweir/sower/conf"
-	"github.com/wweir/sower/dns"
 	"github.com/wweir/sower/proxy"
-	"github.com/wweir/sower/proxy/transport"
 )
 
-var version, date string
-
 func main() {
-	cfg := &conf.Conf
-	if cfg.VersionOnly {
-		config, _ := json.MarshalIndent(cfg, "", "\t")
-		fmt.Printf("Version:\n\t%s %s\nConfig:\n%s", version, date, config)
-		return
-	}
-	glog.Infof("Starting sower(%s %s): %v", version, date, cfg)
-
-	tran, err := transport.GetTransport(cfg.NetType)
-	if err != nil {
-		glog.Exitln(err)
+	if conf.Server.Upstream != "" {
+		proxy.StartServer(conf.Server.Upstream, conf.Password,
+			conf.Server.CertFile, conf.Server.KeyFile, conf.Server.CertEmail)
 	}
 
-	if cfg.ServerAddr == "" {
-		proxy.StartServer(tran, cfg.ServerPort, cfg.Cipher, cfg.Password)
-
-	} else {
-		conf.AddRefreshFn(true, func() (string, error) {
-			dns.LoadRules(cfg.BlockList, cfg.Suggestions, cfg.WhiteList, cfg.ServerAddr)
-			return "load rules", nil
-		})
-
-		isSocks5 := (cfg.NetType == "SOCKS5")
-		serverAddr := net.JoinHostPort(cfg.ServerAddr, cfg.ServerPort)
-
-		if cfg.HTTPProxy != "" {
-			go proxy.StartHttpProxy(tran, isSocks5, serverAddr, cfg.Cipher, cfg.Password, cfg.HTTPProxy)
+	if conf.Client.Address != "" {
+		if conf.Client.DNS.ServeIP != "" {
+			go proxy.StartDNS(conf.Client.DNS.ServeIP, conf.Client.DNS.Upstream)
 		}
 
-		go dns.StartDNS(cfg.DNSServer, cfg.ClientIP, conf.SuggestCh, cfg.SuggestLevel)
-		proxy.StartClient(tran, isSocks5, serverAddr, cfg.Cipher, cfg.Password, cfg.ClientIP)
+		proxy.StartClient(conf.Password, conf.Client.Address, conf.Client.HTTPProxy.Address,
+			conf.Client.DNS.ServeIP, conf.Client.Router.PortMapping)
+	}
+
+	if conf.Server.Upstream == "" && conf.Client.Address == "" {
+		fmt.Println()
+		flag.Usage()
 	}
 }
