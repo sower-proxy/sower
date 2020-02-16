@@ -11,7 +11,7 @@ import (
 	"github.com/wweir/utils/log"
 )
 
-func ServeDNS(redirectIP, relayServer string) {
+func StartDNS(redirectIP, relayServer string) {
 	serveIP := net.ParseIP(redirectIP)
 	if redirectIP == "" || serveIP.String() != redirectIP {
 		log.Fatalw("invalid listen ip", "ip", redirectIP)

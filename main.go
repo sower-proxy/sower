@@ -16,7 +16,7 @@ func main() {
 
 	if conf.Client.Address != "" {
 		if conf.Client.DNS.ServeIP != "" {
-			go proxy.ServeDNS(conf.Client.DNS.ServeIP, conf.Client.DNS.Upstream)
+			go proxy.StartDNS(conf.Client.DNS.ServeIP, conf.Client.DNS.Upstream)
 		}
 
 		proxy.StartClient(conf.Password, conf.Client.Address, conf.Client.HTTPProxy.Address,

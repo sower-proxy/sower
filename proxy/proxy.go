@@ -43,9 +43,11 @@ func StartClient(password, serverAddr, httpProxy, dnsServeIP string, forwards ma
 
 			go func(conn net.Conn) {
 				defer conn.Close()
+
 				if isSocks5 {
 					teeConn := &util.TeeConn{Conn: conn}
 					teeConn.StartOrReset()
+
 					switch tgtType {
 					case _http.TGT_HTTP:
 						conn, host, port, err = _http.ParseHTTP(teeConn)
