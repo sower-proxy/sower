@@ -7,6 +7,8 @@ import (
 	"strconv"
 
 	_http "github.com/wweir/sower/internal/http"
+	"github.com/wweir/sower/internal/socks5"
+	"github.com/wweir/sower/util"
 	"github.com/wweir/utils/log"
 	"golang.org/x/crypto/acme/autocert"
 )
@@ -20,6 +22,8 @@ type head struct {
 
 func StartClient(password, serverAddr, httpProxy, dnsServeIP string, forwards map[string]string) {
 	passwordData := []byte(password)
+	_, isSocks5 := socks5.IsSocks5Schema(serverAddr)
+
 	if httpProxy != "" {
 		go startHTTPProxy(httpProxy, serverAddr, passwordData)
 	}
@@ -39,15 +43,30 @@ func StartClient(password, serverAddr, httpProxy, dnsServeIP string, forwards ma
 
 			go func(conn net.Conn) {
 				defer conn.Close()
+				if isSocks5 {
+					teeConn := &util.TeeConn{Conn: conn}
+					teeConn.StartOrReset()
+					switch tgtType {
+					case _http.TGT_HTTP:
+						conn, host, port, err = _http.ParseHTTP(teeConn)
+					case _http.TGT_HTTPS:
+						conn, host, err = _http.ParseHTTPS(teeConn)
+					}
+					if err != nil {
+						log.Errorw("parse socks5 target", "err", err)
+						return
+					}
+					teeConn.Stop()
+				}
 
-				rc, err := tls.Dial("tcp", net.JoinHostPort(serverAddr, "443"), &tls.Config{})
+				rc, err := dial(serverAddr, passwordData, tgtType, host, port)
 				if err != nil {
-					log.Errorw("tls dial", "addr", net.JoinHostPort(serverAddr, "443"), "err", err)
+					log.Errorw("dial", "addr", serverAddr, "err", err)
 					return
 				}
 				defer rc.Close()
 
-				relay(conn, _http.NewTgtConn(rc, passwordData, tgtType, host, port))
+				relay(conn, rc)
 			}(conn)
 		}
 	}
@@ -59,16 +78,7 @@ func StartClient(password, serverAddr, httpProxy, dnsServeIP string, forwards ma
 
 	for from, to := range forwards {
 		go func(from, to string) {
-			host, portStr, err := net.SplitHostPort(to)
-			if err != nil {
-				log.Fatalw("parse port forward", "target", to, "err", err)
-			}
-			portNum, err := strconv.ParseUint(portStr, 10, 16)
-			if err != nil {
-				log.Fatalw("parse port forward", "target", to, "err", err)
-			}
-			port := uint16(portNum)
-
+			host, port := util.ParseHostPort(to, 0)
 			relayToRemote(_http.TGT_OTHER, from, host, port)
 		}(from, to)
 	}

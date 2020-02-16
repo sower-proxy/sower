@@ -47,7 +47,7 @@ func ServeDNS(redirectIP, relayServer string) {
 			server, err := pickRelayAddr(relayServer)
 			if err != nil {
 				log.Errorw("detect upstream dns", "err", err)
-			} else {
+			} else if relayServer != server {
 				relayServer = server
 				log.Infow("detect upstream dns", "addr", relayServer)
 			}

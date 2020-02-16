@@ -72,16 +72,10 @@ func (c *conn) Write(b []byte) (n int, err error) {
 }
 
 // ParseAddr parse target addr from net.Conn
-func ParseAddr(conn net.Conn, password []byte) (c net.Conn, domain string, port uint16, err error) {
+func ParseAddr(conn net.Conn, password []byte) (_ net.Conn, domain string, port uint16, err error) {
 	teeConn := &util.TeeConn{Conn: conn}
 	teeConn.StartOrReset()
-	defer func() {
-		if err != nil {
-			teeConn.Close()
-		} else {
-			teeConn.Stop()
-		}
-	}()
+	defer teeConn.Stop()
 
 	head := new(header)
 	if err = binary.Read(conn, binary.BigEndian, head); err != nil {
@@ -102,36 +96,39 @@ func ParseAddr(conn net.Conn, password []byte) (c net.Conn, domain string, port 
 
 	case TGT_HTTP:
 		teeConn.DropAndRestart()
-
-		var resp *http.Request
-		resp, err = http.ReadRequest(bufio.NewReader(teeConn))
-		if err != nil {
-			return nil, "", 0, err
-		}
-
-		idx := strings.LastIndex(resp.Host, ":")
-		if idx == -1 {
-			return teeConn, resp.Host, 80, nil
-		}
-
-		var port uint64
-		if port, err = strconv.ParseUint(resp.Host[idx+1:], 10, 16); err != nil {
-			return nil, "", 0, err
-		}
-		return teeConn, resp.Host[:idx], uint16(port), nil
+		return ParseHTTP(teeConn)
 
 	case TGT_HTTPS:
 		teeConn.DropAndRestart()
-
-		domain, _, err := extractSNI(teeConn)
-		if err != nil {
-			return nil, "", 0, err
-		}
-		return teeConn, domain, head.Port, nil
+		conn, domain, err = ParseHTTPS(teeConn)
+		return conn, domain, head.Port, err
 
 	default:
-		return nil, "", 0, errors.New("invalid request")
+		return teeConn, "", 0, errors.New("invalid request")
 	}
+}
+func ParseHTTP(teeConn net.Conn) (_ net.Conn, domain string, port uint16, err error) {
+	resp, err := http.ReadRequest(bufio.NewReader(teeConn))
+	if err != nil {
+		return teeConn, "", 0, err
+	}
+
+	idx := strings.LastIndex(resp.Host, ":")
+	if idx == -1 {
+		return teeConn, resp.Host, 80, nil
+	}
+
+	p, err := strconv.ParseUint(resp.Host[idx+1:], 10, 16)
+	if err != nil {
+		return teeConn, "", 0, err
+	}
+	return teeConn, resp.Host[:idx], uint16(p), nil
+}
+func ParseHTTPS(teeConn net.Conn) (_ net.Conn, domain string, err error) {
+	if domain, _, err = extractSNI(teeConn); err != nil {
+		return nil, "", err
+	}
+	return teeConn, domain, nil
 }
 
 var errChecksum = errors.New("invalid checksum")

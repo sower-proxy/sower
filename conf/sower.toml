@@ -1,5 +1,5 @@
 [client]
-  address = "aa.bb.cc"
+  address = "" # aa.bb.cc, socks5h://127.0.0.1:1080
 
   [client.dns]
     flush_cmd="" # macOS: pkill mDNSResponder || true, Windows: ipconfig /flushdnss

@@ -5,13 +5,28 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"strconv"
+	"strings"
 )
 
-func ToSocks5(c net.Conn, domain, port string) net.Conn {
-	num, _ := strconv.Atoi(port)
-	bytes := []byte{byte(num >> 8), byte(num)}
-	return &conn{init: make(chan struct{}), Conn: c, domain: domain, port: bytes}
+func IsSocks5Schema(addr string) (string, bool) {
+	if strings.HasPrefix(addr, "socks5://") {
+		return strings.TrimPrefix(addr, "socks5://"), true
+	}
+
+	if strings.HasPrefix(addr, "socks5h://") {
+		return strings.TrimPrefix(addr, "socks5h://"), true
+	}
+
+	return addr, false
+}
+
+func ToSocks5(c net.Conn, domain string, port uint16) net.Conn {
+	return &conn{
+		init:   make(chan struct{}),
+		Conn:   c,
+		domain: domain,
+		port:   []byte{byte(port >> 8), byte(port)},
+	}
 }
 
 type conn struct {
@@ -105,45 +120,4 @@ func (c *conn) Write(b []byte) (n int, err error) {
 
 	close(c.init)
 	return c.Conn.Write(b)
-}
-
-type authReq struct {
-	VER      byte
-	NMETHODS byte
-	METHODS  [1]byte // 1 to 255, fix to no authentication
-}
-
-type authResp struct {
-	VER    byte
-	METHOD byte
-}
-
-type request struct {
-	req
-	DST_ADDR []byte // first byte is length
-	DST_PORT []byte // two bytes
-}
-type req struct {
-	VER  byte
-	CMD  byte
-	RSV  byte
-	ATYP byte
-}
-
-func (r *request) Bytes() []byte {
-	out := []byte{r.VER, r.CMD, r.RSV, r.ATYP}
-	out = append(out, r.DST_ADDR...)
-	return append(out, r.DST_PORT...)
-}
-
-type response struct {
-	resp
-	DST_ADDR []byte // first byte is length
-	DST_PORT []byte // two bytes
-}
-type resp struct {
-	VER  byte
-	REP  byte
-	RSV  byte
-	ATYP byte
 }

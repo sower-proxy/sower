@@ -11,6 +11,7 @@ import (
 
 	"github.com/wweir/sower/conf"
 	_http "github.com/wweir/sower/internal/http"
+	"github.com/wweir/sower/util"
 	"github.com/wweir/utils/log"
 )
 
@@ -33,20 +34,12 @@ func startHTTPProxy(httpProxyAddr, serverAddr string, password []byte) {
 }
 
 func httpProxy(w http.ResponseWriter, r *http.Request, serverAddr string, password []byte) {
-	host, _, err := net.SplitHostPort(r.Host)
-	if err != nil {
-		host = r.Host
-	}
+	host, port := util.ParseHostPort(r.Host, 80)
 
 	roundTripper := &http.Transport{}
 	if conf.ShouldProxy(host) {
 		roundTripper.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-			conn, err := tls.Dial("tcp", net.JoinHostPort(serverAddr, "443"), &tls.Config{})
-			if err != nil {
-				return nil, err
-			}
-
-			return _http.NewTgtConn(conn, password, _http.TGT_HTTP, "", 80), nil
+			return dial(serverAddr, password, _http.TGT_HTTP, host, port)
 		}
 	}
 
@@ -67,17 +60,7 @@ func httpProxy(w http.ResponseWriter, r *http.Request, serverAddr string, passwo
 }
 
 func httpsProxy(w http.ResponseWriter, r *http.Request, serverAddr string, password []byte) {
-	var host string
-	var port = uint16(443)
-	if h, p, err := net.SplitHostPort(r.Host); err != nil {
-		host = r.Host
-	} else if pNum, err := strconv.ParseUint(p, 10, 16); err != nil {
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
-		return
-	} else {
-		host = h
-		port = uint16(pNum)
-	}
+	host, port := util.ParseHostPort(r.Host, 443)
 
 	conn, _, err := w.(http.Hijacker).Hijack()
 	if err != nil {
@@ -94,21 +77,14 @@ func httpsProxy(w http.ResponseWriter, r *http.Request, serverAddr string, passw
 
 	var rc net.Conn
 	if conf.ShouldProxy(host) {
-		rc, err = tls.Dial("tcp", net.JoinHostPort(serverAddr, "443"), &tls.Config{})
-		if err != nil {
-			conn.Write([]byte("sower: tls dial: " + err.Error()))
-			conn.Close()
-			return
-		}
-		rc = _http.NewTgtConn(rc, password, _http.TGT_HTTPS, "", port)
-
+		rc, err = dial(serverAddr, password, _http.TGT_HTTPS, host, port)
 	} else {
 		rc, err = net.Dial("tcp", net.JoinHostPort(host, strconv.Itoa(int(port))))
-		if err != nil {
-			conn.Write([]byte("sower: tcp dial: " + err.Error()))
-			conn.Close()
-			return
-		}
+	}
+	if err != nil {
+		conn.Write([]byte("sower dial " + serverAddr + " fail: " + err.Error()))
+		conn.Close()
+		return
 	}
 	defer rc.Close()
 

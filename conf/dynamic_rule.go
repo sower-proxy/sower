@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/wweir/sower/internal/http"
+	"github.com/wweir/sower/internal/socks5"
 	"github.com/wweir/sower/util"
 	"github.com/wweir/utils/log"
 	"github.com/wweir/utils/mem"
@@ -78,15 +79,21 @@ func (d *dynamic) Get(key interface{}) (err error) {
 			defer wg.Done()
 
 			var conn net.Conn
-			if conn, err = tls.Dial("tcp", net.JoinHostPort(Client.Address, "443"), &tls.Config{}); err != nil {
-				log.Errorw("tls dial", "addr", net.JoinHostPort(Client.Address, "443"), "err", err)
-				return
-			}
+			if addr, ok := socks5.IsSocks5Schema(Client.Address); ok {
+				conn, err = net.Dial("tcp", addr)
+				conn = socks5.ToSocks5(conn, domain, uint16(ping.port))
 
-			if ping.port == http.HTTP {
-				conn = http.NewTgtConn(conn, passwordData, http.TGT_HTTP, "", 80)
 			} else {
-				conn = http.NewTgtConn(conn, passwordData, http.TGT_HTTPS, "", 443)
+				conn, err = tls.Dial("tcp", net.JoinHostPort(Client.Address, "443"), &tls.Config{})
+				if ping.port == http.HTTP {
+					conn = http.NewTgtConn(conn, passwordData, http.TGT_HTTP, "", 80)
+				} else {
+					conn = http.NewTgtConn(conn, passwordData, http.TGT_HTTPS, "", 443)
+				}
+			}
+			if err != nil {
+				log.Errorw("sower dial", "addr", Client.Address, "err", err)
+				return
 			}
 
 			if err := ping.port.PingWithConn(domain, conn, timeout); err != nil {

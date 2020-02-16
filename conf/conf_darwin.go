@@ -15,13 +15,13 @@ import (
 	"github.com/wweir/utils/log"
 )
 
-const svcPath = "/Library/LaunchDaemons/cc.wweir.sower.plist"
+const svcPath = "/Library/LaunchDaemons/sower.plist"
 const svcFile = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>cc.wweir.sower</string>
+  <string>sower</string>
   <key>ProgramArguments</key>
   <array>
     <string>/bin/sh</string>

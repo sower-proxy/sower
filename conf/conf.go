@@ -68,7 +68,7 @@ func init() {
 	flag.StringVar(&Server.Upstream, "s", "", "upstream http service, eg: 127.0.0.1:8080")
 	flag.StringVar(&Server.CertFile, "s_cert", "", "tls cert file, gen cert from letsencrypt if empty")
 	flag.StringVar(&Server.KeyFile, "s_key", "", "tls key file, gen cert from letsencrypt if empty")
-	flag.StringVar(&Client.Address, "c", "", "remote server domain, eg: aa.bb.cc") // TODO: socks5://127.0.0.1:1080
+	flag.StringVar(&Client.Address, "c", "", "remote server domain, eg: aa.bb.cc, socks5h://127.0.0.1:1080")
 	flag.StringVar(&Client.HTTPProxy.Address, "http_proxy", ":8080", "http proxy, empty to disable")
 	flag.StringVar(&Client.DNS.ServeIP, "dns_ip", "", "upstream dns, eg: 127.0.0.1, disable dns proxy if empty")
 	flag.StringVar(&Client.DNS.Upstream, "dns_upstream", "", "dns relay server ip, dynamic detect if empty")
