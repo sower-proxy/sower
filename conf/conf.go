@@ -3,7 +3,6 @@ package conf
 import (
 	"flag"
 	"os"
-	"sync"
 	"time"
 
 	toml "github.com/pelletier/go-toml"
@@ -29,9 +28,9 @@ type client struct {
 		DetectLevel   int               `toml:"detect_level"`
 		DetectTimeout string            `toml:"detect_timeout"`
 
-		ProxyList    []string `toml:"proxy_list"`
-		DirectList   []string `toml:"direct_list"`
-		DynamicList  []string `toml:"dynamic_list"`
+		ProxyList    []string       `toml:"proxy_list"`
+		DirectList   []string       `toml:"direct_list"`
+		DynamicList  map[string]int `toml:"dynamic_list"` // toml has a bug with dot
 		directRules  *util.Node
 		proxyRules   *util.Node
 		dynamicRules *util.Node
@@ -47,10 +46,6 @@ type server struct {
 var (
 	version, date string
 
-	flushOnce = sync.Once{}
-	flushMu   = sync.Mutex{}
-	flushCh   = make(chan struct{})
-
 	Server = server{}
 	Client = client{}
 	conf   = struct {
@@ -58,6 +53,7 @@ var (
 		Server *server `toml:"server"`
 		Client *client `toml:"client"`
 	}{"", &Server, &Client}
+	flushCh       = make(chan struct{})
 	Password      string
 	installCmd    string
 	uninstallFlag bool
@@ -108,6 +104,8 @@ func init() {
 			log.Fatalw("load config", "config", conf.file, "step", loadConfigFns[i].step, "err", err)
 		}
 	}
+
+	go flushConfDaemon()
 }
 
 // refreshFns will be executed while init and write new config
@@ -121,12 +119,12 @@ var loadConfigFns = []struct {
 	}
 	defer f.Close()
 
+	Client.Router.DynamicList = map[string]int{}
 	return toml.NewDecoder(f).Decode(&conf)
 
 }}, {"load_rules", func() error {
 	Client.Router.directRules = util.NewNodeFromRules(Client.Router.DirectList...)
 	Client.Router.proxyRules = util.NewNodeFromRules(Client.Router.ProxyList...)
-	Client.Router.dynamicRules = util.NewNodeFromRules(Client.Router.DynamicList...)
 	return nil
 
 }}, {"flush_dns", func() error {
@@ -136,9 +134,9 @@ var loadConfigFns = []struct {
 	return nil
 }}}
 
-func flushConf() {
+func flushConfDaemon() {
 	for range flushCh {
-		// safe write
+		// safe write file
 		if conf.file != "" {
 			f, err := os.OpenFile(conf.file+"~", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 			if err != nil {
@@ -146,14 +144,11 @@ func flushConf() {
 				continue
 			}
 
-			flushMu.Lock()
 			if err := toml.NewEncoder(f).ArraysWithOneElementPerLine(true).Encode(conf); err != nil {
 				log.Errorw("flush config", "step", "flush", "err", err)
-				flushMu.Unlock()
 				f.Close()
 				continue
 			}
-			flushMu.Unlock()
 			f.Close()
 
 			if err = os.Rename(conf.file+"~", conf.file); err != nil {

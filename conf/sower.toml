@@ -22,7 +22,6 @@
       "pop.*.*.*",
       "**.cn",
     ]
-    dynamic_list = []
     proxy_list = [
       "**.google.*",
       "**.goo.gl",
@@ -44,6 +43,7 @@
       "**.amazon.com",
       "**.amazonaws.com",
       "*.githubusercontent.com",
+      "*.githubassets.com",
       "*.github.*",
     ]
 

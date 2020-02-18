@@ -147,7 +147,7 @@ func StartServer(relayTarget, password, certFile, keyFile, email string) {
 
 			rc, err := net.Dial("tcp", addr)
 			if err != nil {
-				log.Errorw("tcp dial", "host", domain, "addr", addr, "err", err)
+				log.Errorw("tcp dial", "addr", addr, "err", err)
 				return
 			}
 			defer rc.Close()
