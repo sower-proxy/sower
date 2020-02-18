@@ -64,7 +64,12 @@ func (c *conn) Write(b []byte) (n int, err error) {
 			return 0, err
 		}
 
-		n, err := c.Conn.Write(append(c.domain, b...))
+		switch c.typ {
+		case TGT_OTHER:
+			n, err = c.Conn.Write(append(c.domain, b...))
+		default:
+			n, err = c.Conn.Write(b)
+		}
 		return n - len(c.domain), err
 	}
 

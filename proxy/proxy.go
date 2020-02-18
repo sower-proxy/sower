@@ -133,12 +133,13 @@ func StartServer(relayTarget, password, certFile, keyFile, email string) {
 		}
 
 		go func(conn net.Conn) {
+			defer conn.Close()
+
 			conn, domain, port, err := _http.ParseAddr(conn, passwordData)
 			if err != nil {
 				log.Errorw("parse relay target", "err", err)
 				return
 			}
-			defer conn.Close()
 
 			addr := relayTarget
 			if domain != "" {

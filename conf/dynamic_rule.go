@@ -27,8 +27,14 @@ var dynamicMu = sync.Mutex{}
 
 // ShouldProxy check if the domain shoule request though proxy
 func ShouldProxy(domain string) bool {
+	// break deadlook, for wildcard
+	if strings.Count(domain, ".") > 4 {
+		return false
+	}
+	domain = strings.TrimSuffix(domain, ".")
+
 	if domain == Client.Address {
-		return true
+		return false
 	}
 	if Client.Router.directRules.Match(domain) {
 		return false
@@ -43,11 +49,7 @@ func ShouldProxy(domain string) bool {
 }
 
 func (d *dynamic) Get(key interface{}) (err error) {
-	// break deadloop, for ugly wildcard setting dns setting
-	domain := strings.TrimSuffix(key.(string), ".")
-	if strings.Count(domain, ".") > 10 {
-		return nil
-	}
+	domain := key.(string)
 	domainUnderscore := strings.ReplaceAll(domain, ".", "_")
 	var score int
 
