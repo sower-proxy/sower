@@ -1,10 +1,11 @@
-package socks5
+package transport
 
 import (
 	"encoding/binary"
 	"fmt"
 	"io"
 	"net"
+	"strconv"
 	"strings"
 )
 
@@ -20,13 +21,22 @@ func IsSocks5Schema(addr string) (string, bool) {
 	return addr, false
 }
 
-func ToSocks5(c net.Conn, domain string, port uint16) net.Conn {
+func ToSocks5(c net.Conn, address string) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(address)
+	if err != nil {
+		return nil, err
+	}
+	p, err := strconv.Atoi(port)
+	if err != nil {
+		return nil, err
+	}
+
 	return &conn{
 		init:   make(chan struct{}),
 		Conn:   c,
-		domain: domain,
-		port:   []byte{byte(port >> 8), byte(port)},
-	}
+		domain: host,
+		port:   []byte{byte(p >> 8), byte(p)},
+	}, nil
 }
 
 type conn struct {

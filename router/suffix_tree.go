@@ -1,4 +1,4 @@
-package util
+package router
 
 import (
 	"strings"
@@ -69,6 +69,9 @@ func (n *Node) Match(item string) bool {
 	if n == nil {
 		return false
 	}
+
+	n.RLock()
+	defer n.RUnlock()
 	return n.matchSecs(strings.Split(n.trim(item), n.sep), false)
 }
 

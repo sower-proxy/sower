@@ -4,31 +4,20 @@ import (
 	"crypto/tls"
 	"net"
 	"net/http"
-	"strconv"
+	"os"
+	"path/filepath"
 
-	_http "github.com/wweir/sower/internal/http"
-	"github.com/wweir/sower/internal/socks5"
-	"github.com/wweir/sower/util"
+	"github.com/wweir/sower/transport"
 	"github.com/wweir/utils/log"
 	"golang.org/x/crypto/acme/autocert"
 )
 
-const configDir = "/etc/sower"
-
-type head struct {
-	checksum byte
-	length   byte
-}
-
-func StartClient(password, serverAddr, httpProxy, dnsServeIP string, forwards map[string]string) {
+func StartClient(serverAddr, password string, enableDNS bool, forwards map[string]string) {
 	passwordData := []byte(password)
-	_, isSocks5 := socks5.IsSocks5Schema(serverAddr)
 
-	if httpProxy != "" {
-		go startHTTPProxy(httpProxy, serverAddr, passwordData)
-	}
+	relayToRemote := func(lnAddr, target string,
+		parseFn func(net.Conn) (net.Conn, string, error)) {
 
-	relayToRemote := func(tgtType byte, lnAddr string, host string, port uint16) {
 		ln, err := net.Listen("tcp", lnAddr)
 		if err != nil {
 			log.Fatalw("tcp listen", "port", lnAddr, "err", err)
@@ -44,26 +33,16 @@ func StartClient(password, serverAddr, httpProxy, dnsServeIP string, forwards ma
 			go func(conn net.Conn) {
 				defer conn.Close()
 
-				if isSocks5 {
-					teeConn := &util.TeeConn{Conn: conn}
-					teeConn.StartOrReset()
-
-					switch tgtType {
-					case _http.TGT_HTTP:
-						conn, host, port, err = _http.ParseHTTP(teeConn)
-					case _http.TGT_HTTPS:
-						conn, host, err = _http.ParseHTTPS(teeConn)
-					}
-					if err != nil {
-						log.Errorw("parse socks5 target", "err", err)
+				if parseFn != nil {
+					if conn, target, err = parseFn(conn); err != nil {
+						log.Warnw("parse target", "err", err)
 						return
 					}
-					teeConn.Stop()
 				}
 
-				rc, err := dial(serverAddr, passwordData, tgtType, host, port)
+				rc, err := transport.Dial(serverAddr, target, passwordData)
 				if err != nil {
-					log.Errorw("dial", "addr", serverAddr, "err", err)
+					log.Warnw("dial", "addr", serverAddr, "err", err)
 					return
 				}
 				defer rc.Close()
@@ -73,30 +52,33 @@ func StartClient(password, serverAddr, httpProxy, dnsServeIP string, forwards ma
 		}
 	}
 
-	if dnsServeIP != "" {
-		go relayToRemote(_http.TGT_HTTP, dnsServeIP+":http", "", 80)
-		go relayToRemote(_http.TGT_HTTPS, dnsServeIP+":https", "", 443)
+	for from, to := range forwards {
+		go relayToRemote(from, to, nil)
 	}
 
-	for from, to := range forwards {
-		go func(from, to string) {
-			host, port := util.ParseHostPort(to, 0)
-			relayToRemote(_http.TGT_OTHER, from, host, port)
-		}(from, to)
+	if enableDNS {
+		go relayToRemote(":80", "", ParseHTTP)
+		go relayToRemote(":443", "", ParseHTTPS)
 	}
 
 	select {}
 }
 
 func StartServer(relayTarget, password, certFile, keyFile, email string) {
+	dir, _ := os.UserCacheDir()
+	dir = filepath.Join("/", dir, "sower")
+	log.Infow("certificate cache dir", "dir", dir)
+
 	certManager := autocert.Manager{
 		Prompt: autocert.AcceptTOS,
-		Cache:  autocert.DirCache(configDir), //folder for storing certificates
 		Email:  email,
+		Cache:  autocert.DirCache(dir),
 	}
+
 	tlsConf := &tls.Config{
 		GetCertificate: certManager.GetCertificate,
 		MinVersion:     tls.VersionTLS12,
+		NextProtos:     []string{"http/1.1", "h2"},
 	}
 	if certFile != "" && keyFile != "" {
 		if cert, err := tls.LoadX509KeyPair(certFile, keyFile); err != nil {
@@ -108,7 +90,7 @@ func StartServer(relayTarget, password, certFile, keyFile, email string) {
 	}
 
 	// Try to redirect 80 to 443
-	go http.ListenAndServe(":http", certManager.HTTPHandler(http.HandlerFunc(
+	go http.ListenAndServe(":80", certManager.HTTPHandler(http.HandlerFunc(
 		func(w http.ResponseWriter, r *http.Request) {
 			if host, _, err := net.SplitHostPort(r.Host); err != nil {
 				r.URL.Host = r.Host
@@ -119,7 +101,7 @@ func StartServer(relayTarget, password, certFile, keyFile, email string) {
 			http.Redirect(w, r, r.URL.String(), 301)
 		})))
 
-	ln, err := tls.Listen("tcp", ":https", tlsConf)
+	ln, err := tls.Listen("tcp", ":443", tlsConf)
 	if err != nil {
 		log.Fatalw("tcp listen", "err", err)
 	}
@@ -135,20 +117,14 @@ func StartServer(relayTarget, password, certFile, keyFile, email string) {
 		go func(conn net.Conn) {
 			defer conn.Close()
 
-			conn, domain, port, err := _http.ParseAddr(conn, passwordData)
-			if err != nil {
-				log.Errorw("parse relay target", "err", err)
-				return
+			conn, target := transport.ToProxyConn(conn, passwordData)
+			if target == "" {
+				target = relayTarget
 			}
 
-			addr := relayTarget
-			if domain != "" {
-				addr = net.JoinHostPort(domain, strconv.Itoa(int(port)))
-			}
-
-			rc, err := net.Dial("tcp", addr)
+			rc, err := net.Dial("tcp", target)
 			if err != nil {
-				log.Errorw("tcp dial", "addr", addr, "err", err)
+				log.Errorw("tcp dial", "addr", target, "err", err)
 				return
 			}
 			defer rc.Close()

@@ -27,9 +27,8 @@ var execFile, _ = filepath.Abs(os.Args[0])
 var execDir, _ = filepath.Abs(filepath.Dir(execFile))
 
 func Init() {
-	flag.StringVar(&conf.file, "f", filepath.Join(execDir, "sower.toml"), "config file, rewrite all other parameters if set")
+	flag.StringVar(&Conf.file, "f", filepath.Join(execDir, "sower.toml"), "config file, rewrite all other parameters if set")
 	flag.StringVar(&installCmd, "install", "", "install service with cmd")
-	flag.StringVar(&Client.DNS.FlushCmd, "flush_dns", "ipconfig /flushdnss", "flush dns command")
 	flag.Parse()
 
 	switch {
@@ -151,7 +150,7 @@ func execute(cmd string) error {
 	defer cancel()
 
 	var cmds []string
-	for _, cmd := range strings.Split(Client.DNS.FlushCmd, " ") {
+	for _, cmd := range strings.Split(cmd, " ") {
 		if cmd == "" {
 			continue
 		}
@@ -168,7 +167,7 @@ func execute(cmd string) error {
 	command := exec.CommandContext(ctx, cmds[0], cmds[1:]...)
 	command.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	if out, err := command.CombinedOutput(); err != nil {
-		return fmt.Errorf("cmd: %s, output: %s, err: %w", Client.DNS.FlushCmd, out, err)
+		return fmt.Errorf("cmd: %s, output: %s, err: %w", cmd, out, err)
 	}
 	return nil
 }

@@ -1,4 +1,4 @@
-package socks5
+package transport
 
 // https://tools.ietf.org/html/rfc1928
 

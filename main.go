@@ -6,25 +6,41 @@ import (
 
 	"github.com/wweir/sower/conf"
 	"github.com/wweir/sower/proxy"
+	"github.com/wweir/sower/router"
 )
 
 func main() {
-	if conf.Server.Upstream != "" {
-		proxy.StartServer(conf.Server.Upstream, conf.Password,
+	switch {
+	case conf.Server.Upstream != "":
+		proxy.StartServer(conf.Server.Upstream, conf.Conf.Password,
 			conf.Server.CertFile, conf.Server.KeyFile, conf.Server.CertEmail)
-	}
 
-	if conf.Client.Address != "" {
-		if conf.Client.DNS.ServeIP != "" {
-			go proxy.StartDNS(conf.Client.DNS.ServeIP, conf.Client.DNS.Upstream)
+	case conf.Client.Address != "":
+		route := &router.Route{
+			ProxyAddress:  conf.Client.Address,
+			ProxyPassword: conf.Conf.Password,
+			DetectLevel:   conf.Client.Router.DetectLevel,
+			DetectTimeout: conf.Client.Router.DetectTimeout,
+			DirectList:    conf.Client.Router.DirectList,
+			ProxyList:     conf.Client.Router.ProxyList,
+			DynamicList:   conf.Client.Router.DynamicList,
 		}
 
-		proxy.StartClient(conf.Password, conf.Client.Address, conf.Client.HTTPProxy.Address,
-			conf.Client.DNS.ServeIP, conf.Client.Router.PortMapping)
-	}
+		go proxy.StartHTTPProxy(conf.Client.HTTPProxy, conf.Client.Address,
+			[]byte(conf.Conf.Password), route.ShouldProxy)
 
-	if conf.Server.Upstream == "" && conf.Client.Address == "" {
-		fmt.Println()
-		flag.Usage()
+		if conf.Client.DNSServeIP != "" {
+			go proxy.StartDNS(conf.Client.DNSServeIP, conf.Client.DNSUpstream,
+				route.ShouldProxy)
+		}
+
+		proxy.StartClient(conf.Client.Address, conf.Conf.Password,
+			conf.Client.DNSServeIP != "", conf.Client.PortForward)
+
+	default:
+		if conf.Server.Upstream == "" && conf.Client.Address == "" {
+			fmt.Println()
+			flag.Usage()
+		}
 	}
 }
