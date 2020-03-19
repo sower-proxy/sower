@@ -1,13 +1,13 @@
-package net_test
+package dhcp_test
 
 import (
 	"fmt"
 
-	"github.com/wweir/sower/internal/net"
+	"github.com/wweir/sower/proxy/dhcp"
 )
 
 func Example_iface() {
-	got, err := net.PickInternetInterface()
+	got, err := dhcp.PickInternetInterface()
 	if err != nil {
 		panic(err)
 	}

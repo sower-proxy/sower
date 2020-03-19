@@ -1,7 +1,9 @@
-package util
+package router_test
 
 import (
 	"testing"
+
+	"github.com/wweir/sower/router"
 )
 
 func TestNode_Match(t *testing.T) {
@@ -11,18 +13,18 @@ func TestNode_Match(t *testing.T) {
 	}
 	tests := []struct {
 		name  string
-		node  *Node
+		node  *router.Node
 		tests []test
 	}{{
 		"simple",
-		NewNodeFromRules("a.wweir.cc", "b.wweir.cc"),
+		router.NewNodeFromRules("a.wweir.cc", "b.wweir.cc"),
 		[]test{
 			{"a.wweir.cc", true},
 			{"b.wweir.cc", true},
 		},
 	}, {
 		"parent",
-		NewNodeFromRules("wweir.cc", "a.wweir.cc"),
+		router.NewNodeFromRules("wweir.cc", "a.wweir.cc"),
 		[]test{
 			{"wweir.cc", true},
 			{"a.wweir.cc", true},
@@ -30,7 +32,7 @@ func TestNode_Match(t *testing.T) {
 		},
 	}, {
 		"fuzz1",
-		NewNodeFromRules("wweir.cc", "a.wweir.cc", "*.wweir.cc"),
+		router.NewNodeFromRules("wweir.cc", "a.wweir.cc", "*.wweir.cc"),
 		[]test{
 			{"wweir.cc", true},
 			{"a.wweir.cc", true},
@@ -39,7 +41,7 @@ func TestNode_Match(t *testing.T) {
 		},
 	}, {
 		"fuzz2",
-		NewNodeFromRules("a.*.cc", "c.wweir.*"),
+		router.NewNodeFromRules("a.*.cc", "c.wweir.*"),
 		[]test{
 			{"wweir.cc", false},
 			{"a.wweir.cc", true},
@@ -48,7 +50,7 @@ func TestNode_Match(t *testing.T) {
 		},
 	}, {
 		"fuzz3",
-		NewNodeFromRules("*.*.cc", "iamp.*.*"),
+		router.NewNodeFromRules("*.*.cc", "iamp.*.*"),
 		[]test{
 			{"wweir.cc", false},
 			{"a.wweir.cc", true},
@@ -57,7 +59,7 @@ func TestNode_Match(t *testing.T) {
 		},
 	}, {
 		"fuzz4",
-		NewNodeFromRules("**.cc", "a.**.com", "**.wweir.*"),
+		router.NewNodeFromRules("**.cc", "a.**.com", "**.wweir.*"),
 		[]test{
 			{"wweir.cc", true},
 			{"a.wweir.cc", true},

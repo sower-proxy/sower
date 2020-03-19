@@ -6,12 +6,11 @@ import (
 	"time"
 
 	"github.com/miekg/dns"
-	"github.com/wweir/sower/conf"
-	_net "github.com/wweir/sower/internal/net"
+	"github.com/wweir/sower/proxy/dhcp"
 	"github.com/wweir/utils/log"
 )
 
-func StartDNS(redirectIP, relayServer string) {
+func StartDNS(redirectIP, relayServer string, shouldProxy func(string) bool) {
 	serveIP := net.ParseIP(redirectIP)
 	if redirectIP == "" || serveIP.String() != redirectIP {
 		log.Fatalw("invalid listen ip", "ip", redirectIP)
@@ -40,7 +39,7 @@ func StartDNS(redirectIP, relayServer string) {
 			domain = domain[:idx] // trim port
 		}
 
-		if conf.ShouldProxy(domain) {
+		if shouldProxy(domain) {
 			w.WriteMsg(localA(r, domain, serveIP))
 
 		} else if msg, err := dns.Exchange(r, relayServer); err != nil || msg == nil {
@@ -64,7 +63,7 @@ func StartDNS(redirectIP, relayServer string) {
 
 func pickRelayAddr(relayServer string) (_ string, err error) {
 	if relayServer == "" {
-		if relayServer, err = _net.GetDefaultDNSServer(); err != nil {
+		if relayServer, err = dhcp.GetDefaultDNSServer(); err != nil {
 			return "", err
 		}
 	}

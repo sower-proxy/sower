@@ -32,9 +32,8 @@ RestartSec=3
 Restart=on-failure`
 
 func Init() {
-	flag.StringVar(&conf.file, "f", "", "config file, rewrite all other parameters if set")
-	flag.StringVar(&Client.DNS.FlushCmd, "flush_dns", "", "flush dns command")
-	flag.StringVar(&installCmd, "install", "", "install service with cmd, eg: '-f /etc/sower/sower.toml'")
+	flag.StringVar(&Conf.file, "f", "", "config file, rewrite all other parameters if set")
+	flag.StringVar(&installCmd, "install", "", "install service with cmd, eg: '-f /etc/sower.toml'")
 }
 func install() {
 	execFile, err := filepath.Abs(os.Args[0])

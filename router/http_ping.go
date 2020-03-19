@@ -1,4 +1,4 @@
-package http
+package router
 
 import (
 	"bytes"
@@ -13,8 +13,10 @@ import (
 // Port ==========================
 type Port uint16
 
-const HTTP Port = 80
-const HTTPS Port = 443
+const (
+	HTTP  Port = 80
+	HTTPS Port = 443
+)
 
 // Ping try connect to a http(s) server with domain though the http addr
 func (p Port) Ping(domain string, timeout time.Duration) error {
@@ -96,7 +98,7 @@ func NewClientHelloSNIMsg(domain string) []byte {
 	length := uint16(len(domain))
 	msg := &clientHelloSNI{
 		ContentType: 0x16,   // Content Type: Handshake (22)
-		Version:     0x0301, // Version: TLS 1.0 (0x0301)
+		Version:     0x0301, // Version: TLS 1.0
 		Length:      length + 56,
 		handshakeProtocol: handshakeProtocol{
 			HandshakeType:            0x01, // Handshake Type: Client Hello (1)

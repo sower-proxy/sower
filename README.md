@@ -50,14 +50,16 @@ There are 3 kinds of proxy solutions, they are HTTP(S)_PROXY / DNS-based proxy /
 An HTTP(S)_PROXY listening on `:8080` is set by default if you run sower as client mode.
 
 ### DNS-based proxy
-You can set the `serve_ip` field in the `dns` section in the configuration file to start the DNS-based proxy. You should also set the value of `serve_ip` as your default DNS in OS.
+**DNS-based** solution is not recommanded now, for incompatible with TLS 1.3 esni extention.
+
+You can set the `dns_serve_ip` field in the configuration file to start the DNS-based proxy. You should also set the value of `dns_upstream` as your default DNS in OS.
 
 If you want to enjoy the full experience provided by the sower, you can take sower as your private DNS on a long-running server and set it as your default DNS in your router.
 
 ### port-forward
-The port-forward can be only setted in configuration file, you can set it in section `client.router.port_mapping`, eg:
+The port-forward can be only setted in configuration file, you can set it in section `client.port_mapping`, eg:
 ``` toml
-[client.router.port_mapping]
+[client.port_mapping]
 ":2222"="aa.bb.cc:22"
 ```
 

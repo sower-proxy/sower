@@ -1,6 +1,6 @@
 // +build !windows
 
-package net
+package dhcp
 
 import (
 	"errors"

@@ -1,13 +1,13 @@
+password="" # sower password
+
 [client]
   address = "" # aa.bb.cc, socks5h://127.0.0.1:1080
+  http_proxy=":8080"
+  dns_serve_ip="" # eg: 127.0.0.1. keep empty to disable DNS solution
+  dns_upstream="" # keep empty to set via dhcp, not effective in any environment
 
-  [client.dns]
-    flush_cmd="" # macOS: pkill mDNSResponder || true, Windows: ipconfig /flushdnss
-    serve_ip = "127.0.0.1"
-    upstream = "" # empty to dynamic detect
-
-  [client.http_proxy]
-    address = ":8080" # empty to disable http_proxy
+  [client.port_forward]
+    # eg: ":2222"="aa.bb.cc:22"
 
   [client.router]
     detect_level = 2 # 0~4, the bigger the harder to add
@@ -47,8 +47,6 @@
       "*.github.*",
     ]
 
-    [client.router.port_mapping]
-      # ":2222"="aa.bb.cc:22"
 
 [server]
   cert_email = "" # eg: user@aa.bb.cc
