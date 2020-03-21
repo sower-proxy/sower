@@ -23,7 +23,7 @@ If you already have another proxy solution, you can use it's socks5(h) service a
 ## Installation
 To enjoy the sower, you need to deploy sower on both server-side and client-side.
 
-The installation script has been integrated into the sower. You can install sower as system service by running `./sower -install 'xxx'`
+The installation script has been integrated into the sower. You can install sower as system service by running `./sower -install 'xxx'` in terminal on the three most popular operating system platforms: Linux / Windows and masOS.
 
 ## Server
 *If you already have another proxy solution with socks5h support, you can skip server-side.*

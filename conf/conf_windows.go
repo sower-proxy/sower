@@ -23,34 +23,30 @@ import (
 const name = "sower"
 const cmdsAccepted = svc.AcceptStop | svc.AcceptShutdown | svc.AcceptPauseAndContinue
 
-func Init() {
+func _init() {
 	flag.StringVar(&Conf.file, "f", filepath.Join(execDir, "sower.toml"), "config file, rewrite all other parameters if set")
-	flag.StringVar(&installCmd, "install", "", "install service with cmd")
-	flag.Parse()
+	flag.StringVar(&installCmd, "install", "", "put any character to install as a service, eg: true")
+}
 
-	switch {
-	case installCmd != "":
-	case uninstallFlag:
-	default:
-		os.Chdir(filepath.Dir(os.Args[0]))
-		if active, err := svc.IsAnInteractiveSession(); err != nil {
-			log.Fatalf("failed to determine if we are running in an interactive session: %v", err)
-		} else if !active {
-			go func() {
-				elog, err := eventlog.Open(name)
-				if err != nil {
-					log.Fatalw("install service", "err", err)
-				}
-				defer elog.Close()
+func runAsService() {
+	os.Chdir(filepath.Dir(os.Args[0]))
+	if active, err := svc.IsAnInteractiveSession(); err != nil {
+		log.Fatalf("failed to determine if we are running in an interactive session: %v", err)
+	} else if !active {
+		go func() {
+			elog, err := eventlog.Open(name)
+			if err != nil {
+				log.Fatalw("install service", "err", err)
+			}
+			defer elog.Close()
 
-				if err := svc.Run(name, &myservice{}); err != nil {
-					elog.Error(1, fmt.Sprintf("%s service failed: %v", name, err))
-					log.Fatalw("install service", "err", err)
-				}
-				elog.Info(1, fmt.Sprintf("winsvc.RunAsService: %s service stopped", name))
-				os.Exit(0)
-			}()
-		}
+			if err := svc.Run(name, &myservice{}); err != nil {
+				elog.Error(1, fmt.Sprintf("%s service failed: %v", name, err))
+				log.Fatalw("install service", "err", err)
+			}
+			elog.Info(1, fmt.Sprintf("winsvc.RunAsService: %s service stopped", name))
+			os.Exit(0)
+		}()
 	}
 }
 

@@ -59,18 +59,20 @@ func init() {
 	flag.IntVar(&Conf.Client.Router.DetectLevel, "level", 2, "dynamic rule detect level: 0~4")
 	flag.StringVar(&Conf.Client.Router.DetectTimeout, "timeout", "500ms", "dynamic rule detect timeout")
 	uninstallFlag := flag.Bool("uninstall", false, "uninstall service")
-	Init() // execute platform init logic
+	_init() // execute platform init logic
 
 	if !flag.Parsed() {
 		flag.Parse()
 	}
-	if *uninstallFlag {
+	switch {
+	case *uninstallFlag:
 		uninstall()
 		os.Exit(0)
-	}
-	if installCmd != "" {
+	case installCmd != "":
 		install()
 		os.Exit(0)
+	default:
+		runAsService()
 	}
 
 	defer log.Infow("starting", "config", &Conf)
@@ -83,7 +85,6 @@ func init() {
 			log.Fatalw("load config", "config", Conf.file, "step", loadConfigFns[i].step, "err", err)
 		}
 	}
-
 }
 
 // refreshFns will be executed while init and write new config

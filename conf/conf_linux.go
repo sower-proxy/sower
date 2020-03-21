@@ -33,7 +33,7 @@ Restart=on-failure`
 
 var ConfigDir = ""
 
-func Init() {
+func _init() {
 	if _, err := os.Stat(execDir + "/sower.toml"); err == nil {
 		ConfigDir = execDir
 
@@ -53,6 +53,8 @@ func Init() {
 
 	flag.StringVar(&installCmd, "install", "", "install service with cmd, eg: '-f "+ConfigDir+"/sower.toml'")
 }
+
+func runAsService() {}
 
 func install() {
 	execFile, err := filepath.Abs(os.Args[0])
