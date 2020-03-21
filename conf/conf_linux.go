@@ -31,10 +31,29 @@ ExecStart=%s %s
 RestartSec=3
 Restart=on-failure`
 
+var ConfigDir = ""
+
 func Init() {
-	flag.StringVar(&Conf.file, "f", "", "config file, rewrite all other parameters if set")
-	flag.StringVar(&installCmd, "install", "", "install service with cmd, eg: '-f /etc/sower.toml'")
+	if _, err := os.Stat(execDir + "/sower.toml"); err == nil {
+		ConfigDir = execDir
+
+	} else if stat, err := os.Stat("/etc/sower"); err == nil && stat.IsDir() {
+		ConfigDir = "/etc/sower"
+
+	} else {
+		dir, _ := os.UserConfigDir()
+		ConfigDir = filepath.Join("/", dir, "sower")
+	}
+
+	if _, err := os.Stat(ConfigDir + "/sower.toml"); err != nil {
+		flag.StringVar(&Conf.file, "f", "", "config file, rewrite all other parameters if set")
+	} else {
+		flag.StringVar(&Conf.file, "f", ConfigDir+"/sower.toml", "config file, rewrite all other parameters if set")
+	}
+
+	flag.StringVar(&installCmd, "install", "", "install service with cmd, eg: '-f "+ConfigDir+"/sower.toml'")
 }
+
 func install() {
 	execFile, err := filepath.Abs(os.Args[0])
 	if err != nil {
@@ -54,12 +73,14 @@ func install() {
 		log.Fatalw("install service", "err", err)
 	}
 }
+
 func uninstall() {
 	execute("systemctl stop sower")
 	execute("systemctl disable sower")
 	os.Remove(svcPath)
 	os.RemoveAll("/etc/sower")
 }
+
 func execute(cmd string) error {
 	ctx, cancel := context.WithTimeout(context.TODO(), 5*time.Second)
 	defer cancel()

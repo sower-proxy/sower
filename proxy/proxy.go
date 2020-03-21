@@ -61,6 +61,8 @@ func StartClient(serverAddr, password string, enableDNS bool, forwards map[strin
 		go relayToRemote(":443", "", ParseHTTPS)
 	}
 
+	log.Infow("start sower client", "dns solution", enableDNS, "forwards", forwards)
+
 	select {}
 }
 
@@ -105,6 +107,8 @@ func StartServer(relayTarget, password, certFile, keyFile, email string) {
 	if err != nil {
 		log.Fatalw("tcp listen", "err", err)
 	}
+
+	log.Infow("start sower server", "relay_to", relayTarget)
 
 	passwordData := []byte(password)
 	for {

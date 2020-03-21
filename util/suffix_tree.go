@@ -1,4 +1,4 @@
-package router
+package util
 
 import (
 	"strings"

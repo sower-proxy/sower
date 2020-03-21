@@ -8,10 +8,12 @@ import (
 	"time"
 
 	"github.com/wweir/sower/transport"
+	"github.com/wweir/sower/util"
 	"github.com/wweir/utils/log"
 	"github.com/wweir/utils/mem"
 )
 
+// Route implement a router for each request
 type Route struct {
 	port  Port
 	once  sync.Once
@@ -26,11 +28,11 @@ type Route struct {
 	timeout       time.Duration
 
 	DirectList  []string
-	directRule  *Node
+	directRule  *util.Node
 	ProxyList   []string
-	proxyRule   *Node
+	proxyRule   *util.Node
 	DynamicList []string
-	dynamicRule *Node
+	dynamicRule *util.Node
 	PersistFn   func(string)
 }
 
@@ -39,9 +41,9 @@ func (r *Route) ShouldProxy(domain string) bool {
 	r.once.Do(func() {
 		r.cache = mem.New(4 * time.Hour)
 		r.password = []byte(r.ProxyPassword)
-		r.directRule = NewNodeFromRules(r.DirectList...)
-		r.proxyRule = NewNodeFromRules(r.ProxyList...)
-		r.dynamicRule = NewNodeFromRules(r.DynamicList...)
+		r.directRule = util.NewNodeFromRules(r.DirectList...)
+		r.proxyRule = util.NewNodeFromRules(r.ProxyList...)
+		r.dynamicRule = util.NewNodeFromRules(r.DynamicList...)
 
 		if timeout, err := time.ParseDuration(r.DetectTimeout); err != nil {
 			r.timeout = 200 * time.Millisecond
@@ -66,15 +68,22 @@ func (r *Route) ShouldProxy(domain string) bool {
 	if r.proxyRule.Match(domain) {
 		return true
 	}
+	if r.dynamicRule.Match(domain) {
+		return true
+	}
 
 	r.cache.Remember(r, domain)
 	return r.dynamicRule.Match(domain)
 }
 
+// Get implement for cache
 func (r *Route) Get(key interface{}) (err error) {
 	domain := key.(string)
 
-	if r.detect(domain) > r.DetectLevel {
+	httpScore, httpsScore := r.detect(domain)
+	log.Infow("detect", "domain", domain, "http", httpScore, "https", httpsScore)
+
+	if httpScore+httpsScore >= r.DetectLevel {
 		r.dynamicRule.Add(domain)
 		if r.PersistFn != nil {
 			r.PersistFn(domain)
@@ -84,7 +93,7 @@ func (r *Route) Get(key interface{}) (err error) {
 }
 
 // detect and caculate direct connection and proxy connection score
-func (r *Route) detect(domain string) int {
+func (r *Route) detect(domain string) (http, https int) {
 	wg := sync.WaitGroup{}
 	httpScore, httpsScore := new(int32), new(int32)
 	for _, ping := range [...]*Route{{port: HTTP}, {port: HTTPS}} {
@@ -138,5 +147,5 @@ func (r *Route) detect(domain string) int {
 	}
 
 	wg.Wait()
-	return int(*httpScore + *httpsScore)
+	return int(*httpScore), int(*httpsScore)
 }

@@ -27,6 +27,7 @@ func StartHTTPProxy(httpProxyAddr, serverAddr string, password []byte, shouldPro
 		IdleTimeout:  90 * time.Second,
 	}
 
+	log.Infow("start sower http proxy", "http_proxy", httpProxyAddr)
 	go log.Fatalw("serve http proxy", "addr", httpProxyAddr, "err", srv.ListenAndServe())
 }
 

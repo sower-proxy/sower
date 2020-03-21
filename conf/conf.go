@@ -3,8 +3,11 @@ package conf
 import (
 	"flag"
 	"os"
+	"path/filepath"
+	"sync"
 
 	toml "github.com/pelletier/go-toml"
+	"github.com/wweir/sower/util"
 	"github.com/wweir/utils/log"
 )
 
@@ -34,35 +37,34 @@ type server struct {
 var (
 	version, date string
 
-	Server = server{}
-	Client = client{}
-	Conf   = struct {
+	installCmd  string
+	execFile, _ = filepath.Abs(os.Args[0])
+	execDir, _  = filepath.Abs(filepath.Dir(execFile))
+	// Conf full config, include common and server / client
+	Conf = struct {
 		file     string
-		Password string  `toml:"password"`
-		Server   *server `toml:"server"`
-		Client   *client `toml:"client"`
-	}{"", "", &Server, &Client}
-	flushCh       = make(chan struct{})
-	installCmd    string
-	uninstallFlag bool
+		Password string `toml:"password"`
+		Server   server `toml:"server"`
+		Client   client `toml:"client"`
+	}{}
 )
 
 func init() {
 	flag.StringVar(&Conf.Password, "password", "", "password")
-	flag.StringVar(&Server.Upstream, "s", "", "upstream http service, eg: 127.0.0.1:8080")
-	flag.StringVar(&Server.CertFile, "s_cert", "", "tls cert file, gen cert from letsencrypt if empty")
-	flag.StringVar(&Server.KeyFile, "s_key", "", "tls key file, gen cert from letsencrypt if empty")
-	flag.StringVar(&Client.Address, "c", "", "remote server domain, eg: aa.bb.cc, socks5h://127.0.0.1:1080")
-	flag.StringVar(&Client.HTTPProxy, "http_proxy", ":8080", "http proxy, empty to disable")
-	flag.IntVar(&Client.Router.DetectLevel, "level", 2, "dynamic rule detect level: 0~4")
-	flag.StringVar(&Client.Router.DetectTimeout, "timeout", "300ms", "dynamic rule detect timeout")
-	flag.BoolVar(&uninstallFlag, "uninstall", false, "uninstall service")
+	flag.StringVar(&Conf.Server.Upstream, "s", "", "upstream http service, eg: 127.0.0.1:8080")
+	flag.StringVar(&Conf.Server.CertFile, "s_cert", "", "tls cert file, gen cert from letsencrypt if empty")
+	flag.StringVar(&Conf.Server.KeyFile, "s_key", "", "tls key file, gen cert from letsencrypt if empty")
+	flag.StringVar(&Conf.Client.Address, "c", "", "remote server domain, eg: aa.bb.cc, socks5h://127.0.0.1:1080")
+	flag.StringVar(&Conf.Client.HTTPProxy, "http_proxy", ":8080", "http proxy, empty to disable")
+	flag.IntVar(&Conf.Client.Router.DetectLevel, "level", 2, "dynamic rule detect level: 0~4")
+	flag.StringVar(&Conf.Client.Router.DetectTimeout, "timeout", "500ms", "dynamic rule detect timeout")
+	uninstallFlag := flag.Bool("uninstall", false, "uninstall service")
 	Init() // execute platform init logic
 
 	if !flag.Parsed() {
 		flag.Parse()
 	}
-	if uninstallFlag {
+	if *uninstallFlag {
 		uninstall()
 		os.Exit(0)
 	}
@@ -82,7 +84,6 @@ func init() {
 		}
 	}
 
-	go flushConfDaemon()
 }
 
 // refreshFns will be executed while init and write new config
@@ -99,8 +100,18 @@ var loadConfigFns = []struct {
 	return toml.NewDecoder(f).Decode(&Conf)
 }}}
 
+// flushCh to avoid parallel persist
+var flushCh = make(chan struct{})
+var flushOnce = sync.Once{}
+
+// PersistRule persist dynamic rule into config file
 func PersistRule(domain string) {
-	Client.Router.DynamicList = append(Client.Router.DynamicList, domain)
+	flushOnce.Do(func() {
+		go flushConfDaemon()
+	})
+
+	log.Infow("persist dynamic rule into config", "domain", domain)
+	Conf.Client.Router.DynamicList = append(Conf.Client.Router.DynamicList, domain)
 	select {
 	case flushCh <- struct{}{}:
 	default:
@@ -115,6 +126,9 @@ func flushConfDaemon() {
 				log.Errorw("flush config", "step", "flush", "err", err)
 				continue
 			}
+
+			Conf.Client.Router.DynamicList =
+				util.NewReverseSecSlice(Conf.Client.Router.DynamicList).Sort().Uniq()
 
 			if err := toml.NewEncoder(f).ArraysWithOneElementPerLine(true).Encode(&Conf); err != nil {
 				log.Errorw("flush config", "step", "flush", "err", err)

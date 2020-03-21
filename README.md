@@ -50,7 +50,8 @@ There are 3 kinds of proxy solutions, they are HTTP(S)_PROXY / DNS-based proxy /
 An HTTP(S)_PROXY listening on `:8080` is set by default if you run sower as client mode.
 
 ### DNS-based proxy
-**DNS-based** solution is not recommanded now, for incompatible with TLS 1.3 esni extention.
+**DNS-based** solution is not recommanded now, for incompatible with TLS 1.3 esni extention. DNS flush logic has been dropped, you should flush your dns cache manually
+in Windows and macOS.
 
 You can set the `dns_serve_ip` field in the configuration file to start the DNS-based proxy. You should also set the value of `dns_upstream` as your default DNS in OS.
 

@@ -11,34 +11,35 @@ import (
 
 func main() {
 	switch {
-	case conf.Server.Upstream != "":
-		proxy.StartServer(conf.Server.Upstream, conf.Conf.Password,
-			conf.Server.CertFile, conf.Server.KeyFile, conf.Server.CertEmail)
+	case conf.Conf.Server.Upstream != "":
+		proxy.StartServer(conf.Conf.Server.Upstream, conf.Conf.Password,
+			conf.Conf.Server.CertFile, conf.Conf.Server.KeyFile, conf.Conf.Server.CertEmail)
 
-	case conf.Client.Address != "":
+	case conf.Conf.Client.Address != "":
 		route := &router.Route{
-			ProxyAddress:  conf.Client.Address,
+			ProxyAddress:  conf.Conf.Client.Address,
 			ProxyPassword: conf.Conf.Password,
-			DetectLevel:   conf.Client.Router.DetectLevel,
-			DetectTimeout: conf.Client.Router.DetectTimeout,
-			DirectList:    conf.Client.Router.DirectList,
-			ProxyList:     conf.Client.Router.ProxyList,
-			DynamicList:   conf.Client.Router.DynamicList,
+			DetectLevel:   conf.Conf.Client.Router.DetectLevel,
+			DetectTimeout: conf.Conf.Client.Router.DetectTimeout,
+			DirectList:    conf.Conf.Client.Router.DirectList,
+			ProxyList:     conf.Conf.Client.Router.ProxyList,
+			DynamicList:   conf.Conf.Client.Router.DynamicList,
+			PersistFn:     conf.PersistRule,
 		}
 
-		go proxy.StartHTTPProxy(conf.Client.HTTPProxy, conf.Client.Address,
+		go proxy.StartHTTPProxy(conf.Conf.Client.HTTPProxy, conf.Conf.Client.Address,
 			[]byte(conf.Conf.Password), route.ShouldProxy)
 
-		if conf.Client.DNSServeIP != "" {
-			go proxy.StartDNS(conf.Client.DNSServeIP, conf.Client.DNSUpstream,
+		if conf.Conf.Client.DNSServeIP != "" {
+			go proxy.StartDNS(conf.Conf.Client.DNSServeIP, conf.Conf.Client.DNSUpstream,
 				route.ShouldProxy)
 		}
 
-		proxy.StartClient(conf.Client.Address, conf.Conf.Password,
-			conf.Client.DNSServeIP != "", conf.Client.PortForward)
+		proxy.StartClient(conf.Conf.Client.Address, conf.Conf.Password,
+			conf.Conf.Client.DNSServeIP != "", conf.Conf.Client.PortForward)
 
 	default:
-		if conf.Server.Upstream == "" && conf.Client.Address == "" {
+		if conf.Conf.Server.Upstream == "" && conf.Conf.Client.Address == "" {
 			fmt.Println()
 			flag.Usage()
 		}

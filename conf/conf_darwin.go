@@ -35,9 +35,23 @@ const svcFile = `<?xml version="1.0" encoding="UTF-8"?>
 </dict>
 </plist>`
 
+var ConfigDir = ""
+
 func Init() {
-	flag.StringVar(&Conf.file, "f", "", "config file, rewrite all other parameters if set")
-	flag.StringVar(&installCmd, "install", "", "install service with cmd, eg: '-f /etc/sower.toml'")
+	if _, err := os.Stat(execDir + "/sower.toml"); err == nil {
+		ConfigDir = execDir
+	} else {
+		dir, _ := os.UserConfigDir()
+		ConfigDir = filepath.Join("/", dir, "sower")
+	}
+
+	if _, err := os.Stat(ConfigDir + "/sower.toml"); err != nil {
+		flag.StringVar(&Conf.file, "f", "", "config file, rewrite all other parameters if set")
+	} else {
+		flag.StringVar(&Conf.file, "f", ConfigDir+"/sower.toml", "config file, rewrite all other parameters if set")
+	}
+
+	flag.StringVar(&installCmd, "install", "", "install service with cmd, eg: '-f "+ConfigDir+"/sower.toml'")
 }
 
 func install() {
@@ -55,11 +69,13 @@ func install() {
 		log.Fatalw("install service", "err", err)
 	}
 }
+
 func uninstall() {
 	execute("launchctl unload " + svcPath)
 	os.Remove(svcPath)
 	os.RemoveAll("/etc/sower")
 }
+
 func execute(cmd string) error {
 	ctx, cancel := context.WithTimeout(context.TODO(), 5*time.Second)
 	defer cancel()

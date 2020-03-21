@@ -23,9 +23,6 @@ import (
 const name = "sower"
 const cmdsAccepted = svc.AcceptStop | svc.AcceptShutdown | svc.AcceptPauseAndContinue
 
-var execFile, _ = filepath.Abs(os.Args[0])
-var execDir, _ = filepath.Abs(filepath.Dir(execFile))
-
 func Init() {
 	flag.StringVar(&Conf.file, "f", filepath.Join(execDir, "sower.toml"), "config file, rewrite all other parameters if set")
 	flag.StringVar(&installCmd, "install", "", "install service with cmd")
@@ -56,6 +53,7 @@ func Init() {
 		}
 	}
 }
+
 func install() {
 	mgrDo(func(m *mgr.Mgr) error {
 		s, err := m.OpenService(name)
@@ -80,6 +78,7 @@ func install() {
 		return s.Start()
 	})
 }
+
 func uninstall() {
 	serviceDo(func(s *mgr.Service) error {
 		err := s.Delete()
