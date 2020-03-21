@@ -11,7 +11,7 @@ password="" # sower password
 
   [client.router]
     detect_level = 2 # 0~4, the bigger the harder to add
-    detect_timeout = "500ms"
+    detect_timeout = "300ms"
     direct_list = [
       "**.in-addr.arpa",
       "imap.*.*",

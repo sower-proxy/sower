@@ -28,9 +28,7 @@ func Dial(address, target string, password []byte) (net.Conn, error) {
 		return nil, err
 	}
 
-	return DialTlsProxyConn(net.JoinHostPort(address, "443"), host, uint16(p), &tls.Config{
-		ServerName: address,
-		MinVersion: tls.VersionTLS12,
-		NextProtos: []string{"http/1.1", "h2"},
-	}, password)
+	// tls.Config is same as golang http pkg default behavior
+	return DialTlsProxyConn(net.JoinHostPort(address, "443"),
+		host, uint16(p), &tls.Config{}, password)
 }

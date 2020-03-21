@@ -66,7 +66,7 @@ func StartClient(serverAddr, password string, enableDNS bool, forwards map[strin
 	select {}
 }
 
-func StartServer(relayTarget, password, certFile, keyFile, email string) {
+func StartServer(relayTarget, password, cacheDir, certFile, keyFile, email string) {
 	dir, _ := os.UserCacheDir()
 	dir = filepath.Join("/", dir, "sower")
 	log.Infow("certificate cache dir", "dir", dir)

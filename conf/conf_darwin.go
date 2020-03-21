@@ -51,17 +51,12 @@ func _init() {
 		flag.StringVar(&Conf.file, "f", ConfigDir+"/sower.toml", "config file, rewrite all other parameters if set")
 	}
 
-	flag.StringVar(&installCmd, "install", "", "install service with cmd, eg: '-f "+ConfigDir+"/sower.toml'")
+	flag.StringVar(&installCmd, "install", "", "install service with cmd, eg: '-f \""+ConfigDir+"/sower.toml\"'")
 }
 
 func runAsService() {}
 
 func install() {
-	execFile, err := filepath.Abs(os.Args[0])
-	if err != nil {
-		log.Fatalw("get binary path", "err", err)
-	}
-
 	if err := ioutil.WriteFile(svcPath, []byte(fmt.Sprintf(svcFile, execFile, installCmd)), 0644); err != nil {
 		log.Fatalw("write service file", "err", err)
 	}

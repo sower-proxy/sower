@@ -23,6 +23,8 @@ import (
 const name = "sower"
 const cmdsAccepted = svc.AcceptStop | svc.AcceptShutdown | svc.AcceptPauseAndContinue
 
+var ConfigDir = execDir
+
 func _init() {
 	flag.StringVar(&Conf.file, "f", filepath.Join(execDir, "sower.toml"), "config file, rewrite all other parameters if set")
 	flag.StringVar(&installCmd, "install", "", "put any character to install as a service, eg: true")

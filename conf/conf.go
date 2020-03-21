@@ -38,7 +38,7 @@ var (
 	version, date string
 
 	installCmd  string
-	execFile, _ = filepath.Abs(os.Args[0])
+	execFile, _ = os.Executable()
 	execDir, _  = filepath.Abs(filepath.Dir(execFile))
 	// Conf full config, include common and server / client
 	Conf = struct {
@@ -57,7 +57,7 @@ func init() {
 	flag.StringVar(&Conf.Client.Address, "c", "", "remote server domain, eg: aa.bb.cc, socks5h://127.0.0.1:1080")
 	flag.StringVar(&Conf.Client.HTTPProxy, "http_proxy", ":8080", "http proxy, empty to disable")
 	flag.IntVar(&Conf.Client.Router.DetectLevel, "level", 2, "dynamic rule detect level: 0~4")
-	flag.StringVar(&Conf.Client.Router.DetectTimeout, "timeout", "500ms", "dynamic rule detect timeout")
+	flag.StringVar(&Conf.Client.Router.DetectTimeout, "timeout", "300ms", "dynamic rule detect timeout")
 	uninstallFlag := flag.Bool("uninstall", false, "uninstall service")
 	_init() // execute platform init logic
 

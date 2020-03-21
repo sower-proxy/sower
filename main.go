@@ -12,7 +12,7 @@ import (
 func main() {
 	switch {
 	case conf.Conf.Server.Upstream != "":
-		proxy.StartServer(conf.Conf.Server.Upstream, conf.Conf.Password,
+		proxy.StartServer(conf.Conf.Server.Upstream, conf.Conf.Password, conf.ConfigDir,
 			conf.Conf.Server.CertFile, conf.Conf.Server.KeyFile, conf.Conf.Server.CertEmail)
 
 	case conf.Conf.Client.Address != "":
@@ -39,9 +39,7 @@ func main() {
 			conf.Conf.Client.DNSServeIP != "", conf.Conf.Client.PortForward)
 
 	default:
-		if conf.Conf.Server.Upstream == "" && conf.Conf.Client.Address == "" {
-			fmt.Println()
-			flag.Usage()
-		}
+		fmt.Println()
+		flag.Usage()
 	}
 }

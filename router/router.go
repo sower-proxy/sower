@@ -46,8 +46,8 @@ func (r *Route) ShouldProxy(domain string) bool {
 		r.dynamicRule = util.NewNodeFromRules(r.DynamicList...)
 
 		if timeout, err := time.ParseDuration(r.DetectTimeout); err != nil {
-			r.timeout = 200 * time.Millisecond
-			log.Warnw("parse detect timeout", "err", err, "default", "t.timeout")
+			r.timeout = 300 * time.Millisecond
+			log.Warnw("parse detect timeout", "err", err, "default", r.timeout)
 		} else {
 			r.timeout = timeout
 		}
