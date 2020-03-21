@@ -1,0 +1,16 @@
+name: Go
+on:
+  push:
+    branches:
+      - master
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-go@v2-beta
+      - uses: actions/checkout@v2
+
+      - name: test and build
+        run: |
+          make
