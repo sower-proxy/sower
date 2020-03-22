@@ -138,6 +138,16 @@ func flushConfDaemon() {
 			}
 			f.Close()
 
+			if stat, err := os.Stat(Conf.file); err != nil {
+				log.Warnw("get file stat", "file", Conf.file, "err", err)
+			} else {
+				// There is no common way to transfer ownership for a file
+				// cross-platform. Drop the ownership support but file mod.
+				if err = os.Chmod(Conf.file+"~", stat.Mode()); err != nil {
+					log.Warnw("set file mod", "file", Conf.file+"~", "err", err)
+				}
+			}
+
 			if err = os.Rename(Conf.file+"~", Conf.file); err != nil {
 				log.Errorw("flush config", "step", "flush", "err", err)
 				continue
