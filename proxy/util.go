@@ -22,10 +22,7 @@ func ParseHTTP(conn net.Conn) (net.Conn, string, error) {
 		return teeConn, "", err
 	}
 
-	if _, _, err := net.SplitHostPort(resp.Host); err != nil {
-		resp.Host = net.JoinHostPort(resp.Host, "80")
-	}
-
+	resp.Host, _ = util.WithDefaultPort(resp.Host, "80")
 	return teeConn, resp.Host, nil
 }
 
@@ -41,15 +38,8 @@ func ParseHTTPS(conn net.Conn) (net.Conn, string, error) {
 		},
 	}).Handshake()
 
-	return teeConn, net.JoinHostPort(domain, "443"), nil
-}
-
-func withDefaultPort(addr string, port string) (address, host string) {
-	host, _, err := net.SplitHostPort(addr)
-	if err != nil {
-		return net.JoinHostPort(addr, port), addr
-	}
-	return addr, host
+	domain, _ = util.WithDefaultPort(domain, "443")
+	return teeConn, domain, nil
 }
 
 func relay(conn1, conn2 net.Conn) {

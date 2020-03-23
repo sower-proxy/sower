@@ -9,19 +9,23 @@ import (
 	"time"
 
 	"github.com/wweir/sower/transport"
+	"github.com/wweir/sower/util"
 	"github.com/wweir/utils/log"
 )
 
 // StartHTTPProxy start http reverse proxy.
 // The httputil.ReverseProxy do not supply enough support for https request.
-func StartHTTPProxy(httpProxyAddr, serverAddr string, password []byte, shouldProxy func(string) bool) {
+func StartHTTPProxy(httpProxyAddr, serverAddr string, password []byte,
+	shouldProxy func(string) bool) {
+
 	proxy := httputil.ReverseProxy{
 		Director: func(r *http.Request) {},
 		Transport: &http.Transport{
 			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-				addr, _ = withDefaultPort(addr, "80")
-				return transport.Dial(serverAddr, addr, password)
-			}},
+				addr, _ = util.WithDefaultPort(addr, "80")
+				return transport.Dial(serverAddr, addr, password, shouldProxy)
+			},
+		},
 	}
 
 	srv := &http.Server{
@@ -45,8 +49,6 @@ func StartHTTPProxy(httpProxyAddr, serverAddr string, password []byte, shouldPro
 func httpsProxy(w http.ResponseWriter, r *http.Request,
 	serverAddr string, password []byte, shouldProxy func(string) bool) {
 
-	target, host := withDefaultPort(r.Host, "443")
-
 	conn, _, err := w.(http.Hijacker).Hijack()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
@@ -60,12 +62,8 @@ func httpsProxy(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	var rc net.Conn
-	if shouldProxy(host) {
-		rc, err = transport.Dial(serverAddr, target, password)
-	} else {
-		rc, err = net.Dial("tcp", target)
-	}
+	target, _ := util.WithDefaultPort(r.Host, "443")
+	rc, err := transport.Dial(serverAddr, target, password, shouldProxy)
 	if err != nil {
 		conn.Write([]byte("sower dial " + serverAddr + " fail: " + err.Error()))
 		conn.Close()

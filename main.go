@@ -30,13 +30,14 @@ func main() {
 		go proxy.StartHTTPProxy(conf.Conf.Client.HTTPProxy, conf.Conf.Client.Address,
 			[]byte(conf.Conf.Password), route.ShouldProxy)
 
-		if conf.Conf.Client.DNSServeIP != "" {
+		enableDNSSolution := conf.Conf.Client.DNSServeIP != ""
+		if enableDNSSolution {
 			go proxy.StartDNS(conf.Conf.Client.DNSServeIP, conf.Conf.Client.DNSUpstream,
 				route.ShouldProxy)
 		}
 
-		proxy.StartClient(conf.Conf.Client.Address, conf.Conf.Password,
-			conf.Conf.Client.DNSServeIP != "", conf.Conf.Client.PortForward)
+		proxy.StartClient(conf.Conf.Client.Address, conf.Conf.Password, enableDNSSolution,
+			conf.Conf.Client.PortForward, route.ShouldProxy)
 
 	default:
 		fmt.Println()

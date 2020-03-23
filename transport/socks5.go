@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"strconv"
 	"strings"
 )
 
@@ -21,28 +20,19 @@ func IsSocks5Schema(addr string) (string, bool) {
 	return addr, false
 }
 
-func ToSocks5(c net.Conn, address string) (net.Conn, error) {
-	host, port, err := net.SplitHostPort(address)
-	if err != nil {
-		return nil, err
-	}
-	p, err := strconv.Atoi(port)
-	if err != nil {
-		return nil, err
-	}
-
+func ToSocks5(c net.Conn, host string, port uint16) (net.Conn, error) {
 	return &conn{
 		init:   make(chan struct{}),
 		Conn:   c,
 		domain: host,
-		port:   []byte{byte(p >> 8), byte(p)},
+		port:   port,
 	}, nil
 }
 
 type conn struct {
 	init   chan struct{}
 	domain string
-	port   []byte
+	port   uint16
 	net.Conn
 }
 
@@ -75,6 +65,8 @@ func (c *conn) Write(b []byte) (n int, err error) {
 		}
 	}
 	{
+		portBuf := make([]byte, 2)
+		binary.BigEndian.PutUint16(portBuf, c.port)
 		req := &request{
 			req: req{
 				VER:  5, // socks5
@@ -83,7 +75,7 @@ func (c *conn) Write(b []byte) (n int, err error) {
 				ATYP: 3, // DOMAINNAME
 			},
 			DST_ADDR: append([]byte{byte(len(c.domain))}, []byte(c.domain)...),
-			DST_PORT: c.port,
+			DST_PORT: portBuf,
 		}
 
 		if _, err := c.Conn.Write(req.Bytes()); err != nil {

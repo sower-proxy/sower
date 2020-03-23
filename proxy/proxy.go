@@ -4,19 +4,19 @@ import (
 	"crypto/tls"
 	"net"
 	"net/http"
-	"os"
-	"path/filepath"
 
 	"github.com/wweir/sower/transport"
 	"github.com/wweir/utils/log"
 	"golang.org/x/crypto/acme/autocert"
 )
 
-func StartClient(serverAddr, password string, enableDNS bool, forwards map[string]string) {
-	passwordData := []byte(password)
+func StartClient(serverAddr, password string, enableDNS bool,
+	forwards map[string]string, shouldProxy func(string) bool) {
 
+	passwordData := []byte(password)
 	relayToRemote := func(lnAddr, target string,
-		parseFn func(net.Conn) (net.Conn, string, error)) {
+		parseFn func(net.Conn) (net.Conn, string, error),
+		shouldProxy func(string) bool) {
 
 		ln, err := net.Listen("tcp", lnAddr)
 		if err != nil {
@@ -40,7 +40,7 @@ func StartClient(serverAddr, password string, enableDNS bool, forwards map[strin
 					}
 				}
 
-				rc, err := transport.Dial(serverAddr, target, passwordData)
+				rc, err := transport.Dial(serverAddr, target, passwordData, shouldProxy)
 				if err != nil {
 					log.Warnw("dial", "addr", serverAddr, "err", err)
 					return
@@ -53,12 +53,12 @@ func StartClient(serverAddr, password string, enableDNS bool, forwards map[strin
 	}
 
 	for from, to := range forwards {
-		go relayToRemote(from, to, nil)
+		go relayToRemote(from, to, nil, func(string) bool { return true })
 	}
 
 	if enableDNS {
-		go relayToRemote(":80", "", ParseHTTP)
-		go relayToRemote(":443", "", ParseHTTPS)
+		go relayToRemote(":80", "", ParseHTTP, shouldProxy)
+		go relayToRemote(":443", "", ParseHTTPS, shouldProxy)
 	}
 
 	log.Infow("start sower client", "dns solution", enableDNS, "forwards", forwards)
@@ -67,14 +67,10 @@ func StartClient(serverAddr, password string, enableDNS bool, forwards map[strin
 }
 
 func StartServer(relayTarget, password, cacheDir, certFile, keyFile, email string) {
-	dir, _ := os.UserCacheDir()
-	dir = filepath.Join("/", dir, "sower")
-	log.Infow("certificate cache dir", "dir", dir)
-
 	certManager := autocert.Manager{
 		Prompt: autocert.AcceptTOS,
 		Email:  email,
-		Cache:  autocert.DirCache(dir),
+		Cache:  autocert.DirCache(cacheDir),
 	}
 
 	tlsConf := &tls.Config{
@@ -94,21 +90,21 @@ func StartServer(relayTarget, password, cacheDir, certFile, keyFile, email strin
 	// Try to redirect 80 to 443
 	go http.ListenAndServe(":80", certManager.HTTPHandler(http.HandlerFunc(
 		func(w http.ResponseWriter, r *http.Request) {
+			r.URL.Scheme = "https"
 			if host, _, err := net.SplitHostPort(r.Host); err != nil {
 				r.URL.Host = r.Host
 			} else {
 				r.URL.Host = host
 			}
-			r.URL.Scheme = "https"
+
 			http.Redirect(w, r, r.URL.String(), 301)
 		})))
 
+	log.Infow("start sower server", "relay_to", relayTarget)
 	ln, err := tls.Listen("tcp", ":443", tlsConf)
 	if err != nil {
 		log.Fatalw("tcp listen", "err", err)
 	}
-
-	log.Infow("start sower server", "relay_to", relayTarget)
 
 	passwordData := []byte(password)
 	for {
