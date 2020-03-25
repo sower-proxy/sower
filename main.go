@@ -27,8 +27,10 @@ func main() {
 			PersistFn:     conf.PersistRule,
 		}
 
-		go proxy.StartHTTPProxy(conf.Conf.Client.HTTPProxy, conf.Conf.Client.Address,
-			[]byte(conf.Conf.Password), route.ShouldProxy)
+		if conf.Conf.Client.HTTPProxy != "" {
+			go proxy.StartHTTPProxy(conf.Conf.Client.HTTPProxy, conf.Conf.Client.Address,
+				[]byte(conf.Conf.Password), route.ShouldProxy)
+		}
 
 		enableDNSSolution := conf.Conf.Client.DNSServeIP != ""
 		if enableDNSSolution {
