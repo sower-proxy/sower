@@ -23,11 +23,28 @@ import (
 const name = "sower"
 const cmdsAccepted = svc.AcceptStop | svc.AcceptShutdown | svc.AcceptPauseAndContinue
 
-var ConfigDir = execDir
+var (
+	ConfigDir     = ""
+	installCmd    = false
+	uninstallFlag = false
+)
 
-func _init() {
-	flag.StringVar(&Conf.file, "f", filepath.Join(execDir, "sower.toml"), "config file, rewrite all other parameters if set")
-	flag.StringVar(&installCmd, "install", "", "put any character to install as a service, eg: true")
+func beforeInitFlag() {
+	flag.StringVar(&conf.file, "f", filepath.Join(execDir, "sower.toml"), "config file, rewrite all other parameters if set")
+	flag.BoolVar(&installCmd, "install", false, "put any character to install as a service, eg: true")
+}
+
+func afterInitFlag() {
+	switch {
+	case installCmd:
+		install()
+	case uninstallFlag:
+		uninstall()
+	default:
+		runAsService()
+		return
+	}
+	os.Exit(0)
 }
 
 func runAsService() {
@@ -86,6 +103,7 @@ func uninstall() {
 		return eventlog.Remove(name)
 	})
 }
+
 func serviceDo(fn func(*mgr.Service) error) {
 	mgrDo(func(m *mgr.Mgr) error {
 		s, err := m.OpenService(name)

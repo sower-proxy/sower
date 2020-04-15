@@ -35,9 +35,13 @@ const svcFile = `<?xml version="1.0" encoding="UTF-8"?>
 </dict>
 </plist>`
 
-var ConfigDir = ""
+var (
+	ConfigDir     = ""
+	installCmd    = ""
+	uninstallFlag = false
+)
 
-func _init() {
+func beforeInitFlag() {
 	if _, err := os.Stat(execDir + "/sower.toml"); err == nil {
 		ConfigDir = execDir
 	} else {
@@ -46,15 +50,26 @@ func _init() {
 	}
 
 	if _, err := os.Stat(ConfigDir + "/sower.toml"); err != nil {
-		flag.StringVar(&Conf.file, "f", "", "config file, rewrite all other parameters if set")
+		flag.StringVar(&conf.file, "f", "", "config file, rewrite all other parameters if set")
 	} else {
-		flag.StringVar(&Conf.file, "f", ConfigDir+"/sower.toml", "config file, rewrite all other parameters if set")
+		flag.StringVar(&conf.file, "f", ConfigDir+"/sower.toml", "config file, rewrite all other parameters if set")
 	}
 
 	flag.StringVar(&installCmd, "install", "", "install service with cmd, eg: '-f \""+ConfigDir+"/sower.toml\"'")
+	flag.BoolVar(&uninstallFlag, "uninstall", false, "uninstall service")
 }
 
-func runAsService() {}
+func afterInitFlag() {
+	switch {
+	case installCmd != "":
+		install()
+	case uninstallFlag:
+		uninstall()
+	default:
+		return
+	}
+	os.Exit(0)
+}
 
 func install() {
 	if err := ioutil.WriteFile(svcPath, []byte(fmt.Sprintf(svcFile, execFile, installCmd)), 0644); err != nil {
@@ -62,7 +77,7 @@ func install() {
 	}
 
 	execute("launchctl unload " + svcPath)
-	if err := execute("launchctl load -w " + svcPath); err != nil {
+	if err := execute("launchctl load -wF " + svcPath); err != nil {
 		log.Fatalw("install service", "err", err)
 	}
 }

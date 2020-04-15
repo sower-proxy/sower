@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"crypto/tls"
 	"encoding/binary"
-	"io"
 	"net"
 	"strconv"
 	"time"
@@ -39,10 +38,7 @@ func (p Port) PingWithConn(domain string, conn net.Conn, timeout time.Duration) 
 	// err -> nil:		read something succ
 	// err -> io.EOF:	no such domain or connection refused
 	// err -> timeout:	tcp package has been dropped
-	_, err := conn.Read(make([]byte, 1))
-	if err == nil || err == io.EOF {
-		return nil
-	}
+	_, err := conn.Read(make([]byte, 10))
 	return err
 }
 

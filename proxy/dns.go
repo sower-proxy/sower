@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/miekg/dns"
-	"github.com/wweir/sower/proxy/dhcp"
+	"github.com/wweir/sower/dhcp"
 	"github.com/wweir/utils/log"
 )
 
@@ -20,7 +20,7 @@ func StartDNS(redirectIP, relayServer string, shouldProxy func(string) bool) {
 	if relayServer, err = pickRelayAddr(relayServer); err != nil {
 		log.Fatalw("pick upstream dns server", "err", err)
 	}
-	log.Infow("detect upstream dns", "addr", relayServer)
+	log.Infow("upstream dns", "addr", relayServer)
 
 	dns.HandleFunc(".", func(w dns.ResponseWriter, r *dns.Msg) {
 		// *Msg r has an TSIG record and it was validated

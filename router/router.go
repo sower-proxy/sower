@@ -15,25 +15,18 @@ import (
 
 // Route implement a router for each request
 type Route struct {
-	shouldProxy bool
-	port        Port
-	once        sync.Once
-	cache       *mem.Cache
+	once  sync.Once
+	cache *mem.Cache
 
 	ProxyAddress  string
 	ProxyPassword string
 	password      []byte
 
-	DetectLevel   int    // dynamic detect proxy level
-	DetectTimeout string // dynamic detect timeout
-	timeout       time.Duration
-
+	DetectLevel int // dynamic detect proxy level
 	DirectList  []string
 	directRule  *util.Node
 	ProxyList   []string
 	proxyRule   *util.Node
-	DynamicList []string
-	dynamicRule *util.Node
 	PersistFn   func(string)
 }
 
@@ -44,14 +37,6 @@ func (r *Route) ShouldProxy(domain string) bool {
 		r.password = []byte(r.ProxyPassword)
 		r.directRule = util.NewNodeFromRules(r.DirectList...)
 		r.proxyRule = util.NewNodeFromRules(r.ProxyList...)
-		r.dynamicRule = util.NewNodeFromRules(r.DynamicList...)
-
-		if timeout, err := time.ParseDuration(r.DetectTimeout); err != nil {
-			r.timeout = 300 * time.Millisecond
-			log.Warnw("parse detect timeout", "err", err, "default", r.timeout)
-		} else {
-			r.timeout = timeout
-		}
 	})
 
 	// break deadlook, for wildcard
@@ -63,18 +48,16 @@ func (r *Route) ShouldProxy(domain string) bool {
 	if domain == r.ProxyAddress {
 		return false
 	}
-	if r.directRule.Match(domain) {
-		return false
-	}
+
 	if r.proxyRule.Match(domain) {
 		return true
 	}
-	if r.dynamicRule.Match(domain) {
-		return true
+	if r.directRule.Match(domain) {
+		return false
 	}
 
-	r.cache.Remember(r, domain)
-	return r.dynamicRule.Match(domain)
+	go r.cache.Remember(r, domain)
+	return true
 }
 
 // Get implement for cache
@@ -85,7 +68,7 @@ func (r *Route) Get(key interface{}) (err error) {
 	log.Infow("detect", "domain", domain, "http", httpScore, "https", httpsScore)
 
 	if httpScore+httpsScore >= r.DetectLevel {
-		r.dynamicRule.Add(domain)
+		r.directRule.Add(domain)
 		if r.PersistFn != nil {
 			r.PersistFn(domain)
 		}
@@ -97,47 +80,54 @@ func (r *Route) Get(key interface{}) (err error) {
 func (r *Route) detect(domain string) (http, https int) {
 	wg := sync.WaitGroup{}
 	httpScore, httpsScore := new(int32), new(int32)
-	for _, ping := range [...]*Route{
+	for _, ping := range [...]struct {
+		shouldProxy bool
+		port        Port
+	}{
 		{shouldProxy: true, port: HTTP},
 		{shouldProxy: true, port: HTTPS},
 		{shouldProxy: false, port: HTTP},
 		{shouldProxy: false, port: HTTPS},
 	} {
 		wg.Add(1)
-		go func(ping *Route) {
+		go func(shouldProxy bool, port Port) {
 			defer wg.Done()
 
-			target := net.JoinHostPort(domain, ping.port.String())
-			conn, err := transport.Dial(r.ProxyAddress, target, r.password,
-				func(string) bool { return r.shouldProxy })
+			target := net.JoinHostPort(domain, port.String())
+			conn, err := transport.Dial(target, func(string) (string, []byte) {
+				if shouldProxy {
+					return r.ProxyAddress, r.password
+				}
+				return "", nil
+			})
 			if err != nil {
-				log.Errorw("sower dial", "addr", r.ProxyAddress, "err", err)
+				log.Warnw("sower dial", "proxy", shouldProxy, "address", target, "err", err)
 				return
 			}
 
-			if err := ping.port.PingWithConn(domain, conn, r.timeout); err != nil {
+			if err := port.PingWithConn(domain, conn, 5*time.Second); err != nil {
 				return
 			}
 
 			switch {
-			case r.shouldProxy && ping.port == HTTP:
-				if !atomic.CompareAndSwapInt32(httpScore, 0, 2) {
-					atomic.AddInt32(httpScore, 1)
-				}
-			case r.shouldProxy && ping.port == HTTPS:
-				if !atomic.CompareAndSwapInt32(httpsScore, 0, 2) {
-					atomic.AddInt32(httpsScore, 1)
-				}
-			case !r.shouldProxy && ping.port == HTTP:
+			case shouldProxy && port == HTTP:
 				if !atomic.CompareAndSwapInt32(httpScore, 0, -2) {
 					atomic.AddInt32(httpScore, -1)
 				}
-			case !r.shouldProxy && ping.port == HTTPS:
+			case shouldProxy && port == HTTPS:
 				if !atomic.CompareAndSwapInt32(httpsScore, 0, -2) {
 					atomic.AddInt32(httpsScore, -1)
 				}
+			case !shouldProxy && port == HTTP:
+				if !atomic.CompareAndSwapInt32(httpScore, 0, 2) {
+					atomic.AddInt32(httpScore, 1)
+				}
+			case !shouldProxy && port == HTTPS:
+				if !atomic.CompareAndSwapInt32(httpsScore, 0, 2) {
+					atomic.AddInt32(httpsScore, 1)
+				}
 			}
-		}(ping)
+		}(ping.shouldProxy, ping.port)
 	}
 
 	wg.Wait()

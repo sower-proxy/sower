@@ -23,7 +23,12 @@ func StartHTTPProxy(httpProxyAddr, serverAddr string, password []byte,
 		Transport: &http.Transport{
 			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 				addr, _ = util.WithDefaultPort(addr, "80")
-				return transport.Dial(serverAddr, addr, password, shouldProxy)
+				return transport.Dial(serverAddr, func(host string) (string, []byte) {
+					if shouldProxy(host) {
+						return httpProxyAddr, password
+					}
+					return "", nil
+				})
 			},
 		},
 	}
@@ -63,7 +68,12 @@ func httpsProxy(w http.ResponseWriter, r *http.Request,
 	}
 
 	target, _ := util.WithDefaultPort(r.Host, "443")
-	rc, err := transport.Dial(serverAddr, target, password, shouldProxy)
+	rc, err := transport.Dial(target, func(host string) (string, []byte) {
+		if shouldProxy(host) {
+			return serverAddr, password
+		}
+		return "", nil
+	})
 	if err != nil {
 		conn.Write([]byte("sower dial " + serverAddr + " fail: " + err.Error()))
 		conn.Close()

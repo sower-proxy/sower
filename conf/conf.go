@@ -11,7 +11,7 @@ import (
 	"github.com/wweir/utils/log"
 )
 
-type client struct {
+type Client struct {
 	Address     string            `toml:"address"`
 	HTTPProxy   string            `toml:"http_proxy"`
 	DNSServeIP  string            `toml:"dns_serve_ip"`
@@ -19,15 +19,12 @@ type client struct {
 	PortForward map[string]string `toml:"port_forward"`
 
 	Router struct {
-		DetectLevel   int    `toml:"detect_level"`
-		DetectTimeout string `toml:"detect_timeout"`
-
+		DetectLevel int      `toml:"detect_level"`
 		ProxyList   []string `toml:"proxy_list"`
 		DirectList  []string `toml:"direct_list"`
-		DynamicList []string `toml:"dynamic_list"`
 	} `toml:"router"`
 }
-type server struct {
+type Server struct {
 	Upstream  string `toml:"upstream"`
 	CertFile  string `toml:"cert_file"`
 	KeyFile   string `toml:"key_file"`
@@ -37,54 +34,43 @@ type server struct {
 var (
 	version, date string
 
-	installCmd  string
 	execFile, _ = os.Executable()
 	execDir, _  = filepath.Abs(filepath.Dir(execFile))
 	// Conf full config, include common and server / client
-	Conf = struct {
+	conf = struct {
 		file     string
 		Password string `toml:"password"`
-		Server   server `toml:"server"`
-		Client   client `toml:"client"`
+		Client   Client `toml:"client"`
+		Server   Server `toml:"server"`
 	}{}
 )
 
-func init() {
-	flag.StringVar(&Conf.Password, "password", "", "password")
-	flag.StringVar(&Conf.Server.Upstream, "s", "", "upstream http service, eg: 127.0.0.1:8080")
-	flag.StringVar(&Conf.Server.CertFile, "s_cert", "", "tls cert file, gen cert from letsencrypt if empty")
-	flag.StringVar(&Conf.Server.KeyFile, "s_key", "", "tls key file, gen cert from letsencrypt if empty")
-	flag.StringVar(&Conf.Client.Address, "c", "", "remote server domain, eg: aa.bb.cc, socks5h://127.0.0.1:1080")
-	flag.StringVar(&Conf.Client.HTTPProxy, "http_proxy", ":8080", "http proxy, empty to disable")
-	flag.IntVar(&Conf.Client.Router.DetectLevel, "level", 2, "dynamic rule detect level: 0~4")
-	flag.StringVar(&Conf.Client.Router.DetectTimeout, "timeout", "300ms", "dynamic rule detect timeout")
-	uninstallFlag := flag.Bool("uninstall", false, "uninstall service")
-	_init() // execute platform init logic
+func Init() (*Client, *Server, string) {
+	beforeInitFlag()
+	flag.StringVar(&conf.Password, "password", "", "password")
+	flag.StringVar(&conf.Server.Upstream, "s", "", "upstream http service, eg: 127.0.0.1:8080")
+	flag.StringVar(&conf.Server.CertFile, "s_cert", "", "tls cert file, gen cert from letsencrypt if empty")
+	flag.StringVar(&conf.Server.KeyFile, "s_key", "", "tls key file, gen cert from letsencrypt if empty")
+	flag.StringVar(&conf.Client.Address, "c", "", "remote server domain, eg: aa.bb.cc, socks5h://127.0.0.1:1080")
+	flag.StringVar(&conf.Client.HTTPProxy, "http_proxy", ":8080", "http proxy, empty to disable")
+	flag.IntVar(&conf.Client.Router.DetectLevel, "level", 2, "dynamic rule detect level: 0~4")
 
 	if !flag.Parsed() {
 		flag.Parse()
 	}
-	switch {
-	case *uninstallFlag:
-		uninstall()
-		os.Exit(0)
-	case installCmd != "":
-		install()
-		os.Exit(0)
-	default:
-		runAsService()
-	}
+	afterInitFlag()
 
-	defer log.Infow("starting", "config", &Conf)
-	if Conf.file == "" {
-		return
+	defer log.Infow("starting", "config", &conf)
+	if conf.file == "" {
+		return &conf.Client, &conf.Server, conf.Password
 	}
 
 	for i := range loadConfigFns {
 		if err := loadConfigFns[i].fn(); err != nil {
-			log.Fatalw("load config", "config", Conf.file, "step", loadConfigFns[i].step, "err", err)
+			log.Fatalw("load config", "config", conf.file, "step", loadConfigFns[i].step, "err", err)
 		}
 	}
+	return &conf.Client, &conf.Server, conf.Password
 }
 
 // refreshFns will be executed while init and write new config
@@ -92,27 +78,27 @@ var loadConfigFns = []struct {
 	step string
 	fn   func() error
 }{{"load_config", func() error {
-	f, err := os.OpenFile(Conf.file, os.O_RDONLY, 0644)
+	f, err := os.OpenFile(conf.file, os.O_RDONLY, 0644)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
 
-	return toml.NewDecoder(f).Decode(&Conf)
+	return toml.NewDecoder(f).Decode(&conf)
 }}}
 
 // flushCh to avoid parallel persist
 var flushCh = make(chan struct{})
 var flushOnce = sync.Once{}
 
-// PersistRule persist dynamic rule into config file
+// PersistRule persist rule into config file
 func PersistRule(domain string) {
 	flushOnce.Do(func() {
 		go flushConfDaemon()
 	})
 
-	log.Infow("persist dynamic rule into config", "domain", domain)
-	Conf.Client.Router.DynamicList = append(Conf.Client.Router.DynamicList, domain)
+	log.Infow("persist direct rule into config", "domain", domain)
+	conf.Client.Router.DirectList = append(conf.Client.Router.DirectList, domain)
 	select {
 	case flushCh <- struct{}{}:
 	default:
@@ -121,34 +107,34 @@ func PersistRule(domain string) {
 func flushConfDaemon() {
 	for range flushCh {
 		// safe write file
-		if Conf.file != "" {
-			f, err := os.OpenFile(Conf.file+"~", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+		if conf.file != "" {
+			f, err := os.OpenFile(conf.file+"~", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 			if err != nil {
 				log.Errorw("flush config", "step", "flush", "err", err)
 				continue
 			}
 
-			Conf.Client.Router.DynamicList =
-				util.NewReverseSecSlice(Conf.Client.Router.DynamicList).Sort().Uniq()
+			conf.Client.Router.DirectList =
+				util.NewReverseSecSlice(conf.Client.Router.DirectList).Sort().Uniq()
 
-			if err := toml.NewEncoder(f).ArraysWithOneElementPerLine(true).Encode(&Conf); err != nil {
+			if err := toml.NewEncoder(f).ArraysWithOneElementPerLine(true).Encode(&conf); err != nil {
 				log.Errorw("flush config", "step", "flush", "err", err)
 				f.Close()
 				continue
 			}
 			f.Close()
 
-			if stat, err := os.Stat(Conf.file); err != nil {
-				log.Warnw("get file stat", "file", Conf.file, "err", err)
+			if stat, err := os.Stat(conf.file); err != nil {
+				log.Warnw("get file stat", "file", conf.file, "err", err)
 			} else {
 				// There is no common way to transfer ownership for a file
 				// cross-platform. Drop the ownership support but file mod.
-				if err = os.Chmod(Conf.file+"~", stat.Mode()); err != nil {
-					log.Warnw("set file mod", "file", Conf.file+"~", "err", err)
+				if err = os.Chmod(conf.file+"~", stat.Mode()); err != nil {
+					log.Warnw("set file mod", "file", conf.file+"~", "err", err)
 				}
 			}
 
-			if err = os.Rename(Conf.file+"~", Conf.file); err != nil {
+			if err = os.Rename(conf.file+"~", conf.file); err != nil {
 				log.Errorw("flush config", "step", "flush", "err", err)
 				continue
 			}

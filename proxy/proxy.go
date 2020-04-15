@@ -40,7 +40,12 @@ func StartClient(serverAddr, password string, enableDNS bool,
 					}
 				}
 
-				rc, err := transport.Dial(serverAddr, target, passwordData, shouldProxy)
+				rc, err := transport.Dial(target, func(host string) (string, []byte) {
+					if shouldProxy(host) {
+						return serverAddr, passwordData
+					}
+					return "", nil
+				})
 				if err != nil {
 					log.Warnw("dial", "addr", serverAddr, "err", err)
 					return
@@ -117,7 +122,7 @@ func StartServer(relayTarget, password, cacheDir, certFile, keyFile, email strin
 		go func(conn net.Conn) {
 			defer conn.Close()
 
-			conn, target := transport.ToProxyConn(conn, passwordData)
+			conn, target := transport.ParseProxyConn(conn, passwordData)
 			if target == "" {
 				target = relayTarget
 			}

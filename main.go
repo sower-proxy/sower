@@ -7,39 +7,43 @@ import (
 	"github.com/wweir/sower/conf"
 	"github.com/wweir/sower/proxy"
 	"github.com/wweir/sower/router"
+	"github.com/wweir/sower/transport"
 )
 
 func main() {
-	switch {
-	case conf.Conf.Server.Upstream != "":
-		proxy.StartServer(conf.Conf.Server.Upstream, conf.Conf.Password, conf.ConfigDir,
-			conf.Conf.Server.CertFile, conf.Conf.Server.KeyFile, conf.Conf.Server.CertEmail)
+	client, server, password := conf.Init()
 
-	case conf.Conf.Client.Address != "":
+	switch {
+	case server.Upstream != "":
+		proxy.StartServer(server.Upstream, password, conf.ConfigDir,
+			server.CertFile, server.KeyFile, server.CertEmail)
+
+	case client.Address != "":
 		route := &router.Route{
-			ProxyAddress:  conf.Conf.Client.Address,
-			ProxyPassword: conf.Conf.Password,
-			DetectLevel:   conf.Conf.Client.Router.DetectLevel,
-			DetectTimeout: conf.Conf.Client.Router.DetectTimeout,
-			DirectList:    conf.Conf.Client.Router.DirectList,
-			ProxyList:     conf.Conf.Client.Router.ProxyList,
-			DynamicList:   conf.Conf.Client.Router.DynamicList,
+			ProxyAddress:  client.Address,
+			ProxyPassword: password,
+			DetectLevel:   client.Router.DetectLevel,
+			DirectList:    client.Router.DirectList,
+			ProxyList:     client.Router.ProxyList,
 			PersistFn:     conf.PersistRule,
 		}
 
-		if conf.Conf.Client.HTTPProxy != "" {
-			go proxy.StartHTTPProxy(conf.Conf.Client.HTTPProxy, conf.Conf.Client.Address,
-				[]byte(conf.Conf.Password), route.ShouldProxy)
+		if client.HTTPProxy != "" {
+			go proxy.StartHTTPProxy(client.HTTPProxy, client.Address,
+				[]byte(password), route.ShouldProxy)
 		}
 
-		enableDNSSolution := conf.Conf.Client.DNSServeIP != ""
+		enableDNSSolution := client.DNSServeIP != ""
 		if enableDNSSolution {
-			go proxy.StartDNS(conf.Conf.Client.DNSServeIP, conf.Conf.Client.DNSUpstream,
+			if client.DNSUpstream != "" {
+				transport.SetDNS(client.DNSUpstream)
+			}
+			go proxy.StartDNS(client.DNSServeIP, client.DNSUpstream,
 				route.ShouldProxy)
 		}
 
-		proxy.StartClient(conf.Conf.Client.Address, conf.Conf.Password, enableDNSSolution,
-			conf.Conf.Client.PortForward, route.ShouldProxy)
+		proxy.StartClient(client.Address, password, enableDNSSolution,
+			client.PortForward, route.ShouldProxy)
 
 	default:
 		fmt.Println()

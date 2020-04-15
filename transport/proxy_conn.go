@@ -19,7 +19,7 @@ type head struct {
 	AddrLen  uint8
 }
 
-func ToProxyConn(conn net.Conn, password []byte) (net.Conn, string) {
+func ParseProxyConn(conn net.Conn, password []byte) (net.Conn, string) {
 	teeConn := &util.TeeConn{Conn: conn}
 	defer teeConn.Stop()
 
@@ -41,12 +41,7 @@ func ToProxyConn(conn net.Conn, password []byte) (net.Conn, string) {
 	return teeConn, net.JoinHostPort(string(buf), strconv.Itoa(int(h.Port)))
 }
 
-func DialTlsProxyConn(address, tgtHost string, tgtPort uint16, tlsCfg *tls.Config, password []byte) (net.Conn, error) {
-	conn, err := tls.Dial("tcp", address, tlsCfg)
-	if err != nil {
-		return nil, err
-	}
-
+func ToProxyConn(conn net.Conn, tgtHost string, tgtPort uint16, tlsCfg *tls.Config, password []byte) (net.Conn, error) {
 	h := &head{
 		Checksum: sumChecksum([]byte(tgtHost), password),
 		Port:     tgtPort,
@@ -57,7 +52,8 @@ func DialTlsProxyConn(address, tgtHost string, tgtPort uint16, tlsCfg *tls.Confi
 		return nil, err
 	}
 
-	data := []byte(tgtHost)
+	var data = []byte(tgtHost)
+	var err error
 	for n, nn := 0, 0; nn < len(data); nn += n {
 		if n, err = conn.Write(data[nn:]); err != nil {
 			conn.Close()
