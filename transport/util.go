@@ -7,17 +7,39 @@ import (
 	"strconv"
 
 	"github.com/wweir/sower/dhcp"
-	"github.com/wweir/sower/util"
+	"github.com/wweir/utils/log"
 )
 
 var (
-	dnsAddr string
-	preSet  bool
+	persistDNS string
+	dnsAddr    string
+	resolver   = &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, network, dnsAddr)
+		},
+	}
 )
 
-func SetDNS(dnsIP string) {
-	dnsAddr = net.JoinHostPort(dnsIP, "53")
-	preSet = true
+func SetDNS(err error, dnsIP string) {
+	if dnsIP != "" {
+		persistDNS = dnsIP
+		dnsAddr = net.JoinHostPort(dnsIP, "53")
+		return
+	} else if persistDNS != "" {
+		return
+	}
+
+	if e, ok := err.(*net.DNSError); !ok /*nil*/ || !e.IsNotFound {
+		if dnsIP, err = dhcp.GetDefaultDNSServer(); err != nil {
+			dnsIP, err = dhcp.GetDefaultDNSServer() // retry
+		}
+		if err != nil {
+			log.Errorw("get dns via dhcp", "err", err, "current_dns", dnsAddr)
+		} else {
+			dnsAddr = net.JoinHostPort(dnsIP, "53")
+		}
+	}
 }
 
 // Dial dial targetAddr with possiable proxy address
@@ -29,21 +51,12 @@ func Dial(targetAddr string, dialAddr func(domain string) (proxyAddr string, pas
 
 	address, password := dialAddr(host)
 	if address == "" {
-		ips, err := (&net.Resolver{
-			PreferGo: true,
-			Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
-				return (&net.Dialer{}).DialContext(ctx, network, dnsAddr)
-			},
-		}).LookupIPAddr(context.Background(), host)
+		ips, err := resolver.LookupIPAddr(context.Background(), host)
+		if err != nil { //retry
+			ips, err = resolver.LookupIPAddr(context.Background(), host)
+		}
 		if err != nil {
-			if !preSet {
-				if e, ok := err.(*net.DNSError); !ok || !e.IsNotFound {
-					if ip, err := dhcp.GetDefaultDNSServer(); err == nil {
-						dnsAddr = net.JoinHostPort(ip, "53")
-					}
-				}
-			}
-
+			SetDNS(err, "")
 			return nil, err
 		}
 
@@ -67,11 +80,10 @@ func Dial(targetAddr string, dialAddr func(domain string) (proxyAddr string, pas
 		return conn, nil
 	}
 
-	address, _ = util.WithDefaultPort(address, "443")
-	// tls.Config is same as golang http pkg default behavior
-	conn, err := tls.Dial("tcp", address, &tls.Config{})
+	conn, err := tls.DialWithDialer(&net.Dialer{Resolver: resolver},
+		"tcp", net.JoinHostPort(address, "443"), &tls.Config{})
 	if err != nil {
 		return nil, err
 	}
-	return ToProxyConn(conn, host, uint16(p), &tls.Config{}, password)
+	return ToProxyConn(conn, host, uint16(p), password)
 }

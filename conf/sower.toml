@@ -10,7 +10,7 @@ password="" # sower password
     # eg: ":2222"="aa.bb.cc:22"
 
   [client.router]
-    detect_level = 1 # 0~4, the bigger the harder to add
+    detect_level = 0 # [-4, 4], the bigger the harder to add
     direct_list = [
       "**.in-addr.arpa",
       "imap.*.*",

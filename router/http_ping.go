@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/tls"
 	"encoding/binary"
+	"io"
 	"net"
 	"strconv"
 	"time"
@@ -18,19 +19,14 @@ const (
 )
 
 // Ping try connect to a http(s) server with domain though the http addr
-func (p Port) Ping(domain string, timeout time.Duration) error {
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort(domain, p.String()), timeout)
+func (p Port) Ping(domain string, dial func(string) (net.Conn, error)) error {
+	conn, err := dial(net.JoinHostPort(domain, p.String()))
 	if err != nil {
 		return err
 	}
 	defer conn.Close()
 
-	return p.PingWithConn(domain, conn, timeout)
-}
-
-// PingWithConn try connect to a http(s) server with domain though the http addr
-func (p Port) PingWithConn(domain string, conn net.Conn, timeout time.Duration) error {
-	conn.SetDeadline(time.Now().Add(timeout))
+	conn.SetDeadline(time.Now().Add(5 * time.Second))
 	if _, err := conn.Write(p.PingMsg(domain)); err != nil {
 		return err
 	}
@@ -38,7 +34,9 @@ func (p Port) PingWithConn(domain string, conn net.Conn, timeout time.Duration) 
 	// err -> nil:		read something succ
 	// err -> io.EOF:	no such domain or connection refused
 	// err -> timeout:	tcp package has been dropped
-	_, err := conn.Read(make([]byte, 10))
+	if _, err = conn.Read(make([]byte, 10)); err == io.EOF {
+		err = nil
+	}
 	return err
 }
 

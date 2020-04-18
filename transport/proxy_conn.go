@@ -2,7 +2,6 @@ package transport
 
 import (
 	"crypto/md5"
-	"crypto/tls"
 	"encoding/binary"
 	"io"
 	"net"
@@ -12,7 +11,7 @@ import (
 )
 
 // checksum(>=0x80) + port + target_length + target + data
-// data(HTTP/HTTPS, first byte < 0x7F)
+// data(HTTP, first byte < 0x7F)
 type head struct {
 	Checksum byte
 	Port     uint16
@@ -41,7 +40,7 @@ func ParseProxyConn(conn net.Conn, password []byte) (net.Conn, string) {
 	return teeConn, net.JoinHostPort(string(buf), strconv.Itoa(int(h.Port)))
 }
 
-func ToProxyConn(conn net.Conn, tgtHost string, tgtPort uint16, tlsCfg *tls.Config, password []byte) (net.Conn, error) {
+func ToProxyConn(conn net.Conn, tgtHost string, tgtPort uint16, password []byte) (net.Conn, error) {
 	h := &head{
 		Checksum: sumChecksum([]byte(tgtHost), password),
 		Port:     tgtPort,

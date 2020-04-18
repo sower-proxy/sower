@@ -31,7 +31,7 @@ type Route struct {
 }
 
 // ShouldProxy check if the domain shoule request though proxy
-func (r *Route) ShouldProxy(domain string) bool {
+func (r *Route) GenProxyCheck(sync bool) func(string) bool {
 	r.once.Do(func() {
 		r.cache = mem.New(4 * time.Hour)
 		r.password = []byte(r.ProxyPassword)
@@ -39,25 +39,36 @@ func (r *Route) ShouldProxy(domain string) bool {
 		r.proxyRule = util.NewNodeFromRules(r.ProxyList...)
 	})
 
-	// break deadlook, for wildcard
-	if strings.Count(domain, ".") > 4 {
-		return false
-	}
-	domain = strings.TrimSuffix(domain, ".")
-
-	if domain == r.ProxyAddress {
-		return false
-	}
-
-	if r.proxyRule.Match(domain) {
+	detect := func(domain string) bool {
+		go r.cache.Remember(r, domain)
 		return true
 	}
-	if r.directRule.Match(domain) {
-		return false
+	if sync {
+		detect = func(domain string) bool {
+			r.cache.Remember(r, domain)
+			if r.proxyRule.Match(domain) {
+				return true
+			}
+			return !r.directRule.Match(domain)
+		}
 	}
 
-	go r.cache.Remember(r, domain)
-	return true
+	return func(domain string) bool {
+		domain = strings.TrimSuffix(domain, ".")
+		// break deadlook, for wildcard
+		if sepCount := strings.Count(domain, "."); sepCount == 0 || sepCount >= 5 {
+			return false
+		}
+
+		if r.proxyRule.Match(domain) {
+			return true
+		}
+		if r.directRule.Match(domain) {
+			return false
+		}
+
+		return detect(domain)
+	}
 }
 
 // Get implement for cache
@@ -93,19 +104,16 @@ func (r *Route) detect(domain string) (http, https int) {
 		go func(shouldProxy bool, port Port) {
 			defer wg.Done()
 
-			target := net.JoinHostPort(domain, port.String())
-			conn, err := transport.Dial(target, func(string) (string, []byte) {
-				if shouldProxy {
-					return r.ProxyAddress, r.password
-				}
-				return "", nil
-			})
-			if err != nil {
-				log.Warnw("sower dial", "proxy", shouldProxy, "address", target, "err", err)
-				return
-			}
-
-			if err := port.PingWithConn(domain, conn, 5*time.Second); err != nil {
+			if err := port.Ping(domain, func(domain string) (net.Conn, error) {
+				return transport.Dial(domain,
+					func(domain string) (proxyAddr string, password []byte) {
+						if shouldProxy {
+							return r.ProxyAddress, r.password
+						}
+						return "", nil
+					})
+			}); err != nil {
+				log.Warnw("sower dial", "proxy", shouldProxy, "host", domain, "port", port, "err", err)
 				return
 			}
 

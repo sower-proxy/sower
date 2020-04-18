@@ -40,14 +40,15 @@ func StartClient(serverAddr, password string, enableDNS bool,
 					}
 				}
 
-				rc, err := transport.Dial(target, func(host string) (string, []byte) {
-					if shouldProxy(host) {
+				rc, err := transport.Dial(target, func(domain string) (string, []byte) {
+					if shouldProxy(domain) {
 						return serverAddr, passwordData
 					}
 					return "", nil
 				})
 				if err != nil {
-					log.Warnw("dial", "addr", serverAddr, "err", err)
+					host, _, _ := net.SplitHostPort(target)
+					log.Warnw("dial", "addr", target, "proxy", shouldProxy(host), "err", err)
 					return
 				}
 				defer rc.Close()

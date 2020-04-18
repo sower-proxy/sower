@@ -30,20 +30,18 @@ func main() {
 
 		if client.HTTPProxy != "" {
 			go proxy.StartHTTPProxy(client.HTTPProxy, client.Address,
-				[]byte(password), route.ShouldProxy)
+				[]byte(password), route.GenProxyCheck(true))
 		}
 
 		enableDNSSolution := client.DNSServeIP != ""
 		if enableDNSSolution {
-			if client.DNSUpstream != "" {
-				transport.SetDNS(client.DNSUpstream)
-			}
+			transport.SetDNS(nil, client.DNSUpstream)
 			go proxy.StartDNS(client.DNSServeIP, client.DNSUpstream,
-				route.ShouldProxy)
+				route.GenProxyCheck(false))
 		}
 
 		proxy.StartClient(client.Address, password, enableDNSSolution,
-			client.PortForward, route.ShouldProxy)
+			client.PortForward, route.GenProxyCheck(true))
 
 	default:
 		fmt.Println()

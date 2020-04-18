@@ -53,7 +53,7 @@ func Init() (*Client, *Server, string) {
 	flag.StringVar(&conf.Server.KeyFile, "s_key", "", "tls key file, gen cert from letsencrypt if empty")
 	flag.StringVar(&conf.Client.Address, "c", "", "remote server domain, eg: aa.bb.cc, socks5h://127.0.0.1:1080")
 	flag.StringVar(&conf.Client.HTTPProxy, "http_proxy", ":8080", "http proxy, empty to disable")
-	flag.IntVar(&conf.Client.Router.DetectLevel, "level", 2, "dynamic rule detect level: 0~4")
+	flag.IntVar(&conf.Client.Router.DetectLevel, "level", 0, "dynamic rule detect level: -4~4")
 
 	if !flag.Parsed() {
 		flag.Parse()
