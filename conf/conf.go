@@ -47,18 +47,17 @@ var (
 
 func Init() (*Client, *Server, string) {
 	beforeInitFlag()
+	defer afterInitFlag()
 	flag.StringVar(&conf.Password, "password", "", "password")
 	flag.StringVar(&conf.Server.Upstream, "s", "", "upstream http service, eg: 127.0.0.1:8080")
 	flag.StringVar(&conf.Server.CertFile, "s_cert", "", "tls cert file, gen cert from letsencrypt if empty")
 	flag.StringVar(&conf.Server.KeyFile, "s_key", "", "tls key file, gen cert from letsencrypt if empty")
 	flag.StringVar(&conf.Client.Address, "c", "", "remote server domain, eg: aa.bb.cc, socks5h://127.0.0.1:1080")
 	flag.StringVar(&conf.Client.HTTPProxy, "http_proxy", ":8080", "http proxy, empty to disable")
-	flag.IntVar(&conf.Client.Router.DetectLevel, "level", 0, "dynamic rule detect level: -4~4")
 
 	if !flag.Parsed() {
 		flag.Parse()
 	}
-	afterInitFlag()
 
 	defer log.Infow("starting", "config", &conf)
 	if conf.file == "" {

@@ -66,6 +66,13 @@ func afterInitFlag() {
 	case uninstallFlag:
 		uninstall()
 	default:
+		if conf.Client.DNSServeIP != "" {
+			log.Infow("setting system DNS", "DNS", conf.Client.DNSServeIP)
+			if err := execute(fmt.Sprintf("grep '%s' || sed -i '1inameserver %s' /etc/resolv.conf",
+				conf.Client.DNSServeIP, conf.Client.DNSServeIP)); err != nil {
+				log.Errorf("set DNS fail, please set DNS to %s manually", conf.Client.DNSServeIP)
+			}
+		}
 		return
 	}
 	os.Exit(0)
