@@ -3,12 +3,20 @@ package proxy
 import (
 	"net"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/miekg/dns"
 	"github.com/wweir/sower/dhcp"
 	"github.com/wweir/utils/log"
 )
+
+type msgCache struct {
+	*dns.Msg
+	time.Time
+}
+
+var cache sync.Map
 
 func StartDNS(redirectIP, relayServer string, shouldProxy func(string) bool) {
 	serveIP := net.ParseIP(redirectIP)
@@ -42,9 +50,17 @@ func StartDNS(redirectIP, relayServer string, shouldProxy func(string) bool) {
 		if shouldProxy(domain) {
 			w.WriteMsg(localA(r, domain, serveIP))
 
+		} else if val, ok := cache.Load(domain); ok && val.(*msgCache).After(time.Now()) {
+			msg := val.(*msgCache)
+			for _, rr := range msg.Answer {
+				rr.Header().Ttl = uint32(time.Until(msg.Time).Seconds())
+			}
+			msg.SetReply(r)
+			w.WriteMsg(msg.Msg)
+
 		} else if msg, err := dns.Exchange(r, relayServer); err != nil || msg == nil {
-			server, err := pickRelayAddr(relayServer)
-			if err != nil {
+			cache.Delete(domain)
+			if server, err := pickRelayAddr(relayServer); err != nil {
 				log.Errorw("detect upstream dns", "err", err)
 			} else if relayServer != server {
 				relayServer = server
@@ -52,6 +68,16 @@ func StartDNS(redirectIP, relayServer string, shouldProxy func(string) bool) {
 			}
 
 		} else {
+			cache.Delete(domain)
+			if len(msg.Answer) != 0 {
+				deadline := time.Now().Add(
+					time.Duration(msg.Answer[0].Header().Ttl) * time.Second)
+				cache.Store(domain, &msgCache{
+					Msg:  msg,
+					Time: deadline,
+				})
+			}
+
 			w.WriteMsg(msg)
 		}
 	})

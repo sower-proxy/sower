@@ -22,7 +22,6 @@ func StartHTTPProxy(httpProxyAddr, serverAddr string, password []byte,
 		Director: func(r *http.Request) {},
 		Transport: &http.Transport{
 			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-				addr, _ = util.WithDefaultPort(addr, "80")
 				return transport.Dial(serverAddr, func(host string) (string, []byte) {
 					if shouldProxy(host) {
 						return httpProxyAddr, password
