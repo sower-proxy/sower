@@ -10,7 +10,7 @@ import (
 	"golang.org/x/crypto/acme/autocert"
 )
 
-func StartClient(serverAddr, password string, enableDNS bool,
+func StartClient(serverAddr, password, serveIP string, enableDNS bool,
 	forwards map[string]string, shouldProxy func(string) bool) {
 
 	passwordData := []byte(password)
@@ -63,8 +63,8 @@ func StartClient(serverAddr, password string, enableDNS bool,
 	}
 
 	if enableDNS {
-		go relayToRemote(":80", "", ParseHTTP, shouldProxy)
-		go relayToRemote(":443", "", ParseHTTPS, shouldProxy)
+		go relayToRemote(net.JoinHostPort(serveIP, "http"), "", ParseHTTP, shouldProxy)
+		go relayToRemote(net.JoinHostPort(serveIP, "https"), "", ParseHTTPS, shouldProxy)
 	}
 
 	log.Infow("start sower client", "dns solution", enableDNS, "forwards", forwards)

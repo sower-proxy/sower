@@ -40,7 +40,8 @@ func main() {
 				route.GenProxyCheck(false))
 		}
 
-		proxy.StartClient(client.Address, password, enableDNSSolution,
+		proxy.StartClient(client.Address, password,
+			client.DNSServeIP, enableDNSSolution,
 			client.PortForward, route.GenProxyCheck(true))
 
 	default:
