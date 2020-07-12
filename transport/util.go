@@ -7,7 +7,7 @@ import (
 	"strconv"
 
 	"github.com/wweir/sower/dhcp"
-	"github.com/wweir/utils/log"
+	"github.com/wweir/util-go/log"
 )
 
 var (

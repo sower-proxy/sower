@@ -13,7 +13,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/wweir/utils/log"
+	"github.com/wweir/util-go/log"
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/eventlog"

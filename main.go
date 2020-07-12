@@ -19,13 +19,12 @@ func main() {
 			server.CertFile, server.KeyFile, server.CertEmail)
 
 	case client.Address != "":
-		route := &router.Route{
-			ProxyAddress:  client.Address,
-			ProxyPassword: password,
-			DetectLevel:   client.Router.DetectLevel,
-			DirectList:    client.Router.DirectList,
-			ProxyList:     client.Router.ProxyList,
-			PersistFn:     conf.PersistRule,
+		route := router.NewRoute(client.Address, password, client.Router.DetectLevel,
+			client.Router.BlockList, client.Router.ProxyList, client.Router.DirectList,
+			conf.PersistRule)
+
+		if client.Socks5Proxy != "" {
+			go proxy.StartSocks5Proxy(client.Socks5Proxy, client.Address, []byte(password))
 		}
 
 		if client.HTTPProxy != "" {
@@ -33,15 +32,10 @@ func main() {
 				[]byte(password), route.GenProxyCheck(true))
 		}
 
-		enableDNSSolution := client.DNSServeIP != ""
-		if enableDNSSolution {
-			transport.SetDNS(nil, client.DNSUpstream)
-			go proxy.StartDNS(client.DNSServeIP, client.DNSUpstream,
-				route.GenProxyCheck(false))
-		}
+		transport.SetDNS(nil, client.DNSUpstream)
+		go proxy.StartDNS(client.DNSUpstream, route.GenProxyCheck(false))
 
 		proxy.StartClient(client.Address, password,
-			client.DNSServeIP, enableDNSSolution,
 			client.PortForward, route.GenProxyCheck(true))
 
 	default:

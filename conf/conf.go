@@ -1,27 +1,36 @@
 package conf
 
 import (
+	"bufio"
 	"flag"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	toml "github.com/pelletier/go-toml"
 	"github.com/wweir/sower/util"
-	"github.com/wweir/utils/log"
+	"github.com/wweir/util-go/log"
+	"golang.org/x/xerrors"
 )
 
 type Client struct {
 	Address     string            `toml:"address"`
-	HTTPProxy   string            `toml:"http_proxy"`
-	DNSServeIP  string            `toml:"dns_serve_ip"`
 	DNSUpstream string            `toml:"dns_upstream"`
+	Socks5Proxy string            `toml:"socks5"`
+	HTTPProxy   string            `toml:"http_proxy"`
 	PortForward map[string]string `toml:"port_forward"`
 
 	Router struct {
 		DetectLevel int      `toml:"detect_level"`
 		ProxyList   []string `toml:"proxy_list"`
+		ProxyRefs   []string `toml:"proxy_refs"`
 		DirectList  []string `toml:"direct_list"`
+		DirectRefs  []string `toml:"direct_refs"`
+		BlockList   []string `toml:"block_list"`
+		BlockRefs   []string `toml:"block_refs"`
 	} `toml:"router"`
 }
 type Server struct {
@@ -59,7 +68,7 @@ func Init() (*Client, *Server, string) {
 		flag.Parse()
 	}
 
-	defer log.Infow("starting", "config", &conf)
+	defer log.Infow("starting", "version", version, "date", date, "config", &conf)
 	if conf.file == "" {
 		return &conf.Client, &conf.Server, conf.Password
 	}
@@ -76,15 +85,60 @@ func Init() (*Client, *Server, string) {
 var loadConfigFns = []struct {
 	step string
 	fn   func() error
-}{{"load_config", func() error {
+}{{"parse file", func() error {
 	f, err := os.OpenFile(conf.file, os.O_RDONLY, 0644)
 	if err != nil {
-		return err
+		return xerrors.New(err.Error())
 	}
 	defer f.Close()
 
 	return toml.NewDecoder(f).Decode(&conf)
+}}, {"load referenced rule", func() error {
+	for _, addr := range conf.Client.Router.BlockRefs {
+		lines, err := getRemoteRuleLines(addr)
+		if err != nil {
+			return err
+		}
+		conf.Client.Router.BlockList = append(conf.Client.Router.BlockList, lines...)
+	}
+	for _, addr := range conf.Client.Router.ProxyRefs {
+		lines, err := getRemoteRuleLines(addr)
+		if err != nil {
+			return err
+		}
+		conf.Client.Router.ProxyList = append(conf.Client.Router.ProxyList, lines...)
+	}
+	for _, addr := range conf.Client.Router.DirectRefs {
+		lines, err := getRemoteRuleLines(addr)
+		if err != nil {
+			return err
+		}
+		conf.Client.Router.DirectList = append(conf.Client.Router.DirectList, lines...)
+	}
+
+	return nil
 }}}
+
+func getRemoteRuleLines(addr string) ([]string, error) {
+	resp, err := http.Get(addr)
+	if err != nil {
+		return nil, xerrors.New(err.Error())
+	}
+	defer resp.Body.Close()
+
+	br := bufio.NewReader(resp.Body)
+	lines := []string{}
+	for {
+		line, _, err := br.ReadLine()
+		if err == io.EOF {
+			return lines, nil
+		} else if err != nil {
+			return nil, xerrors.New(err.Error())
+		}
+
+		lines = append(lines, "**."+strings.TrimSpace(string(line)))
+	}
+}
 
 // flushCh to avoid parallel persist
 var flushCh = make(chan struct{})
@@ -136,13 +190,6 @@ func flushConfDaemon() {
 			if err = os.Rename(conf.file+"~", conf.file); err != nil {
 				log.Errorw("flush config", "step", "flush", "err", err)
 				continue
-			}
-		}
-
-		// reload config
-		for i := range loadConfigFns {
-			if err := loadConfigFns[i].fn(); err != nil {
-				log.Errorw("flush config", "step", loadConfigFns[i].step, "err", err)
 			}
 		}
 	}

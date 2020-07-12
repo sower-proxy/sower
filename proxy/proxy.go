@@ -6,17 +6,17 @@ import (
 	"net/http"
 
 	"github.com/wweir/sower/transport"
-	"github.com/wweir/utils/log"
+	"github.com/wweir/util-go/log"
 	"golang.org/x/crypto/acme/autocert"
 )
 
-func StartClient(serverAddr, password, serveIP string, enableDNS bool,
-	forwards map[string]string, shouldProxy func(string) bool) {
+func StartClient(serverAddr, password string,
+	forwards map[string]string, shouldProxy func(string) (bool, bool)) {
 
 	passwordData := []byte(password)
 	relayToRemote := func(lnAddr, target string,
 		parseFn func(net.Conn) (net.Conn, string, error),
-		shouldProxy func(string) bool) {
+		shouldProxy func(string) (bool, bool)) {
 
 		ln, err := net.Listen("tcp", lnAddr)
 		if err != nil {
@@ -41,14 +41,13 @@ func StartClient(serverAddr, password, serveIP string, enableDNS bool,
 				}
 
 				rc, err := transport.Dial(target, func(domain string) (string, []byte) {
-					if shouldProxy(domain) {
+					if _, ok := shouldProxy(domain); ok {
 						return serverAddr, passwordData
 					}
 					return "", nil
 				})
 				if err != nil {
-					host, _, _ := net.SplitHostPort(target)
-					log.Warnw("dial", "addr", target, "proxy", shouldProxy(host), "err", err)
+					log.Warnw("dial", "addr", target, "err", err)
 					return
 				}
 				defer rc.Close()
@@ -59,15 +58,13 @@ func StartClient(serverAddr, password, serveIP string, enableDNS bool,
 	}
 
 	for from, to := range forwards {
-		go relayToRemote(from, to, nil, func(string) bool { return true })
+		go relayToRemote(from, to, nil, func(string) (bool, bool) { return false, true })
 	}
 
-	if enableDNS {
-		go relayToRemote(net.JoinHostPort(serveIP, "http"), "", ParseHTTP, shouldProxy)
-		go relayToRemote(net.JoinHostPort(serveIP, "https"), "", ParseHTTPS, shouldProxy)
-	}
+	go relayToRemote(":http", "", ParseHTTP, shouldProxy)
+	go relayToRemote(":https", "", ParseHTTPS, shouldProxy)
 
-	log.Infow("start sower client", "dns solution", enableDNS, "forwards", forwards)
+	log.Infow("start sower client", "forwards", forwards)
 
 	select {}
 }

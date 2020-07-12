@@ -9,8 +9,8 @@ import (
 
 	"github.com/wweir/sower/transport"
 	"github.com/wweir/sower/util"
-	"github.com/wweir/utils/log"
-	"github.com/wweir/utils/mem"
+	"github.com/wweir/util-go/log"
+	"github.com/wweir/util-go/mem"
 )
 
 // Route implement a router for each request
@@ -18,27 +18,33 @@ type Route struct {
 	once  sync.Once
 	cache *mem.Cache
 
-	ProxyAddress  string
-	ProxyPassword string
-	password      []byte
+	ProxyAddress string
+	password     []byte
 
 	DetectLevel int // dynamic detect proxy level
-	DirectList  []string
-	directRule  *util.Node
-	ProxyList   []string
+	blockRule   *util.Node
 	proxyRule   *util.Node
+	directRule  *util.Node
 	PersistFn   func(string)
 }
 
-// ShouldProxy check if the domain shoule request though proxy
-func (r *Route) GenProxyCheck(sync bool) func(string) bool {
-	r.once.Do(func() {
-		r.cache = mem.New(4 * time.Hour)
-		r.password = []byte(r.ProxyPassword)
-		r.directRule = util.NewNodeFromRules(r.DirectList...)
-		r.proxyRule = util.NewNodeFromRules(r.ProxyList...)
-	})
+func NewRoute(address, password string, detectLevel int,
+	blocklist, proxylist, directlist []string, persist func(string)) *Route {
+	return &Route{
+		cache:        mem.New(4 * time.Hour),
+		ProxyAddress: address,
+		password:     []byte(password),
 
+		DetectLevel: detectLevel,
+		blockRule:   util.NewNodeFromRules(blocklist...),
+		proxyRule:   util.NewNodeFromRules(proxylist...),
+		directRule:  util.NewNodeFromRules(directlist...),
+		PersistFn:   persist,
+	}
+}
+
+// ShouldProxy check if the domain shoule request though proxy
+func (r *Route) GenProxyCheck(sync bool) func(string) (bool, bool) {
 	detect := func(domain string) bool {
 		go r.cache.Remember(r, domain)
 		return true
@@ -53,21 +59,25 @@ func (r *Route) GenProxyCheck(sync bool) func(string) bool {
 		}
 	}
 
-	return func(domain string) bool {
+	return func(domain string) (bool, bool) {
 		domain = strings.TrimSuffix(domain, ".")
 		// break deadlook, for wildcard
 		if sepCount := strings.Count(domain, "."); sepCount == 0 || sepCount >= 5 {
-			return false
+			return false, false
+		}
+
+		if r.blockRule.Match(domain) {
+			return true, false
 		}
 
 		if r.proxyRule.Match(domain) {
-			return true
+			return false, true
 		}
 		if r.directRule.Match(domain) {
-			return false
+			return false, false
 		}
 
-		return detect(domain)
+		return false, detect(domain)
 	}
 }
 

@@ -49,7 +49,7 @@ func (n *node) add(secs []string) {
 	case 0:
 		return
 	case 1:
-		n.node[secs[length-1]] = &node{node: map[string]*node{"": &node{}}}
+		n.node[secs[length-1]] = &node{node: map[string]*node{"": {}}}
 	default:
 		sec := secs[length-1]
 		if sec == "**" {

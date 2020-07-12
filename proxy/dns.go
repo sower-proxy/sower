@@ -8,7 +8,7 @@ import (
 
 	"github.com/miekg/dns"
 	"github.com/wweir/sower/dhcp"
-	"github.com/wweir/utils/log"
+	"github.com/wweir/util-go/log"
 )
 
 type msgCache struct {
@@ -18,12 +18,7 @@ type msgCache struct {
 
 var cache sync.Map
 
-func StartDNS(redirectIP, relayServer string, shouldProxy func(string) bool) {
-	serveIP := net.ParseIP(redirectIP)
-	if redirectIP == "" || serveIP.String() != redirectIP {
-		log.Fatalw("invalid listen ip", "ip", redirectIP)
-	}
-
+func StartDNS(relayServer string, shouldProxy func(string) (bool, bool)) {
 	var err error
 	if relayServer, err = pickRelayAddr(relayServer); err != nil {
 		log.Fatalw("pick upstream dns server", "err", err)
@@ -47,8 +42,13 @@ func StartDNS(redirectIP, relayServer string, shouldProxy func(string) bool) {
 			domain = domain[:idx] // trim port
 		}
 
-		if shouldProxy(domain) {
-			w.WriteMsg(localA(r, domain, serveIP))
+		if isblock, isproxy := shouldProxy(domain); isblock {
+			m := new(dns.Msg)
+			m.SetReply(r)
+			w.WriteMsg(m)
+		} else if isproxy {
+			host, _, _ := net.SplitHostPort(w.LocalAddr().String())
+			w.WriteMsg(localA(r, domain, net.ParseIP(host)))
 
 		} else if val, ok := cache.Load(domain); ok && val.(*msgCache).After(time.Now()) {
 			msg := val.(*msgCache)
@@ -82,7 +82,7 @@ func StartDNS(redirectIP, relayServer string, shouldProxy func(string) bool) {
 		}
 	})
 
-	server := &dns.Server{Addr: net.JoinHostPort(redirectIP, "53"), Net: "udp"}
+	server := &dns.Server{Addr: ":53", Net: "udp"}
 	log.Infow("start dns", "addr", server.Addr)
 	log.Fatalw("dns serve fail", "err", server.ListenAndServe())
 }

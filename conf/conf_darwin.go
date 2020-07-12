@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/wweir/utils/log"
+	"github.com/wweir/util-go/log"
 )
 
 const svcPath = "/Library/LaunchDaemons/sower.plist"
