@@ -11,5 +11,6 @@ require (
 	github.com/wweir/util-go/log v0.0.0-20200701032032-3cff7b4a46ea
 	github.com/wweir/util-go/mem v0.0.0-20200701032032-3cff7b4a46ea
 	golang.org/x/crypto v0.0.0-20200709230013-948cd5f35899
+	golang.org/x/sys v0.0.0-20190924154521-2837fb4f24fe
 	golang.org/x/xerrors v0.0.0-20191204190536-9bdfabe68543
 )

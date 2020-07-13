@@ -66,14 +66,6 @@ func afterInitFlag() {
 	case uninstallFlag:
 		uninstall()
 	default:
-		if conf.Client.DNSServeIP != "" {
-			log.Infow("setting system DNS", "DNS", conf.Client.DNSServeIP)
-			if err := execute("networksetup -listallnetworkservices | grep -v '*' | xargs -I {} " +
-				"networksetup -setdnsservers {} " + conf.Client.DNSServeIP); err != nil {
-				log.Errorf("set DNS fail, please set DNS to %s manually", conf.Client.DNSServeIP)
-			}
-			execute("pkill mDNSResponder")
-		}
 		return
 	}
 	os.Exit(0)

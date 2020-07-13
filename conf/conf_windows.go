@@ -50,7 +50,7 @@ func afterInitFlag() {
 func runAsService() {
 	os.Chdir(filepath.Dir(os.Args[0]))
 	if active, err := svc.IsAnInteractiveSession(); err != nil {
-		log.Fatalf("failed to determine if we are running in an interactive session: %v", err)
+		log.Fatalw("failed to determine if we are running in an interactive session", "err", err)
 	} else if !active {
 		go func() {
 			elog, err := eventlog.Open(name)

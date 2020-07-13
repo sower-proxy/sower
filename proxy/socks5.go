@@ -13,6 +13,7 @@ func StartSocks5Proxy(listenAddr, serverAddr string, password []byte) {
 		log.Fatalw("socks5 proxy", "addr", listenAddr, "err", err)
 	}
 
+	log.Infow("start socks5 proxy", "endpoint", listenAddr)
 	serveSocks5(ln, serverAddr, password)
 }
 
