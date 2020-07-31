@@ -120,9 +120,11 @@ func StartServer(relayTarget, password, cacheDir, certFile, keyFile, email strin
 		go func(conn net.Conn) {
 			defer conn.Close()
 
-			conn, target := transport.ParseProxyConn(conn, passwordData)
-			if target == "" {
-				target = relayTarget
+			target := relayTarget
+
+			conn, t := transport.ParseTrojanConn(conn, passwordData)
+			if t != nil {
+				target = t.Addr()
 			}
 
 			rc, err := net.Dial("tcp", target)

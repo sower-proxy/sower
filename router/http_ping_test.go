@@ -36,7 +36,7 @@ func TestPort_Ping(t *testing.T) {
 		if err != nil {
 			return nil, err
 		}
-		return transport.ToProxyConn(conn, host, uint16(p), password)
+		return transport.ToTrojanConn(conn, host, uint16(p), password)
 	}
 
 	type args struct {

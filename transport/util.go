@@ -85,5 +85,5 @@ func Dial(targetAddr string, dialAddr func(domain string) (proxyAddr string, pas
 	if err != nil {
 		return nil, err
 	}
-	return ToProxyConn(conn, host, uint16(p), password)
+	return ToTrojanConn(conn, host, uint16(p), password)
 }
