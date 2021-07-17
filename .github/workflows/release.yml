@@ -8,7 +8,7 @@ jobs:
     name: Build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/setup-go@v2-beta
+      - uses: actions/setup-go@v2
       - uses: actions/checkout@v2
 
       - name: build matrix
@@ -16,25 +16,25 @@ jobs:
           cp conf/sower.toml sower.toml
 
           GOOS=linux GOARCH=amd64 make build
-          tar czvf sower-linux-amd64.tar.gz sower sower.toml
+          tar czvf sower-linux-amd64.tar.gz client server
           GOOS=linux GOARCH=386 make build
-          tar czvf sower-linux-386.tar.gz sower sower.toml
+          tar czvf sower-linux-386.tar.gz client server
           GOOS=linux GOARCH=arm make build
-          tar czvf sower-linux-arm.tar.gz sower sower.toml
+          tar czvf sower-linux-arm.tar.gz client server
           GOOS=linux GOARCH=arm64 make build
-          tar czvf sower-linux-arm64.tar.gz sower sower.toml
+          tar czvf sower-linux-arm64.tar.gz client server
           GOOS=linux GOARCH=mips make build
-          tar czvf sower-linux-mips.tar.gz sower sower.toml
+          tar czvf sower-linux-mips.tar.gz client server
           GOOS=linux GOARCH=mipsle make build
-          tar czvf sower-linux-mipsle.tar.gz sower sower.toml
+          tar czvf sower-linux-mipsle.tar.gz client server
 
           GOOS=darwin GOARCH=amd64 make build
-          tar czvf sower-darwin-amd64.tar.gz sower sower.toml
+          tar czvf sower-darwin-amd64.tar.gz client server
 
           GOOS=windows GOARCH=amd64 make build
-          tar czvf sower-windows-amd64.tar.gz sower.exe sower.toml
+          tar czvf sower-windows-amd64.tar.gz client server
           GOOS=windows GOARCH=386 make build
-          tar czvf sower-windows-386.tar.gz sower.exe sower.toml
+          tar czvf sower-windows-386.tar.gz client server
 
       - name: Release
         uses: softprops/action-gh-release@master

@@ -8,7 +8,7 @@ jobs:
     name: Build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/setup-go@v2-beta
+      - uses: actions/setup-go@v2
       - uses: actions/checkout@v2
 
       - name: test and build
