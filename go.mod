@@ -4,6 +4,10 @@ go 1.16
 
 require (
 	github.com/cristalhq/aconfig v0.16.2
+	github.com/cristalhq/aconfig/aconfigdotenv v0.16.1
+	github.com/cristalhq/aconfig/aconfighcl v0.16.1
+	github.com/cristalhq/aconfig/aconfigtoml v0.16.1
+	github.com/cristalhq/aconfig/aconfigyaml v0.16.1
 	github.com/krolaw/dhcp4 v0.0.0-20190909130307-a50d88189771
 	github.com/libp2p/go-reuseport v0.0.2
 	github.com/miekg/dns v1.1.43

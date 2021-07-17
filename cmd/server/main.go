@@ -6,13 +6,9 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
-	"time"
 
 	"github.com/cristalhq/aconfig"
-	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
-	"github.com/rs/zerolog/pkgerrors"
 	"github.com/wweir/sower/pkg/teeconn"
 	"github.com/wweir/sower/transport/sower"
 	"github.com/wweir/sower/transport/trojan"
@@ -37,24 +33,6 @@ var (
 )
 
 func init() {
-	zerolog.ErrorStackMarshaler = func(err error) interface{} {
-		return pkgerrors.MarshalStack(err)
-	}
-	log.Logger = zerolog.New(zerolog.ConsoleWriter{
-		Out:        os.Stderr,
-		TimeFormat: time.StampMilli,
-		FormatCaller: func(i interface{}) string {
-			caller := i.(string)
-			if idx := strings.Index(caller, "/pkg/mod/"); idx > 0 {
-				return caller[idx+9:]
-			}
-			if idx := strings.LastIndexByte(caller, '/'); idx > 0 {
-				return caller[idx+1:]
-			}
-			return caller
-		},
-	}).With().Timestamp().Caller().Logger()
-
 	if err := aconfig.LoaderFor(&conf, aconfig.Config{}).Load(); err != nil {
 		log.Fatal().Err(err).Msg("Load config")
 	}

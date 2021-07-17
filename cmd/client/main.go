@@ -2,73 +2,83 @@ package main
 
 import (
 	"bufio"
-	"crypto/tls"
+	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
+	"strconv"
 	"strings"
-	"time"
 
 	"github.com/cristalhq/aconfig"
+	"github.com/cristalhq/aconfig/aconfigdotenv"
+	"github.com/cristalhq/aconfig/aconfighcl"
+	"github.com/cristalhq/aconfig/aconfigtoml"
+	"github.com/cristalhq/aconfig/aconfigyaml"
 	"github.com/miekg/dns"
-	"github.com/pkg/errors"
-	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
-	"github.com/rs/zerolog/pkgerrors"
-	"github.com/wweir/sower/pkg/teeconn"
 	"github.com/wweir/sower/router"
-	"github.com/wweir/sower/transport"
-	"github.com/wweir/sower/transport/sower"
-	"github.com/wweir/sower/transport/trojan"
-	"github.com/wweir/sower/util"
 )
 
 var (
 	version, date string
 
 	conf = struct {
-		Proxy struct {
+		Remote struct {
 			Type     string `default:"sower" usage:"remote proxy protocol, sower/trojan"`
 			Addr     string `required:"true" usage:"remote proxy address, eg: proxy.com"`
 			Password string `required:"true" usage:"remote proxy password"`
 		}
 
-		Socks5Addr  string `default:":1080" usage:"socks5 listen address"`
-		FallbackDNS string `default:"223.5.5.5" usage:"fallback dns server"`
-		DNSServeIP  string `usage:"dns server ip, eg: 127.0.0.1"`
+		DNS struct {
+			Enable   bool   `default:"true" usage:"enable DNS proxy"`
+			Serve    string `usage:"dns server ip, default all, eg: 127.0.0.1"`
+			Fallback string `default:"223.5.5.5" usage:"fallback dns server"`
+		}
+		Socks5 struct {
+			Enable bool   `default:"true" usage:"enable sock5 proxy"`
+			Addr   string `default:":1080" usage:"socks5 listen address"`
+		} `flag:"socks5"`
 
 		Router struct {
-			ProxyList  []string
-			ProxyRefs  []string
-			DirectList []string
-			DirectRefs []string
-			BlockList  []string
-			BlockRefs  []string
+			Block struct {
+				File  string   `usage:"block list file, parsed as '**.line_text'"`
+				Rules []string `usage:"block list rules"`
+			}
+			Direct struct {
+				File  string   `usage:"direct list file, parsed as '**.line_text'"`
+				Rules []string `usage:"direct list rules"`
+			}
+			Proxy struct {
+				File  string   `usage:"proxy list file, parsed as '**.line_text'"`
+				Rules []string `usage:"proxy list rules"`
+			}
+
+			Country struct {
+				MMDB  string   `usage:"mmdb file"`
+				File  string   `usage:"CIDR block list file"`
+				Rules []string `usage:"CIDR list rules"`
+			}
 		}
 	}{}
 )
 
 func init() {
-	zerolog.ErrorStackMarshaler = func(err error) interface{} {
-		return pkgerrors.MarshalStack(err)
-	}
-	log.Logger = zerolog.New(zerolog.ConsoleWriter{
-		Out:        os.Stderr,
-		TimeFormat: time.StampMilli,
-		FormatCaller: func(i interface{}) string {
-			caller := i.(string)
-			if idx := strings.Index(caller, "/pkg/mod/"); idx > 0 {
-				return caller[idx+9:]
-			}
-			if idx := strings.LastIndexByte(caller, '/'); idx > 0 {
-				return caller[idx+1:]
-			}
-			return caller
+	if err := aconfig.LoaderFor(&conf, aconfig.Config{
+		FileFlag: "conf",
+		Files: []string{".env",
+			"config.yml", "config.yaml", "config.json", "config.toml", "config.hcl"},
+		FileDecoders: map[string]aconfig.FileDecoder{
+			".env":  aconfigdotenv.New(),
+			".yml":  aconfigyaml.New(),
+			".yaml": aconfigyaml.New(),
+			".toml": aconfigtoml.New(),
+			".hcl":  aconfighcl.New(),
+			".tf":   aconfighcl.New(),
 		},
-	}).With().Timestamp().Caller().Logger()
-
-	if err := aconfig.LoaderFor(&conf, aconfig.Config{}).Load(); err != nil {
+	}).Load(); err != nil {
 		log.Fatal().Err(err).
+			Interface("conf", conf).
 			Msg("Load config")
 	}
 
@@ -80,140 +90,120 @@ func init() {
 }
 
 func main() {
-
-	r := router.NewRouter(genProxyDial())
+	proxtDial := GenProxyDial(conf.Remote.Type, conf.Remote.Addr, conf.Remote.Password)
+	r := router.NewRouter(conf.DNS.Fallback, conf.Router.Country.MMDB, proxtDial,
+		append(conf.Router.Block.Rules, parseRuleLines(proxtDial, conf.Router.Block.File, "**.")...),
+		append(conf.Router.Direct.Rules, parseRuleLines(proxtDial, conf.Router.Direct.File, "**.")...),
+		append(conf.Router.Proxy.Rules, parseRuleLines(proxtDial, conf.Router.Proxy.File, "**.")...),
+		append(conf.Router.Country.Rules, parseRuleLines(proxtDial, conf.Router.Country.File, "")...),
+	)
 
 	go func() {
-		lnHTTP, err := net.Listen("tcp", net.JoinHostPort(conf.DNSServeIP, "80"))
+		if !conf.DNS.Enable {
+			log.Info().Msg("DNS proxy disabled")
+			return
+		}
+
+		lnHTTP, err := net.Listen("tcp", net.JoinHostPort(conf.DNS.Serve, "80"))
 		if err != nil {
 			log.Fatal().Err(err).Msg("listen port")
 		}
 		go ServeHTTP(lnHTTP, r)
 
-		lnHTTPS, err := net.Listen("tcp", net.JoinHostPort(conf.DNSServeIP, "443"))
+		lnHTTPS, err := net.Listen("tcp", net.JoinHostPort(conf.DNS.Serve, "443"))
 		if err != nil {
 			log.Fatal().Err(err).Msg("listen port")
 		}
 		go ServeHTTPS(lnHTTPS, r)
 
-		if err := dns.ListenAndServe(conf.DNSServeIP, "udp", r); err != nil {
+		log.Info().Msg("DNS proxy started")
+		if err := dns.ListenAndServe(conf.DNS.Serve, "udp", r); err != nil {
 			log.Fatal().Err(err).Msg("serve dns")
 		}
 	}()
 
-	ln, err := net.Listen("tcp", conf.Socks5Addr)
-	if err != nil {
-		log.Fatal().Err(err).Msg("listen port")
-	}
-	go ServeSocks5(ln, r)
+	go func() {
+		if !conf.Socks5.Enable {
+			log.Info().Msg("SOCKS5 proxy disabled")
+			return
+		}
+
+		ln, err := net.Listen("tcp", conf.Socks5.Addr)
+		if err != nil {
+			log.Fatal().Err(err).Msg("listen port")
+		}
+		log.Info().Msgf("SOCKS5 proxy listening on %s", conf.Socks5.Addr)
+		ServeSocks5(ln, r)
+	}()
 
 	select {}
 }
 
-func genProxyDial() func(network, host string, port uint16) (net.Conn, error) {
-	var (
-		proxyAddr = net.JoinHostPort(conf.Proxy.Addr, "443")
-		tlsCfg    = &tls.Config{}
-		proxy     transport.Transport
-	)
-	switch conf.Proxy.Type {
-	case "sower":
-		proxy = sower.New(conf.Proxy.Password)
-	case "trojan":
-		proxy = trojan.New(conf.Proxy.Password)
-	default:
-		log.Fatal().
-			Str("type", conf.Proxy.Type).
-			Msg("unknown proxy type")
-	}
-
-	return func(network, host string, port uint16) (net.Conn, error) {
-		if host == "" || port == 0 {
-			return nil, errors.Errorf("invalid addr(%s:%d)", host, port)
+func parseRuleLines(proxyDial router.ProxyDialFn, file, linePrefix string) []string {
+	var r io.Reader
+	if _, err := url.Parse(file); err == nil {
+		client := &http.Client{
+			Transport: &http.Transport{
+				Dial: func(network, addr string) (net.Conn, error) {
+					domain, port, _ := net.SplitHostPort(addr)
+					p, _ := strconv.Atoi(port)
+					return proxyDial("tcp", domain, uint16(p))
+				},
+			},
 		}
 
-		c, err := tls.Dial("tcp", proxyAddr, tlsCfg)
+		resp, err := client.Get(file)
 		if err != nil {
-			return nil, err
+			log.Error().Err(err).
+				Str("file", file).
+				Msg("proxy read response")
+			return nil
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			log.Error().
+				Int("status", resp.StatusCode).
+				Str("file", file).
+				Msg("proxy response status")
+			return nil
 		}
 
-		if err := proxy.Wrap(c, host, port); err != nil {
-			return nil, err
+		r = resp.Body
+
+	} else {
+		f, err := os.Open(file)
+		if err != nil {
+			log.Error().Err(err).
+				Str("file", file).
+				Msg("open file")
+			return nil
+		}
+		defer f.Close()
+
+		r = f
+	}
+
+	var lines []string
+	br := bufio.NewReader(r)
+	for {
+		line, _, err := br.ReadLine()
+		if err == io.EOF {
+			break
+		} else if err != nil {
+			log.Error().Err(err).
+				Str("file", file).
+				Msg("read line")
+			return nil
 		}
 
-		return c, nil
-	}
-}
+		if strings.TrimSpace(string(line)) == "" {
+			continue
+		}
 
-func ServeHTTP(ln net.Listener, r *router.Router) {
-	conn, err := ln.Accept()
-	if err != nil {
-		log.Fatal().Err(err).
-			Msg("serve socks5")
+		// use line content as suffix
+		lines = append(lines, linePrefix+string(line))
 	}
 
-	go ServeHTTP(ln, r)
-	start := time.Now()
-	teeconn := teeconn.New(conn)
-	defer teeconn.Close()
-
-	req, err := http.ReadRequest(bufio.NewReader(teeconn))
-	if err != nil {
-		log.Error().Err(err).Msg("read http request")
-		return
-	}
-
-	rc, err := r.ProxyDial("tcp", req.Host, 80)
-	if err != nil {
-		log.Error().Err(err).
-			Str("host", req.Host).
-			Interface("req", req.URL).
-			Msg("dial proxy")
-		return
-	}
-	defer rc.Close()
-
-	teeconn.Stop().Reread()
-	util.Relay(teeconn, rc)
-	log.Info().
-		Str("host", req.Host).
-		Dur("spend", time.Since(start)).
-		Msg("serve http")
-}
-
-func ServeHTTPS(ln net.Listener, r *router.Router) {
-	conn, err := ln.Accept()
-	if err != nil {
-		log.Fatal().Err(err).
-			Msg("serve socks5")
-	}
-
-	go ServeHTTPS(ln, r)
-	start := time.Now()
-	teeconn := teeconn.New(conn)
-	defer teeconn.Close()
-
-	var domain string
-	tls.Server(teeconn, &tls.Config{
-		GetConfigForClient: func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
-			domain = hello.ServerName
-			return nil, nil
-		},
-	}).Handshake()
-
-	rc, err := r.ProxyDial("tcp", domain, 443)
-	if err != nil {
-		log.Error().Err(err).
-			Str("host", domain).
-			Msg("dial proxy")
-		return
-	}
-	defer rc.Close()
-
-	teeconn.Stop().Reread()
-	util.Relay(teeconn, rc)
-	log.Info().
-		Str("host", domain).
-		Dur("spend", time.Since(start)).
-		Msg("serve http")
+	return lines
 }

@@ -14,53 +14,64 @@ import (
 	"github.com/wweir/sower/util"
 )
 
+type ProxyDialFn func(network, host string, port uint16) (net.Conn, error)
 type Router struct {
 	blockRule  *util.Node
 	directRule *util.Node
 	proxyRule  *util.Node
-
-	ProxyDial func(network, host string, port uint16) (net.Conn, error)
-	cache     *mem.Cache
+	ProxyDial  ProxyDialFn
+	cache      *mem.Cache
 
 	dns struct {
+		fallbackDNS string
 		dns.Client
 		connCh chan *dns.Conn
 	}
 
 	mmdb struct {
 		*geoip2.Reader
-		*net.Resolver
-
 		cidrs []*net.IPNet
 	}
 }
 
-func NewRouter(proxyDial func(network, host string, port uint16) (net.Conn, error)) *Router {
+func NewRouter(fallbackDNS, mmdbFile string, proxyDial ProxyDialFn,
+	blockList, directList, proxyList, directCIDRs []string) *Router {
+
 	r := Router{
-		blockRule:  util.NewNodeFromRules(),
-		directRule: util.NewNodeFromRules(),
-		proxyRule:  util.NewNodeFromRules("google.*"),
+		blockRule:  util.NewNodeFromRules(blockList...),
+		directRule: util.NewNodeFromRules(directList...),
+		proxyRule:  util.NewNodeFromRules(proxyList...),
 		ProxyDial:  proxyDial,
 		cache:      mem.New(time.Hour), // TODO: config
 	}
 
+	r.dns.fallbackDNS = fallbackDNS
 	r.dns.connCh = make(chan *dns.Conn, 1)
 	go r.dialDNSConn()
 
+	var err error
+	r.mmdb.Reader, err = geoip2.Open(mmdbFile)
+	log.Err(err).Str("file", mmdbFile).Msg("open geoip2 db")
+	r.mmdb.cidrs = make([]*net.IPNet, 0, len(directCIDRs))
+	for _, cidr := range directCIDRs {
+		_, ipnet, err := net.ParseCIDR(cidr)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to parse CIDR")
+		}
+		r.mmdb.cidrs = append(r.mmdb.cidrs, ipnet)
+	}
 	return &r
 }
 
 func (r *Router) dialDNSConn() {
 	for {
 		server, err := dhcp.GetDNSServer()
-		if err != nil {
-			time.Sleep(time.Second)
-			continue
+		if server == "" {
+			server = r.dns.fallbackDNS
 		}
-
-		log.Info().
-			Str("ip", server).
-			Msg("get upstream dns server")
+		log.Err(err).
+			Str("DNS", server).
+			Msg("get DNS server")
 
 		for {
 			conn, err := dns.DialTimeout("udp", net.JoinHostPort(server, "53"), time.Second)
@@ -89,7 +100,7 @@ func (r *Router) RouteHandle(conn net.Conn, domain string, port uint16) error {
 
 	case r.localSite(domain):
 		return r.DirectHandle(conn, addr)
-	case r.isAccess(domain):
+	case r.isAccess(domain, port):
 		return r.DirectHandle(conn, addr)
 	case port == 80:
 		return r.DirectHandle(conn, addr)

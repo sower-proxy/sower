@@ -10,7 +10,14 @@ var pingClient = http.Client{
 	Timeout: 2 * time.Second,
 }
 
-func (r *Router) isAccess(domain string) bool {
+func (r *Router) isAccess(domain string, port uint16) bool {
+	switch port {
+	case 80:
+	case 443:
+	default:
+		return false
+	}
+
 	p := &ping{}
 	r.cache.Remember(p, domain)
 	return p.isAccess
