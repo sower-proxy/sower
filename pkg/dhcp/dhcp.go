@@ -14,7 +14,7 @@ import (
 var xid = make([]byte, 4)
 var broadcastAddr, _ = net.ResolveUDPAddr("udp", "255.255.255.255:67")
 
-func GetDefaultDNSServer() (string, error) {
+func GetDNSServer() (string, error) {
 	iface, err := PickInternetInterface()
 	if err != nil {
 		return "", errors.Wrap(err, "pick interface")

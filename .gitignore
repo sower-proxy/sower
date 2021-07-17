@@ -17,6 +17,8 @@
 *.swo
 .vscode
 .idea
-sower
-sower.exe*
-/sower.toml
+
+/cmd/client/client
+/client
+/cmd/server/server
+/server

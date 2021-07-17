@@ -1,12 +1,22 @@
+CPUS ?= $(shell nproc)
+MAKEFLAGS += --jobs=$(CPUS)
+GO:=CGO_ENABLED=0 go
+
 default: test build
 
 test:
-	go vet ./...
-	go list ./... | grep -v internal | xargs go test
-build:
-	go build -ldflags "-w -s \
-		-X conf.version=$(shell git describe --tags --always) \
-		-X conf.date=$(shell date +%Y-%m-%d)"
-image:
-	docker build -t sower -f .github/Dockerfile .
+	${GO} vet ./...
+	${GO} test ./...
 
+build: client server
+
+.PHONY: client
+client:
+	${GO} build -ldflags "\
+		-X main.version=$(shell git describe --tags --always) \
+		-X main.date=$(shell date +%Y-%m-%d)" ./cmd/client
+.PHONY: server
+server:
+	${GO} build -ldflags "\
+		-X main.version=$(shell git describe --tags --always) \
+		-X main.date=$(shell date +%Y-%m-%d)" ./cmd/server
