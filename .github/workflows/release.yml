@@ -16,25 +16,25 @@ jobs:
           cp conf/sower.toml sower.toml
 
           GOOS=linux GOARCH=amd64 make build
-          tar czvf sower-linux-amd64.tar.gz client server
+          tar czvf sower-linux-amd64.tar.gz sower sowerd
           GOOS=linux GOARCH=386 make build
-          tar czvf sower-linux-386.tar.gz client server
+          tar czvf sower-linux-386.tar.gz sower sowerd
           GOOS=linux GOARCH=arm make build
-          tar czvf sower-linux-arm.tar.gz client server
+          tar czvf sower-linux-arm.tar.gz sower sowerd
           GOOS=linux GOARCH=arm64 make build
-          tar czvf sower-linux-arm64.tar.gz client server
+          tar czvf sower-linux-arm64.tar.gz sower sowerd
           GOOS=linux GOARCH=mips make build
-          tar czvf sower-linux-mips.tar.gz client server
+          tar czvf sower-linux-mips.tar.gz sower sowerd
           GOOS=linux GOARCH=mipsle make build
-          tar czvf sower-linux-mipsle.tar.gz client server
+          tar czvf sower-linux-mipsle.tar.gz sower sowerd
 
           GOOS=darwin GOARCH=amd64 make build
-          tar czvf sower-darwin-amd64.tar.gz client server
+          tar czvf sower-darwin-amd64.tar.gz sower sowerd
 
           GOOS=windows GOARCH=amd64 make build
-          tar czvf sower-windows-amd64.tar.gz client server
+          tar czvf sower-windows-amd64.tar.gz sower sowerd
           GOOS=windows GOARCH=386 make build
-          tar czvf sower-windows-386.tar.gz client server
+          tar czvf sower-windows-386.tar.gz sower sowerd
 
       - name: Release
         uses: softprops/action-gh-release@master

@@ -1,5 +1,4 @@
-CPUS ?= $(shell nproc)
-MAKEFLAGS += --jobs=$(CPUS)
+MAKEFLAGS += --jobs all
 GO:=CGO_ENABLED=0 go
 
 default: test build
@@ -10,13 +9,13 @@ test:
 
 build: client server
 
-.PHONY: client
 client:
 	${GO} build -ldflags "\
 		-X main.version=$(shell git describe --tags --always) \
-		-X main.date=$(shell date +%Y-%m-%d)" ./cmd/client
-.PHONY: server
+		-X main.date=$(shell date +%Y-%m-%d)" \
+		-o sower ./cmd/sower
 server:
 	${GO} build -ldflags "\
 		-X main.version=$(shell git describe --tags --always) \
-		-X main.date=$(shell date +%Y-%m-%d)" ./cmd/server
+		-X main.date=$(shell date +%Y-%m-%d)" \
+		-o sowerd ./cmd/sowerd
