@@ -27,14 +27,14 @@ func (r *Router) localSite(domain string) bool {
 		ip = ips[0]
 	}
 
-	for _, cidr := range r.mmdb.cidrs {
+	for _, cidr := range r.country.cidrs {
 		if cidr.Contains(ip) {
 			return true
 		}
 	}
 
-	if r.mmdb.Reader != nil {
-		city, err := r.mmdb.City(ip)
+	if r.country.Reader != nil {
+		city, err := r.country.City(ip)
 		if err != nil {
 			log.Warn().Err(err).
 				Str("domain", domain).

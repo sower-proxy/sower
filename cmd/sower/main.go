@@ -9,13 +9,14 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/cristalhq/aconfig"
-	"github.com/cristalhq/aconfig/aconfigdotenv"
 	"github.com/cristalhq/aconfig/aconfighcl"
 	"github.com/cristalhq/aconfig/aconfigtoml"
 	"github.com/cristalhq/aconfig/aconfigyaml"
 	"github.com/miekg/dns"
+	"github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
 	"github.com/wweir/sower/router"
 )
@@ -31,13 +32,13 @@ var (
 		}
 
 		DNS struct {
-			Enable   bool   `default:"true" usage:"enable DNS proxy"`
+			Disable  bool   `usage:"disable DNS proxy"`
 			Serve    string `usage:"dns server ip, default all, eg: 127.0.0.1"`
 			Fallback string `default:"223.5.5.5" usage:"fallback dns server"`
 		}
 		Socks5 struct {
-			Enable bool   `default:"true" usage:"enable sock5 proxy"`
-			Addr   string `default:":1080" usage:"socks5 listen address"`
+			Disable bool   `usage:"disable sock5 proxy"`
+			Addr    string `default:":1080" usage:"socks5 listen address"`
 		} `flag:"socks5"`
 
 		Router struct {
@@ -65,16 +66,13 @@ var (
 
 func init() {
 	if err := aconfig.LoaderFor(&conf, aconfig.Config{
-		FileFlag: "conf",
-		Files: []string{".env",
-			"config.yml", "config.yaml", "config.json", "config.toml", "config.hcl"},
+		AllowUnknownFields: true,
+		FileFlag:           "conf",
 		FileDecoders: map[string]aconfig.FileDecoder{
-			".env":  aconfigdotenv.New(),
 			".yml":  aconfigyaml.New(),
 			".yaml": aconfigyaml.New(),
 			".toml": aconfigtoml.New(),
 			".hcl":  aconfighcl.New(),
-			".tf":   aconfighcl.New(),
 		},
 	}).Load(); err != nil {
 		log.Fatal().Err(err).
@@ -82,6 +80,7 @@ func init() {
 			Msg("Load config")
 	}
 
+	conf.Router.Direct.Rules = append(conf.Router.Direct.Rules, conf.Remote.Addr)
 	log.Info().
 		Str("version", version).
 		Str("date", date).
@@ -91,15 +90,12 @@ func init() {
 
 func main() {
 	proxtDial := GenProxyDial(conf.Remote.Type, conf.Remote.Addr, conf.Remote.Password)
-	r := router.NewRouter(conf.DNS.Fallback, conf.Router.Country.MMDB, proxtDial,
-		append(conf.Router.Block.Rules, parseRuleLines(proxtDial, conf.Router.Block.File, "**.")...),
-		append(conf.Router.Direct.Rules, parseRuleLines(proxtDial, conf.Router.Direct.File, "**.")...),
-		append(conf.Router.Proxy.Rules, parseRuleLines(proxtDial, conf.Router.Proxy.File, "**.")...),
-		append(conf.Router.Country.Rules, parseRuleLines(proxtDial, conf.Router.Country.File, "")...),
-	)
+	r := router.NewRouter(conf.DNS.Fallback, conf.Router.Country.MMDB, proxtDial)
+	r.SetRules(conf.Router.Block.Rules, conf.Router.Direct.Rules, conf.Router.Proxy.Rules,
+		conf.Router.Country.Rules)
 
 	go func() {
-		if !conf.DNS.Enable {
+		if conf.DNS.Disable {
 			log.Info().Msg("DNS proxy disabled")
 			return
 		}
@@ -123,7 +119,7 @@ func main() {
 	}()
 
 	go func() {
-		if !conf.Socks5.Enable {
+		if conf.Socks5.Disable {
 			log.Info().Msg("SOCKS5 proxy disabled")
 			return
 		}
@@ -136,11 +132,26 @@ func main() {
 		ServeSocks5(ln, r)
 	}()
 
+	start := time.Now()
+	conf.Router.Block.Rules = append(conf.Router.Block.Rules, loadRules(proxtDial, conf.Router.Block.File, "**.")...)
+	conf.Router.Direct.Rules = append(conf.Router.Direct.Rules, loadRules(proxtDial, conf.Router.Direct.File, "**.")...)
+	conf.Router.Proxy.Rules = append(conf.Router.Proxy.Rules, loadRules(proxtDial, conf.Router.Proxy.File, "**.")...)
+	conf.Router.Country.Rules = append(conf.Router.Country.Rules, loadRules(proxtDial, conf.Router.Country.File, "")...)
+	r.SetRules(conf.Router.Block.Rules, conf.Router.Direct.Rules, conf.Router.Proxy.Rules,
+		conf.Router.Country.Rules)
+
+	log.Info().
+		Dur("spend", time.Since(start)).
+		Int("blockRule", len(conf.Router.Block.Rules)).
+		Int("directRule", len(conf.Router.Direct.Rules)).
+		Int("proxyRule", len(conf.Router.Proxy.Rules)).
+		Int("countryRule", len(conf.Router.Country.Rules)).
+		Msg("Loaded rules, proxy started")
 	select {}
 }
 
-func parseRuleLines(proxyDial router.ProxyDialFn, file, linePrefix string) []string {
-	var r io.Reader
+func loadRules(proxyDial router.ProxyDialFn, file, linePrefix string) []string {
+	var loadFn func() (io.ReadCloser, error)
 	if _, err := url.Parse(file); err == nil {
 		client := &http.Client{
 			Transport: &http.Transport{
@@ -152,40 +163,45 @@ func parseRuleLines(proxyDial router.ProxyDialFn, file, linePrefix string) []str
 			},
 		}
 
-		resp, err := client.Get(file)
-		if err != nil {
-			log.Error().Err(err).
-				Str("file", file).
-				Msg("proxy read response")
-			return nil
-		}
-		defer resp.Body.Close()
+		loadFn = func() (io.ReadCloser, error) {
+			resp, err := client.Get(file)
+			if err != nil {
+				return nil, err
+			}
 
-		if resp.StatusCode != http.StatusOK {
-			log.Error().
-				Int("status", resp.StatusCode).
-				Str("file", file).
-				Msg("proxy response status")
-			return nil
-		}
+			if resp.StatusCode != http.StatusOK {
+				resp.Body.Close()
+				return nil, errors.Errorf("status code: %d", resp.StatusCode)
+			}
 
-		r = resp.Body
+			return resp.Body, nil
+		}
 
 	} else {
-		f, err := os.Open(file)
-		if err != nil {
-			log.Error().Err(err).
-				Str("file", file).
-				Msg("open file")
-			return nil
+		loadFn = func() (io.ReadCloser, error) {
+			return os.Open(file)
 		}
-		defer f.Close()
-
-		r = f
 	}
 
+	rc, err := loadFn()
+	for i := time.Duration(1); i < 10; i++ {
+		if err == nil {
+			break
+		}
+
+		// wait: 28.5s
+		time.Sleep(i * i * 100 * time.Millisecond)
+		rc, err = loadFn()
+	}
+	if err != nil {
+		log.Fatal().Err(err).
+			Str("file", file).
+			Msg("load config file")
+	}
+	defer rc.Close()
+
 	var lines []string
-	br := bufio.NewReader(r)
+	br := bufio.NewReader(rc)
 	for {
 		line, _, err := br.ReadLine()
 		if err == io.EOF {

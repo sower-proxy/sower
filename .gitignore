@@ -25,3 +25,8 @@
 /cmd/server/server
 /sower
 /sowerd
+/*.yml
+/*.yaml
+/*.toml
+/*.hcl
+/*.tf

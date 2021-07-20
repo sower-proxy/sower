@@ -68,9 +68,17 @@ func ServeSocks5(ln net.Listener, r *router.Router) {
 	}
 
 	host, port := addr.Addr()
-	log.Err(r.RouteHandle(conn, host, port)).
+	route, err := r.RouteHandle(conn, host, port)
+	switch route {
+	case router.RouteProxy:
+	case router.RouteDefault:
+	default:
+		return
+	}
+	log.Err(err).
 		Str("host", host).
 		Uint16("port", port).
+		Str("route", route).
 		Dur("spend", time.Since(start)).
 		Msg("serve socsk5")
 }

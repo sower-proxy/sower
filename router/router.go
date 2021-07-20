@@ -14,6 +14,15 @@ import (
 	"github.com/wweir/sower/util"
 )
 
+const (
+	RouteBlock   = "block"
+	RouteDirect  = "direct"
+	RouteProxy   = "proxy"
+	RouteLocal   = "local"
+	RouteAccess  = "access"
+	RouteDefault = "default"
+)
+
 type ProxyDialFn func(network, host string, port uint16) (net.Conn, error)
 type Router struct {
 	blockRule  *util.Node
@@ -28,21 +37,16 @@ type Router struct {
 		connCh chan *dns.Conn
 	}
 
-	mmdb struct {
+	country struct {
 		*geoip2.Reader
 		cidrs []*net.IPNet
 	}
 }
 
-func NewRouter(fallbackDNS, mmdbFile string, proxyDial ProxyDialFn,
-	blockList, directList, proxyList, directCIDRs []string) *Router {
-
+func NewRouter(fallbackDNS, mmdbFile string, proxyDial ProxyDialFn) *Router {
 	r := Router{
-		blockRule:  util.NewNodeFromRules(blockList...),
-		directRule: util.NewNodeFromRules(directList...),
-		proxyRule:  util.NewNodeFromRules(proxyList...),
-		ProxyDial:  proxyDial,
-		cache:      mem.New(time.Hour), // TODO: config
+		ProxyDial: proxyDial,
+		cache:     mem.New(time.Hour), // TODO: config
 	}
 
 	r.dns.fallbackDNS = fallbackDNS
@@ -50,28 +54,38 @@ func NewRouter(fallbackDNS, mmdbFile string, proxyDial ProxyDialFn,
 	go r.dialDNSConn()
 
 	var err error
-	r.mmdb.Reader, err = geoip2.Open(mmdbFile)
+	r.country.Reader, err = geoip2.Open(mmdbFile)
 	log.Err(err).Str("file", mmdbFile).Msg("open geoip2 db")
-	r.mmdb.cidrs = make([]*net.IPNet, 0, len(directCIDRs))
+
+	return &r
+}
+
+func (r *Router) SetRules(blockList, directList, proxyList, directCIDRs []string) {
+
+	r.blockRule = util.NewNodeFromRules(blockList...)
+	r.directRule = util.NewNodeFromRules(directList...)
+	r.proxyRule = util.NewNodeFromRules(proxyList...)
+
+	r.country.cidrs = make([]*net.IPNet, 0, len(directCIDRs))
 	for _, cidr := range directCIDRs {
 		_, ipnet, err := net.ParseCIDR(cidr)
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to parse CIDR")
 		}
-		r.mmdb.cidrs = append(r.mmdb.cidrs, ipnet)
+		r.country.cidrs = append(r.country.cidrs, ipnet)
 	}
-	return &r
 }
 
 func (r *Router) dialDNSConn() {
 	for {
 		server, err := dhcp.GetDNSServer()
+		log.Err(err).
+			Str("DNS", server).
+			Str("fallback", r.dns.fallbackDNS).
+			Msg("get DNS server")
 		if server == "" {
 			server = r.dns.fallbackDNS
 		}
-		log.Err(err).
-			Str("DNS", server).
-			Msg("get DNS server")
 
 		for {
 			conn, err := dns.DialTimeout("udp", net.JoinHostPort(server, "53"), time.Second)
@@ -85,29 +99,25 @@ func (r *Router) dialDNSConn() {
 	}
 }
 
-func (r *Router) RouteHandle(conn net.Conn, domain string, port uint16) error {
+func (r *Router) RouteHandle(conn net.Conn, domain string, port uint16) (string, error) {
 	addr := net.JoinHostPort(domain, strconv.FormatUint(uint64(port), 10))
 
 	switch {
 	case r.blockRule.Match(domain):
-		return nil
+		return RouteBlock, nil
 
 	case r.directRule.Match(domain):
-		return r.DirectHandle(conn, addr)
+		return RouteDirect, r.DirectHandle(conn, addr)
 
 	case r.proxyRule.Match(domain):
-		return r.ProxyHandle(conn, domain, port)
+		return RouteProxy, r.ProxyHandle(conn, domain, port)
 
 	case r.localSite(domain):
-		return r.DirectHandle(conn, addr)
+		return RouteLocal, r.DirectHandle(conn, addr)
 	case r.isAccess(domain, port):
-		return r.DirectHandle(conn, addr)
-	case port == 80:
-		return r.DirectHandle(conn, addr)
-	case port == 443:
-		return r.DirectHandle(conn, addr)
+		return RouteAccess, r.DirectHandle(conn, addr)
 	default:
-		return r.ProxyHandle(conn, domain, port)
+		return RouteDefault, r.ProxyHandle(conn, domain, port)
 	}
 }
 
