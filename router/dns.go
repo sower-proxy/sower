@@ -30,8 +30,7 @@ func (r *Router) ServeDNS(w dns.ResponseWriter, req *dns.Msg) {
 	case r.directRule.Match(domain):
 
 	case r.proxyRule.Match(domain):
-		host, _, _ := net.SplitHostPort(w.LocalAddr().String())
-		w.WriteMsg(r.dnsProxyA(domain, net.ParseIP(host), req))
+		w.WriteMsg(r.dnsProxyA(domain, r.dns.serveIP, req))
 		return
 	}
 

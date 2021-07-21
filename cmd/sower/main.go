@@ -26,14 +26,14 @@ var (
 
 	conf = struct {
 		Remote struct {
-			Type     string `default:"sower" usage:"remote proxy protocol, sower/trojan"`
+			Type     string `default:"sower" required:"true" usage:"remote proxy protocol, sower/trojan"`
 			Addr     string `required:"true" usage:"remote proxy address, eg: proxy.com"`
 			Password string `required:"true" usage:"remote proxy password"`
 		}
 
 		DNS struct {
 			Disable  bool   `usage:"disable DNS proxy"`
-			Serve    string `usage:"dns server ip, default all, eg: 127.0.0.1"`
+			Serve    string `default:"127.0.0.1" required:"true" usage:"dns server ip"`
 			Fallback string `default:"223.5.5.5" usage:"fallback dns server"`
 		}
 		Socks5 struct {
@@ -90,7 +90,7 @@ func init() {
 
 func main() {
 	proxtDial := GenProxyDial(conf.Remote.Type, conf.Remote.Addr, conf.Remote.Password)
-	r := router.NewRouter(conf.DNS.Fallback, conf.Router.Country.MMDB, proxtDial)
+	r := router.NewRouter(conf.DNS.Serve, conf.DNS.Fallback, conf.Router.Country.MMDB, proxtDial)
 	r.SetRules(conf.Router.Block.Rules, conf.Router.Direct.Rules, conf.Router.Proxy.Rules,
 		conf.Router.Country.Rules)
 
@@ -112,8 +112,10 @@ func main() {
 		}
 		go ServeHTTPS(lnHTTPS, r)
 
-		log.Info().Msg("DNS proxy started")
-		if err := dns.ListenAndServe(conf.DNS.Serve, "udp", r); err != nil {
+		log.Info().
+			Str("ip", conf.DNS.Serve).
+			Msg("DNS proxy started")
+		if err := dns.ListenAndServe(net.JoinHostPort(conf.DNS.Serve, "53"), "udp", r); err != nil {
 			log.Fatal().Err(err).Msg("serve dns")
 		}
 	}()

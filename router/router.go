@@ -33,6 +33,7 @@ type Router struct {
 
 	dns struct {
 		fallbackDNS string
+		serveIP     net.IP
 		dns.Client
 		connCh chan *dns.Conn
 	}
@@ -43,12 +44,13 @@ type Router struct {
 	}
 }
 
-func NewRouter(fallbackDNS, mmdbFile string, proxyDial ProxyDialFn) *Router {
+func NewRouter(serveIP, fallbackDNS, mmdbFile string, proxyDial ProxyDialFn) *Router {
 	r := Router{
 		ProxyDial: proxyDial,
 		cache:     mem.New(time.Hour), // TODO: config
 	}
 
+	r.dns.serveIP = net.ParseIP(serveIP)
 	r.dns.fallbackDNS = fallbackDNS
 	r.dns.connCh = make(chan *dns.Conn, 1)
 	go r.dialDNSConn()
