@@ -9,18 +9,10 @@ import (
 	geoip2 "github.com/oschwald/geoip2-golang"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
+	"github.com/wweir/sower/pkg/deferlog"
 	"github.com/wweir/sower/pkg/dhcp"
 	"github.com/wweir/sower/pkg/mem"
 	"github.com/wweir/sower/util"
-)
-
-const (
-	RouteBlock   = "block"
-	RouteDirect  = "direct"
-	RouteProxy   = "proxy"
-	RouteLocal   = "local"
-	RouteAccess  = "access"
-	RouteDefault = "default"
 )
 
 type ProxyDialFn func(network, host string, port uint16) (net.Conn, error)
@@ -101,25 +93,34 @@ func (r *Router) dialDNSConn() {
 	}
 }
 
-func (r *Router) RouteHandle(conn net.Conn, domain string, port uint16) (string, error) {
+func (r *Router) RouteHandle(conn net.Conn, domain string, port uint16) (err error) {
+	start := time.Now()
+	defer func() {
+		deferlog.DebugWarn(err).
+			Str("domain", domain).
+			Uint16("port", port).
+			Dur("spend", time.Since(start)).
+			Msg("RouteHandle")
+	}()
+
 	addr := net.JoinHostPort(domain, strconv.FormatUint(uint64(port), 10))
 
 	switch {
 	case r.blockRule.Match(domain):
-		return RouteBlock, nil
+		return nil
 
 	case r.directRule.Match(domain):
-		return RouteDirect, r.DirectHandle(conn, addr)
+		return r.DirectHandle(conn, addr)
 
 	case r.proxyRule.Match(domain):
-		return RouteProxy, r.ProxyHandle(conn, domain, port)
+		return r.ProxyHandle(conn, domain, port)
 
 	case r.localSite(domain):
-		return RouteLocal, r.DirectHandle(conn, addr)
+		return r.DirectHandle(conn, addr)
 	case r.isAccess(domain, port):
-		return RouteAccess, r.DirectHandle(conn, addr)
+		return r.DirectHandle(conn, addr)
 	default:
-		return RouteDefault, r.ProxyHandle(conn, domain, port)
+		return r.ProxyHandle(conn, domain, port)
 	}
 }
 

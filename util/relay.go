@@ -10,7 +10,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-func RelayTo(conn net.Conn, addr string) (time.Duration, error) {
+func RelayTo(conn net.Conn, addr string) (dur time.Duration, err error) {
 	if _, _, err := net.SplitHostPort(addr); err != nil {
 		addr = net.JoinHostPort(addr, "80")
 	}

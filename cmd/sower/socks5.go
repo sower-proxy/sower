@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 	"io"
 	"net"
-	"time"
 
 	"github.com/rs/zerolog/log"
 	"github.com/wweir/sower/router"
@@ -18,7 +17,6 @@ func ServeSocks5(ln net.Listener, r *router.Router) {
 	}
 	go ServeSocks5(ln, r)
 	defer conn.Close()
-	start := time.Now()
 
 	{
 		auth := new(socks5AuthReq)
@@ -68,19 +66,7 @@ func ServeSocks5(ln net.Listener, r *router.Router) {
 	}
 
 	host, port := addr.Addr()
-	route, err := r.RouteHandle(conn, host, port)
-	switch route {
-	case router.RouteProxy:
-	case router.RouteDefault:
-	default:
-		return
-	}
-	log.Err(err).
-		Str("host", host).
-		Uint16("port", port).
-		Str("route", route).
-		Dur("spend", time.Since(start)).
-		Msg("serve socsk5")
+	r.RouteHandle(conn, host, port)
 }
 
 /******************* https://tools.ietf.org/html/rfc1928 *******************/

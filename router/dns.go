@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/miekg/dns"
-	"github.com/rs/zerolog/log"
+	"github.com/wweir/sower/pkg/deferlog"
 )
 
 func (r *Router) ServeDNS(w dns.ResponseWriter, req *dns.Msg) {
@@ -36,12 +36,12 @@ func (r *Router) ServeDNS(w dns.ResponseWriter, req *dns.Msg) {
 
 	conn := <-r.dns.connCh
 	resp, rtt, err := r.dns.ExchangeWithConn(req, conn)
-	if err != nil {
-		log.Error().Err(err).
-			Dur("rtt", rtt).
-			Str("domain", domain).
-			Msg("exchange dns record")
+	deferlog.Std.DebugWarn(err).
+		Dur("rtt", rtt).
+		Str("domain", domain).
+		Msg("exchange dns record")
 
+	if err != nil {
 		conn.Close()
 		w.WriteMsg(r.dnsFail(req, dns.RcodeServerFailure))
 		return
