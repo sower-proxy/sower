@@ -17,17 +17,18 @@ import (
 
 type ProxyDialFn func(network, host string, port uint16) (net.Conn, error)
 type Router struct {
-	blockRule  *util.Node
-	directRule *util.Node
-	proxyRule  *util.Node
-	ProxyDial  ProxyDialFn
-	cache      *mem.Cache
+	blockRule   *util.Node
+	directRule  *util.Node
+	proxyRule   *util.Node
+	ProxyDial   ProxyDialFn
+	accessCache *mem.Cache
 
 	dns struct {
 		fallbackDNS string
 		serveIP     net.IP
 		dns.Client
 		connCh chan *dns.Conn
+		cache  *mem.Cache
 	}
 
 	country struct {
@@ -38,13 +39,14 @@ type Router struct {
 
 func NewRouter(serveIP, fallbackDNS, mmdbFile string, proxyDial ProxyDialFn) *Router {
 	r := Router{
-		ProxyDial: proxyDial,
-		cache:     mem.New(time.Hour), // TODO: config
+		ProxyDial:   proxyDial,
+		accessCache: mem.New(time.Hour), // TODO: config
 	}
 
 	r.dns.serveIP = net.ParseIP(serveIP)
 	r.dns.fallbackDNS = fallbackDNS
 	r.dns.connCh = make(chan *dns.Conn, 1)
+	r.dns.cache = mem.New(5 * time.Minute) // Tll: 10 minutes
 	go r.dialDNSConn()
 
 	var err error

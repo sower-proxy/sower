@@ -80,7 +80,8 @@ func init() {
 			Msg("Load config")
 	}
 
-	conf.Router.Direct.Rules = append(conf.Router.Direct.Rules, conf.Remote.Addr)
+	conf.Router.Direct.Rules = append(conf.Router.Direct.Rules,
+		conf.Remote.Addr, "**.in-addr.arpa", "**.ip6.arpa")
 	log.Info().
 		Str("version", version).
 		Str("date", date).

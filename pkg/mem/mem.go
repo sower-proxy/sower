@@ -2,7 +2,6 @@ package mem
 
 import (
 	"errors"
-	"fmt"
 	"reflect"
 	"sync"
 	"time"
@@ -12,7 +11,7 @@ import (
 
 // Data define the type which can speed up by mem cache
 type Data interface {
-	Fulfill(key interface{}) error
+	Fulfill(key string) (err error)
 }
 
 // Cache is the definition of cache, be careful of the memory usage
@@ -28,12 +27,12 @@ type Cache struct {
 var DefaultCache = New(time.Minute)
 
 // Remember is a surge, it provides a quite simple way to use cache
-func Remember(dst Data, key interface{}) error {
+func Remember(dst Data, key string) error {
 	return DefaultCache.Remember(dst, key)
 }
 
 // Delete is a surge, it delete a specified data in DefaultCache
-func Delete(dst Data, key interface{}) {
+func Delete(dst Data, key string) {
 	DefaultCache.Delete(dst, key)
 }
 
@@ -49,7 +48,7 @@ func New(rotateInterval time.Duration) *Cache {
 }
 
 // Remember automatically save and retrieve data from a cache entity
-func (c *Cache) Remember(dst Data, key interface{}) error {
+func (c *Cache) Remember(dst Data, key string) error {
 	rv := reflect.ValueOf(dst)
 	if rv.Kind() != reflect.Ptr {
 		panic("invalid not pointor type: " + reflect.TypeOf(dst).Name())
@@ -72,17 +71,16 @@ func (c *Cache) Remember(dst Data, key interface{}) error {
 	}
 
 	// First: load from cache
-	cacheKey := fmt.Sprintf("%T%v", dst, key)
-	if val, ok := c.now.Load(cacheKey); ok {
+	if val, ok := c.now.Load(key); ok {
 		return deepcopier.Copy(val).To(dst)
 	}
 
 	// Second: load from old cache, or waitting the sigle groutine getting data
 	ch := make(chan struct{})
-	if chVal, ok := c.barrier.LoadOrStore(cacheKey, ch); ok {
+	if chVal, ok := c.barrier.LoadOrStore(key, ch); ok {
 		close(ch) // the ch is not used
 
-		if val, ok := c.old.Load(cacheKey); ok {
+		if val, ok := c.old.Load(key); ok {
 			return deepcopier.Copy(val).To(dst)
 		}
 
@@ -90,12 +88,12 @@ func (c *Cache) Remember(dst Data, key interface{}) error {
 		// type error: already failed
 		if ch, ok = chVal.(chan struct{}); ok {
 			<-ch
-			if val, ok := c.now.Load(cacheKey); ok {
+			if val, ok := c.now.Load(key); ok {
 				return deepcopier.Copy(val).To(dst)
 			}
 		}
 
-		val, _ := c.barrier.Load(cacheKey)
+		val, _ := c.barrier.Load(key)
 		if err, ok := val.(error); ok {
 			return err
 		}
@@ -106,25 +104,24 @@ func (c *Cache) Remember(dst Data, key interface{}) error {
 	// Third: getting data from CacheType, maybe from db
 	err := dst.Fulfill(key)
 	if err != nil {
-		c.barrier.Store(cacheKey, err)
+		c.barrier.Store(key, err)
 		return err
 	}
 
-	c.now.Store(cacheKey, dst)
+	c.now.Store(key, dst)
 	close(ch) // broadcast, wakeup all waiting groutine
 
 	return nil
 }
 
 // Delete immediately specified the cached content to expire
-func (c *Cache) Delete(dst Data, key interface{}) {
+func (c *Cache) Delete(dst Data, key string) {
 	c.rwmutex.Lock()
 	defer c.rwmutex.Unlock()
 
-	cacheKey := fmt.Sprintf("%T%v", dst, key)
-	c.old.Delete(cacheKey)
-	c.now.Delete(cacheKey)
-	c.barrier.Store(cacheKey, errors.New(cacheKey+"is deleted"))
+	c.old.Delete(key)
+	c.now.Delete(key)
+	c.barrier.Store(key, errors.New(key+" is deleted"))
 }
 
 // Rotate force refresh cached data

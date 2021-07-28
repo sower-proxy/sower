@@ -19,7 +19,7 @@ func (r *Router) isAccess(domain string, port uint16) bool {
 	}
 
 	p := &ping{}
-	r.cache.Remember(p, domain)
+	r.accessCache.Remember(p, domain)
 	return p.isAccess
 }
 
@@ -27,8 +27,8 @@ type ping struct {
 	isAccess bool
 }
 
-func (p *ping) Fulfill(key interface{}) error {
-	_, err := http.Head(net.JoinHostPort(key.(string), "80"))
+func (p *ping) Fulfill(key string) error {
+	_, err := http.Head(net.JoinHostPort(key, "80"))
 	p.isAccess = (err == nil)
 	return nil
 }

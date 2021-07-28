@@ -9,12 +9,6 @@ import (
 )
 
 func (r *Router) ServeDNS(w dns.ResponseWriter, req *dns.Msg) {
-	// *Msg r has an TSIG record and it was validated
-	if req.IsTsig() != nil && w.TsigStatus() == nil {
-		lastTsig := req.Extra[len(req.Extra)-1].(*dns.TSIG)
-		req.SetTsig(lastTsig.Hdr.Name, dns.HmacMD5, 300, time.Now().Unix())
-	}
-
 	// https://stackoverflow.com/questions/4082081/requesting-a-and-aaaa-records-in-single-dns-query/4083071#4083071
 	if len(req.Question) == 0 {
 		w.WriteMsg(r.dnsFail(req, dns.RcodeFormatError))
@@ -34,28 +28,15 @@ func (r *Router) ServeDNS(w dns.ResponseWriter, req *dns.Msg) {
 		return
 	}
 
-	conn := <-r.dns.connCh
-	resp, rtt, err := r.dns.ExchangeWithConn(req, conn)
-	deferlog.Std.DebugWarn(err).
-		Dur("rtt", rtt).
-		Str("domain", domain).
-		Msg("exchange dns record")
-
-	if err != nil {
-		conn.Close()
+	c := &dnsCache{Router: r, Req: req}
+	if err := r.dns.cache.Remember(c, req.Question[0].String()); err != nil {
 		w.WriteMsg(r.dnsFail(req, dns.RcodeServerFailure))
 		return
 	}
 
-	select {
-	case r.dns.connCh <- conn:
-	default:
-		conn.Close()
-	}
-
-	resp.Id = req.Id
-	resp.Compress = true
-	w.WriteMsg(resp)
+	c.Resp.SetReply(req)
+	c.Resp.Compress = true
+	w.WriteMsg(c.Resp)
 }
 
 func (r *Router) dnsFail(req *dns.Msg, rcode int) *dns.Msg {
@@ -81,4 +62,30 @@ func (r *Router) dnsProxyA(domain string, localIP net.IP, req *dns.Msg) *dns.Msg
 		}}
 	}
 	return m
+}
+
+type dnsCache struct {
+	*Router
+	Req, Resp *dns.Msg
+}
+
+func (r *dnsCache) Fulfill(question string) (err error) {
+	conn := <-r.dns.connCh
+
+	var rtt time.Duration
+	r.Resp, rtt, err = r.dns.ExchangeWithConn(r.Req, conn)
+	if err != nil {
+		r.Resp, rtt, err = r.dns.ExchangeWithConn(r.Req, conn)
+	}
+	deferlog.Std.DebugWarn(err).
+		Dur("rtt", rtt).
+		Str("question", question).
+		Msg("exchange dns record")
+
+	select {
+	case r.dns.connCh <- conn:
+	default:
+		conn.Close()
+	}
+	return err
 }
