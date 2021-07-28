@@ -52,6 +52,9 @@ func (r *Router) ServeDNS(w dns.ResponseWriter, req *dns.Msg) {
 	default:
 		conn.Close()
 	}
+
+	resp.Id = req.Id
+	resp.Compress = true
 	w.WriteMsg(resp)
 }
 

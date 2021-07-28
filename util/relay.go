@@ -18,7 +18,7 @@ func RelayTo(conn net.Conn, addr string) (dur time.Duration, err error) {
 	start := time.Now()
 	rc, err := net.DialTimeout("tcp", addr, 5*time.Second)
 	if err != nil {
-		return time.Since(start), errors.Wrapf(err, "dial %s", addr)
+		return time.Since(start), errors.WithStack(err)
 	}
 	defer rc.Close()
 

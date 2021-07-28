@@ -138,5 +138,5 @@ func (r *Router) ProxyHandle(conn net.Conn, domain string, port uint16) error {
 
 func (r *Router) DirectHandle(conn net.Conn, addr string) error {
 	dur, err := util.RelayTo(conn, addr)
-	return errors.Wrapf(err, "direct relay to (%s), spend (%s)", addr, dur)
+	return errors.Wrapf(err, "spend (%s)", dur)
 }
