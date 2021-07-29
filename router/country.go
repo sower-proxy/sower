@@ -9,7 +9,7 @@ import (
 )
 
 func (r *Router) localSite(domain string) bool {
-
+	// parse domain to IP
 	ip := net.ParseIP(domain)
 	if ip == nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -27,12 +27,14 @@ func (r *Router) localSite(domain string) bool {
 		ip = ips[0]
 	}
 
+	// CIDR match
 	for _, cidr := range r.country.cidrs {
 		if cidr.Contains(ip) {
 			return true
 		}
 	}
 
+	// MMDB match CN
 	if r.country.Reader != nil {
 		city, err := r.country.City(ip)
 		if err != nil {

@@ -130,7 +130,7 @@ func (r *Router) ProxyHandle(conn net.Conn, domain string, port uint16) error {
 	start := time.Now()
 	rc, err := r.ProxyDial("tcp", domain, port)
 	if err != nil {
-		return errors.Wrapf(err, "dial proxy to (%s:%d), spend (%s)", domain, port, time.Since(start))
+		return errors.Wrapf(err, "proxy dial (%s:%d), spend (%s)", domain, port, time.Since(start))
 	}
 	defer rc.Close()
 

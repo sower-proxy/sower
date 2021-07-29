@@ -4,6 +4,8 @@ import (
 	"net"
 	"net/http"
 	"time"
+
+	"github.com/wweir/sower/pkg/deferlog"
 )
 
 var pingClient = http.Client{
@@ -19,7 +21,7 @@ func (r *Router) isAccess(domain string, port uint16) bool {
 	}
 
 	p := &ping{}
-	r.accessCache.Remember(p, domain)
+	_ = r.accessCache.Remember(p, domain)
 	return p.isAccess
 }
 
@@ -28,7 +30,10 @@ type ping struct {
 }
 
 func (p *ping) Fulfill(key string) error {
-	_, err := http.Head(net.JoinHostPort(key, "80"))
+	_, err := pingClient.Head(net.JoinHostPort(key, "80"))
+	deferlog.Std.DebugWarn(err).
+		Str("domain", key).
+		Msg("detect if site is accessible")
 	p.isAccess = (err == nil)
 	return nil
 }

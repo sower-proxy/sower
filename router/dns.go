@@ -11,32 +11,32 @@ import (
 func (r *Router) ServeDNS(w dns.ResponseWriter, req *dns.Msg) {
 	// https://stackoverflow.com/questions/4082081/requesting-a-and-aaaa-records-in-single-dns-query/4083071#4083071
 	if len(req.Question) == 0 {
-		w.WriteMsg(r.dnsFail(req, dns.RcodeFormatError))
+		_ = w.WriteMsg(r.dnsFail(req, dns.RcodeFormatError))
 		return
 	}
 
 	domain := req.Question[0].Name
 	switch {
 	case r.blockRule.Match(domain):
-		w.WriteMsg(r.dnsFail(req, dns.RcodeNameError))
+		_ = w.WriteMsg(r.dnsFail(req, dns.RcodeNameError))
 		return
 
 	case r.directRule.Match(domain):
 
 	case r.proxyRule.Match(domain):
-		w.WriteMsg(r.dnsProxyA(domain, r.dns.serveIP, req))
+		_ = w.WriteMsg(r.dnsProxyA(domain, r.dns.serveIP, req))
 		return
 	}
 
 	c := &dnsCache{Router: r, Req: req}
 	if err := r.dns.cache.Remember(c, req.Question[0].String()); err != nil {
-		w.WriteMsg(r.dnsFail(req, dns.RcodeServerFailure))
+		_ = w.WriteMsg(r.dnsFail(req, dns.RcodeServerFailure))
 		return
 	}
 
 	c.Resp.SetReply(req)
 	c.Resp.Compress = true
-	w.WriteMsg(c.Resp)
+	_ = w.WriteMsg(c.Resp)
 }
 
 func (r *Router) dnsFail(req *dns.Msg, rcode int) *dns.Msg {

@@ -26,39 +26,43 @@ var (
 
 	conf = struct {
 		Remote struct {
-			Type     string `default:"sower" required:"true" usage:"remote proxy protocol, optional: sower/trojan/socks5"`
-			Addr     string `required:"true" usage:"remote proxy address, eg: proxy.com/127.0.0.1:7890"`
+			Type     string `default:"sower" required:"true" usage:"optional: sower/trojan/socks5"`
+			Addr     string `required:"true" usage:"proxy address, eg: proxy.com/127.0.0.1:7890"`
 			Password string `usage:"remote proxy password"`
 		}
 
 		DNS struct {
-			Disable  bool   `usage:"disable DNS proxy"`
+			Disable  bool   `default:"false" usage:"disable DNS proxy"`
 			Serve    string `default:"127.0.0.1" required:"true" usage:"dns server ip"`
 			Fallback string `default:"223.5.5.5" usage:"fallback dns server"`
 		}
 		Socks5 struct {
-			Disable bool   `usage:"disable sock5 proxy"`
+			Disable bool   `default:"false" usage:"disable sock5 proxy"`
 			Addr    string `default:":1080" usage:"socks5 listen address"`
 		} `flag:"socks5"`
 
 		Router struct {
 			Block struct {
-				File  string   `usage:"block list file, parsed as '**.line_text'"`
-				Rules []string `usage:"block list rules"`
+				File       string   `usage:"block list file, local file or remote"`
+				FilePrefix string   `default:"**." usage:"parsed as 'prefix.line_text'"`
+				Rules      []string `usage:"block list rules"`
 			}
 			Direct struct {
-				File  string   `usage:"direct list file, parsed as '**.line_text'"`
-				Rules []string `usage:"direct list rules"`
+				File       string   `usage:"direct list file, local file or remote"`
+				FilePrefix string   `default:"**." usage:"parsed as 'prefix.line_text'"`
+				Rules      []string `usage:"direct list rules"`
 			}
 			Proxy struct {
-				File  string   `usage:"proxy list file, parsed as '**.line_text'"`
-				Rules []string `usage:"proxy list rules"`
+				File       string   `usage:"proxy list file, local file or remote"`
+				FilePrefix string   `default:"**." usage:"parsed as 'prefix.line_text'"`
+				Rules      []string `usage:"proxy list rules"`
 			}
 
 			Country struct {
-				MMDB  string   `usage:"mmdb file"`
-				File  string   `usage:"CIDR block list file"`
-				Rules []string `usage:"CIDR list rules"`
+				MMDB       string   `usage:"mmdb file"`
+				File       string   `usage:"CIDR block list file, local file or remote"`
+				FilePrefix string   `default:"" usage:"parsed as 'prefix.line_text'"`
+				Rules      []string `usage:"CIDR list rules"`
 			}
 		}
 	}{}
@@ -67,7 +71,7 @@ var (
 func init() {
 	if err := aconfig.LoaderFor(&conf, aconfig.Config{
 		AllowUnknownFields: true,
-		FileFlag:           "conf",
+		FileFlag:           "f",
 		FileDecoders: map[string]aconfig.FileDecoder{
 			".yml":  aconfigyaml.New(),
 			".yaml": aconfigyaml.New(),
@@ -76,7 +80,7 @@ func init() {
 		},
 	}).Load(); err != nil {
 		log.Fatal().Err(err).
-			Interface("conf", conf).
+			Interface("config", conf).
 			Msg("Load config")
 	}
 
@@ -113,10 +117,11 @@ func main() {
 		}
 		go ServeHTTPS(lnHTTPS, r)
 
+		addr := net.JoinHostPort(conf.DNS.Serve, "53")
 		log.Info().
-			Str("ip", conf.DNS.Serve).
+			Str("listen_on", addr).
 			Msg("DNS proxy started")
-		if err := dns.ListenAndServe(net.JoinHostPort(conf.DNS.Serve, "53"), "udp", r); err != nil {
+		if err := dns.ListenAndServe(addr, "udp", r); err != nil {
 			log.Fatal().Err(err).Msg("serve dns")
 		}
 	}()
@@ -132,14 +137,18 @@ func main() {
 			log.Fatal().Err(err).Msg("listen port")
 		}
 		log.Info().Msgf("SOCKS5 proxy listening on %s", conf.Socks5.Addr)
-		ServeSocks5(ln, r)
+		go ServeSocks5(ln, r)
 	}()
 
 	start := time.Now()
-	conf.Router.Block.Rules = append(conf.Router.Block.Rules, loadRules(proxtDial, conf.Router.Block.File, "**.")...)
-	conf.Router.Direct.Rules = append(conf.Router.Direct.Rules, loadRules(proxtDial, conf.Router.Direct.File, "**.")...)
-	conf.Router.Proxy.Rules = append(conf.Router.Proxy.Rules, loadRules(proxtDial, conf.Router.Proxy.File, "**.")...)
-	conf.Router.Country.Rules = append(conf.Router.Country.Rules, loadRules(proxtDial, conf.Router.Country.File, "")...)
+	conf.Router.Block.Rules = append(conf.Router.Block.Rules,
+		loadRules(proxtDial, conf.Router.Block.File, conf.Router.Block.FilePrefix)...)
+	conf.Router.Direct.Rules = append(conf.Router.Direct.Rules,
+		loadRules(proxtDial, conf.Router.Direct.File, conf.Router.Direct.FilePrefix)...)
+	conf.Router.Proxy.Rules = append(conf.Router.Proxy.Rules,
+		loadRules(proxtDial, conf.Router.Proxy.File, conf.Router.Proxy.FilePrefix)...)
+	conf.Router.Country.Rules = append(conf.Router.Country.Rules,
+		loadRules(proxtDial, conf.Router.Country.File, conf.Router.Country.FilePrefix)...)
 	r.SetRules(conf.Router.Block.Rules, conf.Router.Direct.Rules, conf.Router.Proxy.Rules,
 		conf.Router.Country.Rules)
 
@@ -156,6 +165,7 @@ func main() {
 func loadRules(proxyDial router.ProxyDialFn, file, linePrefix string) []string {
 	var loadFn func() (io.ReadCloser, error)
 	if _, err := url.Parse(file); err == nil {
+		// load rule file from remote by HTTP
 		client := &http.Client{
 			Transport: &http.Transport{
 				Dial: func(network, addr string) (net.Conn, error) {
@@ -181,11 +191,13 @@ func loadRules(proxyDial router.ProxyDialFn, file, linePrefix string) []string {
 		}
 
 	} else {
+		// load rule file from local file
 		loadFn = func() (io.ReadCloser, error) {
 			return os.Open(file)
 		}
 	}
 
+	// load rule file, retry 10 times
 	rc, err := loadFn()
 	for i := time.Duration(1); i < 10; i++ {
 		if err == nil {
@@ -203,6 +215,7 @@ func loadRules(proxyDial router.ProxyDialFn, file, linePrefix string) []string {
 	}
 	defer rc.Close()
 
+	// parse rule file into rule tree
 	var lines []string
 	br := bufio.NewReader(rc)
 	for {

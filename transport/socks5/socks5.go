@@ -22,8 +22,7 @@ func (h *AddrHead) String() string {
 // Socks5 is a SOCKS5 proxy. It implements the teeconn.Conn interface.
 // It is used to be a second relay of other proxy tools.
 // user -> sower -socks5-> third-party proxy -> target
-type Socks5 struct {
-}
+type Socks5 struct{}
 
 func New() *Socks5 {
 	return &Socks5{}
@@ -33,7 +32,7 @@ var noAuthResp = authResp{VER: 5, METHOD: 0}
 var succHeadResp = respHead{VER: 5, REP: 0, RSV: 0, ATYP: 1}
 
 func (s *Socks5) Unwrap(conn net.Conn) (net.Addr, error) {
-	{
+	{ //auth
 		auth := new(authReq)
 		if err := auth.Fulfill(conn); err != nil && !auth.IsValid() {
 			return nil, errors.Wrap(err, "read auth")
@@ -45,7 +44,7 @@ func (s *Socks5) Unwrap(conn net.Conn) (net.Addr, error) {
 	}
 
 	var addr addrType
-	{
+	{ // head
 		head := new(reqHead)
 		if err := binary.Read(conn, binary.BigEndian, head); err != nil || !head.IsValid() {
 			return nil, errors.Wrap(err, "read head")
@@ -80,10 +79,10 @@ var noAuthReq = struct {
 	NMETHODS uint8
 	METHODS  byte
 }{5, 1, 0}
-var domainHead = reqHead{VER: 5, CMD: 1, RSV: 0, ATYP: 0x03}
+var domainHead = reqHead{VER: 5, CMD: 1, RSV: 0, ATYP: 3}
 
 func (s *Socks5) Wrap(conn net.Conn, tgtHost string, tgtPort uint16) error {
-	{
+	{ // auth
 		if err := binary.Write(conn, binary.BigEndian, &noAuthReq); err != nil {
 			return errors.WithStack(err)
 		}
@@ -93,8 +92,7 @@ func (s *Socks5) Wrap(conn net.Conn, tgtHost string, tgtPort uint16) error {
 			return errors.WithStack(err)
 		}
 	}
-
-	{
+	{ // head
 		buf := bytes.NewBuffer(make([]byte, 0, binary.Size(domainHead)+1+len(tgtHost)+2))
 		_ = binary.Write(buf, binary.BigEndian, domainHead)
 		buf.WriteByte(uint8(len(tgtHost)))

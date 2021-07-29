@@ -12,7 +12,7 @@ import (
 )
 
 var StructLogger = zerolog.New(os.Stdout).
-	With().Caller().Timestamp().Logger()
+	With().Timestamp().Logger()
 
 var ConsoleLogger = zerolog.New(zerolog.ConsoleWriter{
 	Out:        os.Stdout,
@@ -27,7 +27,7 @@ var ConsoleLogger = zerolog.New(zerolog.ConsoleWriter{
 		}
 		return caller
 	},
-}).With().Timestamp().Caller().Logger()
+}).With().Timestamp().Logger()
 
 func init() {
 	zerolog.ErrorStackMarshaler = func(err error) interface{} {
@@ -46,6 +46,6 @@ func init() {
 }
 
 func SetDefaultLogger(logger zerolog.Logger, deferSkip int, logLevel zerolog.Level) {
-	log.Logger = logger.Level(logLevel)
+	log.Logger = logger.With().Caller().Logger().Level(logLevel)
 	Logger = logger.With().CallerWithSkipFrameCount(deferSkip + 2).Logger().Level(logLevel)
 }

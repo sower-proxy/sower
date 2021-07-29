@@ -48,7 +48,7 @@ func (s *Sower) Unwrap(conn net.Conn) (net.Addr, error) {
 	}
 
 	h := &Head{}
-	binary.Read(bytes.NewReader(buf), binary.BigEndian, h)
+	_ = binary.Read(bytes.NewReader(buf), binary.BigEndian, h)
 	switch h.Cmd {
 	case 0x80:
 	default:
