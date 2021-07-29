@@ -19,7 +19,7 @@ var headSize = binary.Size(new(Head))
 // data(HTTP, first byte < 0x7F)
 type Head struct {
 	Cmd      byte
-	Checksum byte
+	Checksum uint64
 	Port     uint16
 	TgtAddr  [maxDomainLength]byte
 }
@@ -74,6 +74,8 @@ func (s *Sower) Wrap(conn net.Conn, tgtHost string, tgtPort uint16) error {
 	})
 }
 
-func sumChecksum(target [maxDomainLength]byte, password []byte) byte {
-	return md5.Sum(append(target[:], password...))[0]
+func sumChecksum(target [maxDomainLength]byte, password []byte) uint64 {
+	checksum := md5.Sum(append(target[:], password...))
+	checksumVal, _ := binary.Uvarint(checksum[:])
+	return checksumVal
 }
