@@ -10,7 +10,6 @@ import (
 	"strconv"
 
 	"github.com/pkg/errors"
-	"github.com/wweir/sower/pkg/teeconn"
 )
 
 // +-----------------------+---------+----------------+---------+----------+
@@ -110,47 +109,41 @@ func New(password string) *Trojan {
 	return t
 }
 
-func (t *Trojan) Unwrap(conn *teeconn.Conn) net.Addr {
+func (t *Trojan) Unwrap(conn net.Conn) (net.Addr, error) {
 	buf := make([]byte, headLen)
 	// do not use io.ReadFull to avoid hang
 	if n, err := conn.Read(buf); err != nil || n != headLen {
-		return nil
+		return nil, errors.Wrap(err, "read head")
 	}
 
 	head := &staticHead{}
 	if err := binary.Read(bytes.NewBuffer(buf), binary.BigEndian, head); err != nil {
-		return nil
+		return nil, errors.Wrap(err, "read head")
 	}
 
 	if !bytes.Equal(head.Passwd[:], []byte(t.headPasswd)) {
-		return nil
+		return nil, errors.New("auth fail")
 	}
 
 	head.CMD, head.ATYP = buf[58], buf[59]
 	switch head.ATYP {
 	case 0x01: //ipv4
 		addr := &ipv4Addr{}
-		if err := binary.Read(conn, binary.BigEndian, addr); err != nil {
-			return nil
-		}
-		return addr
+		err := binary.Read(conn, binary.BigEndian, addr)
+		return addr, errors.Wrap(err, "read addr")
 
 	case 0x04: //ipv6
 		addr := &ipv6Addr{}
-		if err := binary.Read(conn, binary.BigEndian, addr); err != nil {
-			return nil
-		}
-		return addr
+		err := binary.Read(conn, binary.BigEndian, addr)
+		return addr, errors.Wrap(err, "read addr")
 
 	case 0x03: // domain
 		addr := &domain{}
-		if err := addr.Fulfill(conn); err != nil {
-			return nil
-		}
-		return addr
+		err := addr.Fulfill(conn)
+		return addr, errors.Wrap(err, "read addr")
 
 	default:
-		return nil
+		return nil, errors.New("invalid ATYP")
 	}
 }
 

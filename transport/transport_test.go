@@ -15,7 +15,7 @@ func init() {
 	log.Logger = log.Logger.With().Caller().Logger()
 }
 
-func testPipe(tran Transport) net.Addr {
+func testPipe(tran Transport) (net.Addr, error) {
 	r, w := net.Pipe()
 	defer r.Close()
 
@@ -28,11 +28,11 @@ func testPipe(tran Transport) net.Addr {
 }
 
 func Test_Transports(t *testing.T) {
-	if addr := testPipe(newSower()); addr == nil || strings.TrimSpace(addr.String()) != "sower:443" {
+	if addr, err := testPipe(newSower()); err != nil || strings.TrimSpace(addr.String()) != "sower:443" {
 		t.Errorf("test sower, unexpected address: %s", addr)
 	}
 
-	if addr := testPipe(newTrojan()); addr == nil || strings.TrimSpace(addr.String()) != "sower:443" {
+	if addr, err := testPipe(newTrojan()); err != nil || strings.TrimSpace(addr.String()) != "sower:443" {
 		t.Errorf("test trojan, unexpected address: %s", addr)
 	}
 }

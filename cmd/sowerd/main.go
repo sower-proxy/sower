@@ -109,7 +109,7 @@ func serve443(ln net.Listener, fakeSite string, sower *sower.Sower, trojan *troj
 	defer teeconn.Close()
 
 	teeconn.Reread()
-	if addr := sower.Unwrap(teeconn); addr != nil {
+	if addr, err := sower.Unwrap(teeconn); err == nil {
 		teeconn.Stop()
 
 		dur, err := util.RelayTo(teeconn, addr.String())
@@ -121,7 +121,7 @@ func serve443(ln net.Listener, fakeSite string, sower *sower.Sower, trojan *troj
 	}
 
 	teeconn.Reread()
-	if addr := trojan.Unwrap(teeconn); addr != nil {
+	if addr, err := trojan.Unwrap(teeconn); err == nil {
 		teeconn.Stop()
 
 		dur, err := util.RelayTo(teeconn, addr.String())

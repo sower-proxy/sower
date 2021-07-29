@@ -24,11 +24,11 @@ type Router struct {
 	accessCache *mem.Cache
 
 	dns struct {
+		dns.Client
 		fallbackDNS string
 		serveIP     net.IP
-		dns.Client
-		connCh chan *dns.Conn
-		cache  *mem.Cache
+		connCh      chan *dns.Conn
+		cache       *mem.Cache
 	}
 
 	country struct {
@@ -102,7 +102,7 @@ func (r *Router) RouteHandle(conn net.Conn, domain string, port uint16) (err err
 			Str("domain", domain).
 			Uint16("port", port).
 			Dur("spend", time.Since(start)).
-			Msg("RouteHandle")
+			Msg("serve socks5")
 	}()
 
 	addr := net.JoinHostPort(domain, strconv.FormatUint(uint64(port), 10))

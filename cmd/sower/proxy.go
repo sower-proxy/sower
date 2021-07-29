@@ -12,22 +12,37 @@ import (
 	"github.com/wweir/sower/pkg/teeconn"
 	"github.com/wweir/sower/router"
 	"github.com/wweir/sower/transport"
+	"github.com/wweir/sower/transport/socks5"
 	"github.com/wweir/sower/transport/sower"
 	"github.com/wweir/sower/transport/trojan"
 	"github.com/wweir/sower/util"
 )
 
 func GenProxyDial(proxyType, proxyHost, proxyPassword string) router.ProxyDialFn {
-	var (
-		proxyAddr = net.JoinHostPort(proxyHost, "443")
-		tlsCfg    = &tls.Config{}
-		proxy     transport.Transport
-	)
+	var proxy transport.Transport
+	var dialFn func() (net.Conn, error)
+
 	switch conf.Remote.Type {
 	case "sower":
 		proxy = sower.New(conf.Remote.Password)
+		tlsCfg := &tls.Config{}
+		dialFn = func() (net.Conn, error) {
+			return tls.Dial("tcp", net.JoinHostPort(proxyHost, "443"), tlsCfg)
+		}
+
 	case "trojan":
 		proxy = trojan.New(conf.Remote.Password)
+		tlsCfg := &tls.Config{}
+		dialFn = func() (net.Conn, error) {
+			return tls.Dial("tcp", net.JoinHostPort(proxyHost, "443"), tlsCfg)
+		}
+
+	case "socks5":
+		proxy = socks5.New()
+		dialFn = func() (net.Conn, error) {
+			return net.Dial("tcp", proxyHost)
+		}
+
 	default:
 		log.Fatal().
 			Str("type", conf.Remote.Type).
@@ -39,16 +54,17 @@ func GenProxyDial(proxyType, proxyHost, proxyPassword string) router.ProxyDialFn
 			return nil, errors.Errorf("invalid addr(%s:%d)", host, port)
 		}
 
-		c, err := tls.Dial("tcp", proxyAddr, tlsCfg)
+		conn, err := dialFn()
 		if err != nil {
 			return nil, err
 		}
 
-		if err := proxy.Wrap(c, host, port); err != nil {
+		if err := proxy.Wrap(conn, host, port); err != nil {
+			conn.Close()
 			return nil, err
 		}
 
-		return c, nil
+		return conn, nil
 	}
 }
 
@@ -82,7 +98,7 @@ func ServeHTTP(ln net.Listener, r *router.Router) {
 
 	teeconn.Stop().Reread()
 	util.Relay(teeconn, rc)
-	log.Info().
+	log.Debug().
 		Str("host", req.Host).
 		Dur("spend", time.Since(start)).
 		Msg("serve http")
@@ -119,8 +135,29 @@ func ServeHTTPS(ln net.Listener, r *router.Router) {
 
 	teeconn.Stop().Reread()
 	util.Relay(teeconn, rc)
-	log.Info().
+	log.Debug().
 		Str("host", domain).
 		Dur("spend", time.Since(start)).
 		Msg("serve http")
+}
+
+func ServeSocks5(ln net.Listener, r *router.Router) {
+	conn, err := ln.Accept()
+	if err != nil {
+		log.Fatal().Err(err).
+			Msg("serve socks5")
+	}
+	go ServeSocks5(ln, r)
+	defer conn.Close()
+
+	addr, err := socks5.New().Unwrap(conn)
+	if err != nil {
+		log.Warn().Err(err).
+			Str("addr", addr.String()).
+			Msg("parse socks5 target")
+		return
+	}
+
+	host, port := addr.(*socks5.AddrHead).Addr()
+	r.RouteHandle(conn, host, port)
 }

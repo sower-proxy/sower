@@ -7,7 +7,7 @@ import (
 	"net"
 	"strconv"
 
-	"github.com/wweir/sower/pkg/teeconn"
+	"github.com/pkg/errors"
 )
 
 // https://en.wikipedia.org/wiki/Domain_Name_System
@@ -41,10 +41,10 @@ func New(password string) *Sower {
 	}
 }
 
-func (s *Sower) Unwrap(conn *teeconn.Conn) net.Addr {
+func (s *Sower) Unwrap(conn net.Conn) (net.Addr, error) {
 	buf := make([]byte, headSize)
 	if n, err := conn.Read(buf); err != nil || n != headSize {
-		return nil
+		return nil, errors.Wrap(err, "read head")
 	}
 
 	h := &Head{}
@@ -52,14 +52,14 @@ func (s *Sower) Unwrap(conn *teeconn.Conn) net.Addr {
 	switch h.Cmd {
 	case 0x80:
 	default:
-		return nil
+		return nil, errors.Errorf("invalid command: %d", h.Cmd)
 	}
 
 	if h.Checksum != sumChecksum(h.TgtAddr, s.password) {
-		return nil
+		return nil, errors.New("auth fail")
 	}
 
-	return h
+	return h, nil
 }
 
 func (s *Sower) Wrap(conn net.Conn, tgtHost string, tgtPort uint16) error {

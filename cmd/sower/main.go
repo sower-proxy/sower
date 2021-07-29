@@ -26,9 +26,9 @@ var (
 
 	conf = struct {
 		Remote struct {
-			Type     string `default:"sower" required:"true" usage:"remote proxy protocol, sower/trojan"`
-			Addr     string `required:"true" usage:"remote proxy address, eg: proxy.com"`
-			Password string `required:"true" usage:"remote proxy password"`
+			Type     string `default:"sower" required:"true" usage:"remote proxy protocol, optional: sower/trojan/socks5"`
+			Addr     string `required:"true" usage:"remote proxy address, eg: proxy.com/127.0.0.1:7890"`
+			Password string `usage:"remote proxy password"`
 		}
 
 		DNS struct {
