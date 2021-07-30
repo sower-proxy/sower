@@ -35,7 +35,7 @@ func (s *Socks5) Unwrap(conn net.Conn) (net.Addr, error) {
 	{ //auth
 		auth := new(authReq)
 		if err := auth.Fulfill(conn); err != nil && !auth.IsValid() {
-			return nil, errors.Wrap(err, "read auth")
+			return nil, errors.Errorf("read head: %v, err: %s", auth, err)
 		}
 
 		if err := binary.Write(conn, binary.BigEndian, noAuthResp); err != nil {
@@ -47,7 +47,7 @@ func (s *Socks5) Unwrap(conn net.Conn) (net.Addr, error) {
 	{ // head
 		head := new(reqHead)
 		if err := binary.Read(conn, binary.BigEndian, head); err != nil || !head.IsValid() {
-			return nil, errors.Wrap(err, "read head")
+			return nil, errors.Errorf("read head: %v, err: %s", head, err)
 		}
 		switch head.ATYP {
 		case 0x01: // IPv4

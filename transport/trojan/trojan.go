@@ -113,7 +113,7 @@ func (t *Trojan) Unwrap(conn net.Conn) (net.Addr, error) {
 	buf := make([]byte, headLen)
 	// do not use io.ReadFull to avoid hang
 	if n, err := conn.Read(buf); err != nil || n != headLen {
-		return nil, errors.Wrap(err, "read head")
+		return nil, errors.Errorf("n: %d, err: %s", n, err)
 	}
 
 	head := &staticHead{}
@@ -148,28 +148,27 @@ func (t *Trojan) Unwrap(conn net.Conn) (net.Addr, error) {
 }
 
 func (t *Trojan) Wrap(conn net.Conn, tgtHost string, tgtPort uint16) error {
-	var buf []byte
+	buf := bytes.NewBuffer(make([]byte, 0, headLen+1+len(tgtHost)+4))
 	ip := net.ParseIP(tgtHost)
-
 	switch {
 	case len(ip.To4()) != 0:
-		buf = make([]byte, headLen+net.IPv4len+4)
-		buf = append(t.headIPv4, []byte(ip.To4())...)
+		buf.Write(t.headIPv4)
+		buf.Write([]byte(ip.To4()))
 
 	case len(ip) != 0:
-		buf = make([]byte, headLen+net.IPv6len+4)
-		buf = append(t.headIPv6, []byte(ip)...)
+		buf.Write(t.headIPv6)
+		buf.Write([]byte(ip.To16()))
 
 	default:
-		buf = make([]byte, headLen+1+len(tgtHost)+4)
-		buf = append(t.headDomain, byte(len(tgtHost)))
-		buf = append(buf, []byte(tgtHost)...)
+		buf.Write(t.headDomain)
+		buf.WriteByte(byte(len(tgtHost)))
+		buf.WriteString(tgtHost)
 	}
 
-	buf = append(buf, byte(tgtPort>>8), byte(tgtPort), 0x0D, 0x0A)
+	buf.Write([]byte{byte(tgtPort >> 8), byte(tgtPort), 0x0D, 0x0A})
 
-	if n, err := conn.Write(buf); err != nil || n != len(buf) {
-		return errors.Errorf("n: %d, msg: %s", n, err)
+	if n, err := conn.Write(buf.Bytes()); err != nil || n != len(buf.Bytes()) {
+		return errors.Errorf("n: %d, err: %s", n, err)
 	}
 	return nil
 }

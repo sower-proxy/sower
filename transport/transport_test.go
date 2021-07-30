@@ -29,11 +29,11 @@ func testPipe(tran Transport) (net.Addr, error) {
 
 func Test_Transports(t *testing.T) {
 	if addr, err := testPipe(newSower()); err != nil || strings.TrimSpace(addr.String()) != "sower:443" {
-		t.Errorf("test sower, unexpected address: %s", addr)
+		t.Errorf("test sower, unexpected address: %s, err: %s", addr, err)
 	}
 
 	if addr, err := testPipe(newTrojan()); err != nil || strings.TrimSpace(addr.String()) != "sower:443" {
-		t.Errorf("test trojan, unexpected address: %s", addr)
+		t.Errorf("test trojan, unexpected address: %s, err: %s", addr, err)
 	}
 }
 

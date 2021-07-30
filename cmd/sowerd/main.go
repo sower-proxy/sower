@@ -6,9 +6,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/cristalhq/aconfig"
 	"github.com/rs/zerolog/log"
+	"github.com/wweir/sower/pkg/deferlog"
 	"github.com/wweir/sower/pkg/teeconn"
 	"github.com/wweir/sower/transport/sower"
 	"github.com/wweir/sower/transport/trojan"
@@ -33,15 +35,12 @@ var (
 )
 
 func init() {
-	if err := aconfig.LoaderFor(&conf, aconfig.Config{}).Load(); err != nil {
-		log.Fatal().Err(err).Msg("Load config")
-	}
-
-	log.Info().
+	err := aconfig.LoaderFor(&conf, aconfig.Config{}).Load()
+	deferlog.Std.InfoFatal(err).
 		Str("version", version).
 		Str("date", date).
 		Interface("config", conf).
-		Msg("Starting")
+		Msg("Load config")
 }
 
 func main() {
@@ -75,13 +74,18 @@ func main() {
 	}
 
 	// Redirect 80 to 443
-	go http.ListenAndServe(net.JoinHostPort(conf.ServeIP, "80"),
-		certManager.HTTPHandler(http.HandlerFunc(redirectToHTTPS)))
+	go func() {
+		err := http.ListenAndServe(net.JoinHostPort(conf.ServeIP, "80"),
+			certManager.HTTPHandler(http.HandlerFunc(redirectToHTTPS)))
+		log.Fatal().Err(err).
+			Str("IP", conf.ServeIP).
+			Msg("Listen HTTP service")
+	}()
 
 	ln, err := tls.Listen("tcp", net.JoinHostPort(conf.ServeIP, "443"), tlsConf)
-	if err != nil {
-		log.Fatal().Err(err).Msg("listen tcp 443")
-	}
+	deferlog.Std.InfoFatal(err).
+		Str("IP", conf.ServeIP).
+		Msg("Start listen HTTPS service")
 
 	go serve443(ln, conf.FakeSite, sower.New(conf.Password), trojan.New(conf.Password))
 	select {}
@@ -103,39 +107,34 @@ func serve443(ln net.Listener, fakeSite string, sower *sower.Sower, trojan *troj
 	if err != nil {
 		log.Fatal().Err(err).Msg("serve 443 port")
 	}
-
 	go serve443(ln, fakeSite, sower, trojan)
 	teeconn := teeconn.New(conn)
 	defer teeconn.Close()
 
+	var addr net.Addr
+	var dur time.Duration
+	defer func() {
+		deferlog.DebugWarn(err).
+			Dur("spend", dur).
+			Msgf("relay conn to %s", addr)
+	}()
+
 	teeconn.Reread()
-	if addr, err := sower.Unwrap(teeconn); err == nil {
+	if addr, err = sower.Unwrap(teeconn); err == nil {
 		teeconn.Stop()
 
-		dur, err := util.RelayTo(teeconn, addr.String())
-		log.Err(err).
-			Dur("spend", dur).
-			Str("target", addr.String()).
-			Msg("relay sower conn")
+		dur, err = util.RelayTo(teeconn, addr.String())
 		return
 	}
 
 	teeconn.Reread()
-	if addr, err := trojan.Unwrap(teeconn); err == nil {
+	if addr, err = trojan.Unwrap(teeconn); err == nil {
 		teeconn.Stop()
 
-		dur, err := util.RelayTo(teeconn, addr.String())
-		log.Err(err).
-			Dur("spend", dur).
-			Str("target", addr.String()).
-			Msg("relay trojan conn")
+		dur, err = util.RelayTo(teeconn, addr.String())
 		return
 	}
 
 	teeconn.Stop().Reread()
-	dur, err := util.RelayTo(teeconn, fakeSite)
-	log.Err(err).
-		Dur("spend", dur).
-		Str("target", fakeSite).
-		Msg("relay fake site")
+	dur, err = util.RelayTo(teeconn, fakeSite)
 }

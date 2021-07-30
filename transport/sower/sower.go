@@ -44,7 +44,7 @@ func New(password string) *Sower {
 func (s *Sower) Unwrap(conn net.Conn) (net.Addr, error) {
 	buf := make([]byte, headSize)
 	if n, err := conn.Read(buf); err != nil || n != headSize {
-		return nil, errors.Wrap(err, "read head")
+		return nil, errors.Errorf("n: %d, err: %s", n, err)
 	}
 
 	h := &Head{}
