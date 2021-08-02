@@ -153,8 +153,7 @@ func ServeSocks5(ln net.Listener, r *router.Router) {
 	addr, err := socks5.New().Unwrap(conn)
 	if err != nil {
 		log.Warn().Err(err).
-			Str("addr", addr.String()).
-			Msg("parse socks5 target")
+			Msgf("parse socks5 target: %s", addr)
 		return
 	}
 
