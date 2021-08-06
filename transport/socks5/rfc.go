@@ -79,7 +79,7 @@ type addrTypeIPv4 struct {
 }
 
 func (a *addrTypeIPv4) Fulfill(r io.Reader) error {
-	return binary.Read(r, binary.BigEndian, &a)
+	return binary.Read(r, binary.BigEndian, a)
 }
 func (a *addrTypeIPv4) Addr() (string, uint16) {
 	return net.IP(a.DST_ADDR[:]).String(), a.DST_PORT
@@ -118,7 +118,7 @@ type addrTypeIPv6 struct {
 }
 
 func (a *addrTypeIPv6) Fulfill(r io.Reader) error {
-	return binary.Read(r, binary.BigEndian, &a)
+	return binary.Read(r, binary.BigEndian, a)
 }
 func (a *addrTypeIPv6) Addr() (string, uint16) {
 	return net.IP(a.DST_ADDR[:]).String(), a.DST_PORT
