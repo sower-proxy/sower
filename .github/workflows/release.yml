@@ -9,45 +9,40 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/setup-go@v2
+        with:
+          go-version: ^1.16.7
       - uses: actions/checkout@v2
 
       - name: build matrix
         run: |
-          cp conf/sower.toml sower.toml
-
-          GOOS=linux GOARCH=amd64 make build
+          make build GO='GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go'
           tar czvf sower-linux-amd64.tar.gz sower sowerd
-          GOOS=linux GOARCH=386 make build
-          tar czvf sower-linux-386.tar.gz sower sowerd
-          GOOS=linux GOARCH=arm make build
+          rm -f sower sowerd
+          make build GO='GOOS=linux GOARCH=arm CGO_ENABLED=0 go'
           tar czvf sower-linux-arm.tar.gz sower sowerd
-          GOOS=linux GOARCH=arm64 make build
+          rm -f sower sowerd
+          make build GO='GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go'
           tar czvf sower-linux-arm64.tar.gz sower sowerd
-          GOOS=linux GOARCH=mips make build
+          rm -f sower sowerd
+          make build GO='GOOS=linux GOARCH=mips CGO_ENABLED=0 go'
           tar czvf sower-linux-mips.tar.gz sower sowerd
-          GOOS=linux GOARCH=mipsle make build
+          rm -f sower sowerd
+          make build GO='GOOS=linux GOARCH=mipsle CGO_ENABLED=0 go'
           tar czvf sower-linux-mipsle.tar.gz sower sowerd
+          rm -f sower sowerd
 
-          GOOS=darwin GOARCH=amd64 make build
+          make build GO='GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go'
           tar czvf sower-darwin-amd64.tar.gz sower sowerd
+          rm -f sower sowerd
+          make build GO='GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go'
+          tar czvf sower-darwin-arm64.tar.gz sower sowerd
+          rm -f sower sowerd
 
-          GOOS=windows GOARCH=amd64 make build
+          make build GO='GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go'
           tar czvf sower-windows-amd64.tar.gz sower sowerd
-          GOOS=windows GOARCH=386 make build
-          tar czvf sower-windows-386.tar.gz sower sowerd
+          rm -f sower sowerd
 
-      - name: Release
-        uses: softprops/action-gh-release@master
+      - uses: ncipollo/release-action@v1
         with:
-          files: |
-            sower-linux-amd64.tar.gz
-            sower-linux-386.tar.gz
-            sower-linux-arm.tar.gz
-            sower-linux-arm64.tar.gz
-            sower-linux-mips.tar.gz
-            sower-linux-mipsle.tar.gz
-            sower-darwin-amd64.tar.gz
-            sower-windows-amd64.tar.gz
-            sower-windows-386.tar.gz
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          artifacts: "*.tar.gz"
+          token: ${{ secrets.GITHUB_TOKEN }}
