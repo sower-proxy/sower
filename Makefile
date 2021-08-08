@@ -7,14 +7,14 @@ test:
 	${GO} vet ./...
 	${GO} test ./...
 
-build: client server
+build: sower sowerd
 
-client:
+sower:
 	${GO} build -ldflags "\
 		-X main.version=$(shell git describe --tags --always) \
 		-X main.date=$(shell date +%Y-%m-%d)" \
 		-o sower ./cmd/sower
-server:
+sowerd:
 	${GO} build -ldflags "\
 		-X main.version=$(shell git describe --tags --always) \
 		-X main.date=$(shell date +%Y-%m-%d)" \

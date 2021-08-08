@@ -1,7 +1,6 @@
 # sower
 [![GitHub release](http://img.shields.io/github/release/wweir/sower.svg?style=popout)](https://github.com/wweir/sower/releases)
 [![Actions Status](https://github.com/wweir/sower/workflows/Go/badge.svg)](https://github.com/wweir/sower/actions)
-[![Docker Cloud Build Status](https://img.shields.io/docker/cloud/build/wweir/sower.svg?style=popout)](https://hub.docker.com/r/wweir/sower)
 [![GitHub issue](https://img.shields.io/github/issues/wweir/sower.svg?style=popout)](https://github.com/wweir/sower/issues)
 [![GitHub star](https://img.shields.io/github/stars/wweir/sower.svg?style=popout)](https://github.com/wweir/sower/stargazers)
 [![GitHub license](https://img.shields.io/github/license/wweir/sower.svg?style=popout)](LICENSE)
@@ -9,82 +8,55 @@
 
 中文介绍见 [Wiki](https://github.com/wweir/sower/wiki)
 
-The sower is a cross-platform intelligent transparent proxy tool.
-
-The first time you visit a new website, the sower will detect if the domain is accessible and add it in the dynamic detect list. So, you do not need to care about the rules, sower will handle it intelligently.
-
-Sower provider both http_proxy/https_proxy and DNS-based proxy. All these kinds of proxy support intelligent router. You can also port-forward any TCP request to remote, such as SSH / SMTP / POP3.
-
-You can enjoy it by setting http_proxy or your DNS without any other settings.
+The sower is a cross-platform intelligent transparent proxy tool. It provide both socks5 proxy and DNS-based proxy. All these kinds of proxy support intelligent router.
 
 If you already have another proxy solution, you can use it's socks5(h) service as a parent proxy to enjoy the sower's intelligent router.
 
 
 ## Installation
-To enjoy the sower, you need to deploy sower on both server-side and client-side.
+To enjoy the sower, you need to deploy sower on both server-side(sowerd) and client-side(sower).
 
-The installation script has been integrated into the sower. You can install sower as system service by running `./sower -install 'xxx'` in terminal on the three most popular operating system platforms: Linux / Windows and masOS.
+## Sowerd
+*If you wanna use sower as secondary proxy to provide intelligent router, you can skip sowerd.*
 
-## Server
-*If you already have another proxy solution with socks5h support, you can skip server-side.*
+At the server-side, the sowerd runs just like a web server proxy. It will occupy two ports `80` / `443`.
 
-At the server-side, the sower runs just like a web server proxy.
-It redirects HTTP requests to HTTPS and proxy https requests to the upstream HTTP service.
-You can use your certificate or use the auto-generated certificate by the sower.
+You can use your own certificate or the certificate automatically applied for by the sowerd from [`Let's Encrypt`](https://letsencrypt.org/).
 
-What you must set is the upstream HTTP service. You can set it by parameter `-s`, eg:
-``` shell
-# sower -s 127.0.0.1:8080
-```
+There are two ways to run the sowerd service:
+1. run the shell command with root permission
+    ``` shell
+    # sowerd -password XXX -fake_site 127.0.0.1:8080
+    ```
+2. install as a systemd service
+    ```service
+    [Unit]
+    Description=sower server service
+    After=network.target
 
-## Client
-The easiest way to run it is:
-``` shell
-# sower -c aa.bb.cc # the `aa.bb.cc` can also be `socks5h://127.0.0.1:1080`
-```
-But a configuration file is recommended to persist dynamic rules in client side.
+    [Service]
+    Type=simple
+    ExecStart=/usr/local/bin/sowerd
+    Environment="FAKE_SITE=127.0.0.1:8080"
+    Environment="PASSWORD=XXX"
 
-There are 3 kinds of proxy solutions, they are HTTP(S)_PROXY / DNS-based proxy / port-forward.
+    [Install]
+    WantedBy=multi-user.target
+    ```
 
-### HTTP(S)_PROXY
-An HTTP(S)_PROXY listening on `:8080` is set by default if you run sower as client mode.
+## Sower
 
-### DNS-based proxy
-**DNS-based** solution is not recommanded now, for incompatible with TLS 1.3 esni extention. DNS flush logic has been dropped, you should flush your dns cache manually
-in Windows and macOS.
+A config file is required in sower client side. [Here](https://github.com/wweir/sower/wiki/sower.hcl) is an usable example in China.
 
-You can set the `dns_serve_ip` field in the configuration file to start the DNS-based proxy. You should also set the value of `dns_upstream` as your default DNS in OS.
+`Sower` will take 4 port by default with root permission. They are: `udp(53)` / `tcp(80)` / `tcp(443)` / `tcp(1080)`.
 
-If you want to enjoy the full experience provided by the sower, you can take sower as your private DNS on a long-running server and set it as your default DNS in your router.
-
-### port-forward
-The port-forward can be only setted in configuration file, you can set it in section `client.port_mapping`, eg:
-``` toml
-[client.port_mapping]
-":2222"="aa.bb.cc:22"
-```
-
+After do the next three step, you can enjoy the intelligent transparent proxy solution:
+1. run the command line with root permission:
+    ```shell
+    # sower -f sower.hcl
+    ```
+2. changing your DNS server to `127.0.0.1` and
+3. setting your proxy to `socks5h://127.0.0.1:1080`.
 
 ## Architecture
-```
-  relay   <--+       +-> target
-http service |       |   service
-     +-------+-------+----+
-     |    sower server    |
-     +----^-------^-------+
-          80     443
-301 http -+       +----- https
-to https          |     service
-               protected
-                by tls
-          socks5  |
- dns <---+   ^    |  +--> direct
-relay    |   |    |  |   request
-     +---+---+----+--+----+
-     |    sower client    |
-     +----^--^----^---^---+
-          |  |    |   |
-    dns --+  +    +   +-- port
-            80  http(s)  forward
-           443  proxy
-```
+![Architecture diagram](./sower.drawio.svg)
