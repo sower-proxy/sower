@@ -14,5 +14,6 @@ require (
 	github.com/pkg/errors v0.9.1
 	github.com/rs/zerolog v1.23.0
 	github.com/ulule/deepcopier v0.0.0-20200430083143-45decc6639b6
+	github.com/wweir/deferlog v0.0.1
 	golang.org/x/crypto v0.0.0-20210711020723-a769d52b0f97
 )

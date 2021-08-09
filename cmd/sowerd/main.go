@@ -10,7 +10,7 @@ import (
 
 	"github.com/cristalhq/aconfig"
 	"github.com/rs/zerolog/log"
-	"github.com/wweir/sower/pkg/deferlog"
+	"github.com/wweir/deferlog"
 	"github.com/wweir/sower/pkg/teeconn"
 	"github.com/wweir/sower/transport/sower"
 	"github.com/wweir/sower/transport/trojan"

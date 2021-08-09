@@ -9,7 +9,7 @@ import (
 	geoip2 "github.com/oschwald/geoip2-golang"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
-	"github.com/wweir/sower/pkg/deferlog"
+	"github.com/wweir/deferlog"
 	"github.com/wweir/sower/pkg/dhcp"
 	"github.com/wweir/sower/pkg/mem"
 	"github.com/wweir/sower/util"

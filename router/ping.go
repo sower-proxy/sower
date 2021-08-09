@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/wweir/sower/pkg/deferlog"
+	"github.com/wweir/deferlog"
 )
 
 var pingClient = http.Client{
