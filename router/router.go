@@ -107,6 +107,9 @@ func (r *Router) RouteHandle(conn net.Conn, domain string, port uint16) (err err
 
 	addr := net.JoinHostPort(domain, strconv.FormatUint(uint64(port), 10))
 
+	// 1. rule_based( block > direct > proxy )
+	// 2. detect_based( CN IP || access site )
+	// 3. fallback( proxy )
 	switch {
 	case r.blockRule.Match(domain):
 		return nil
@@ -117,9 +120,7 @@ func (r *Router) RouteHandle(conn net.Conn, domain string, port uint16) (err err
 	case r.proxyRule.Match(domain):
 		return r.ProxyHandle(conn, domain, port)
 
-	case r.localSite(domain):
-		return r.DirectHandle(conn, addr)
-	case r.isAccess(domain, port):
+	case r.localSite(domain), r.isAccess(domain, port):
 		return r.DirectHandle(conn, addr)
 	default:
 		return r.ProxyHandle(conn, domain, port)

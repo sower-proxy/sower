@@ -30,6 +30,7 @@ type ping struct {
 }
 
 func (p *ping) Fulfill(key string) error {
+	// just like `curl -I http://domain.com:80`
 	_, err := pingClient.Head(net.JoinHostPort(key, "80"))
 	deferlog.Std.DebugWarn(err).
 		Str("domain", key).

@@ -119,6 +119,7 @@ func serve443(ln net.Listener, fakeSite string, sower *sower.Sower, trojan *troj
 			Msgf("relay conn to %s", addr)
 	}()
 
+	// 1. detect if it's a sower underlaying connection
 	teeconn.Reread()
 	if addr, err = sower.Unwrap(teeconn); err == nil {
 		teeconn.Stop()
@@ -127,6 +128,7 @@ func serve443(ln net.Listener, fakeSite string, sower *sower.Sower, trojan *troj
 		return
 	}
 
+	// 2. detect if it's a trojan underlaying connection
 	teeconn.Reread()
 	if addr, err = trojan.Unwrap(teeconn); err == nil {
 		teeconn.Stop()
@@ -135,6 +137,7 @@ func serve443(ln net.Listener, fakeSite string, sower *sower.Sower, trojan *troj
 		return
 	}
 
+	// 3. fallback to fake site
 	teeconn.Stop().Reread()
 	dur, err = util.RelayTo(teeconn, fakeSite)
 }

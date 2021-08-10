@@ -26,7 +26,7 @@ var (
 
 	conf = struct {
 		Remote struct {
-			Type     string `default:"sower" required:"true" usage:"optional: sower/trojan/socks5"`
+			Type     string `default:"sower" required:"true" usage:"option: sower/trojan/socks5"`
 			Addr     string `required:"true" usage:"proxy address, eg: proxy.com/127.0.0.1:7890"`
 			Password string `usage:"remote proxy password"`
 		}
@@ -44,24 +44,24 @@ var (
 		Router struct {
 			Block struct {
 				File       string   `usage:"block list file, local file or remote"`
-				FilePrefix string   `default:"**." usage:"parsed as 'prefix.line_text'"`
+				FilePrefix string   `default:"**." usage:"parsed as '<prefix>line_text'"`
 				Rules      []string `usage:"block list rules"`
 			}
 			Direct struct {
 				File       string   `usage:"direct list file, local file or remote"`
-				FilePrefix string   `default:"**." usage:"parsed as 'prefix.line_text'"`
+				FilePrefix string   `default:"**." usage:"parsed as '<prefix>line_text'"`
 				Rules      []string `usage:"direct list rules"`
 			}
 			Proxy struct {
 				File       string   `usage:"proxy list file, local file or remote"`
-				FilePrefix string   `default:"**." usage:"parsed as 'prefix.line_text'"`
+				FilePrefix string   `default:"**." usage:"parsed as '<prefix>line_text'"`
 				Rules      []string `usage:"proxy list rules"`
 			}
 
 			Country struct {
 				MMDB       string   `usage:"mmdb file"`
 				File       string   `usage:"CIDR block list file, local file or remote"`
-				FilePrefix string   `default:"" usage:"parsed as 'prefix.line_text'"`
+				FilePrefix string   `default:"" usage:"parsed as '<prefix>line_text'"`
 				Rules      []string `usage:"CIDR list rules"`
 			}
 		}
@@ -117,11 +117,10 @@ func main() {
 		}
 		go ServeHTTPS(lnHTTPS, r)
 
-		addr := net.JoinHostPort(conf.DNS.Serve, "53")
 		log.Info().
-			Str("listen_on", addr).
+			Str("listen_on", conf.DNS.Serve).
 			Msg("DNS proxy started")
-		if err := dns.ListenAndServe(addr, "udp", r); err != nil {
+		if err := dns.ListenAndServe(net.JoinHostPort(conf.DNS.Serve, "53"), "udp", r); err != nil {
 			log.Fatal().Err(err).Msg("serve dns")
 		}
 	}()
