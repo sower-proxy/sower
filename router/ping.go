@@ -1,11 +1,11 @@
 package router
 
 import (
-	"net"
 	"net/http"
+	"sync"
 	"time"
 
-	"github.com/wweir/deferlog"
+	"github.com/rs/zerolog/log"
 )
 
 var pingClient = http.Client{
@@ -30,11 +30,25 @@ type ping struct {
 }
 
 func (p *ping) Fulfill(key string) error {
-	// just like `curl -I http://domain.com:80`
-	_, err := pingClient.Head(net.JoinHostPort(key, "80"))
-	deferlog.Std.DebugWarn(err).
-		Str("domain", key).
-		Msg("detect if site is accessible")
-	p.isAccess = (err == nil)
+	wg := sync.WaitGroup{}
+	wg.Add(2)
+	var err80, err443 error
+	go func() {
+		_, err80 = pingClient.Head("http://" + key)
+		wg.Done()
+	}()
+	go func() {
+		_, err443 = pingClient.Head("https://" + key)
+		wg.Done()
+	}()
+	wg.Wait()
+
+	if err80 != nil && err443 != nil {
+		log.Warn().
+			Errs("errs", []error{err80, err443}).
+			Msg("Failed to ping")
+	}
+
+	p.isAccess = (err80 == nil && err443 == nil)
 	return nil
 }
