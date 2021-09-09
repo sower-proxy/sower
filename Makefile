@@ -20,3 +20,6 @@ sowerd:
 		-X main.version=$(shell git describe --tags --always) \
 		-X main.date=$(shell date +%Y-%m-%d)" \
 		-o sowerd ./cmd/sowerd
+
+clean:
+	rm -f sower sowerd sower.exe sowerd.exe
