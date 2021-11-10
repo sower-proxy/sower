@@ -39,6 +39,8 @@ jobs:
           make clean
 
           make build GO='GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go'
+          mv sower sower.exe
+          mv sowerd sowerd.exe
           tar czvf sower-windows-amd64.tar.gz sower.exe sowerd.exe
           make clean
 
