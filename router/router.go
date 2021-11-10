@@ -8,8 +8,8 @@ import (
 	"github.com/miekg/dns"
 	geoip2 "github.com/oschwald/geoip2-golang"
 	"github.com/pkg/errors"
-	"github.com/rs/zerolog/log"
 	"github.com/wweir/deferlog"
+	"github.com/wweir/deferlog/log"
 	"github.com/wweir/sower/pkg/dhcp"
 	"github.com/wweir/sower/pkg/mem"
 	"github.com/wweir/sower/util"
@@ -51,7 +51,7 @@ func NewRouter(serveIP, fallbackDNS, mmdbFile string, proxyDial ProxyDialFn) *Ro
 
 	var err error
 	r.country.Reader, err = geoip2.Open(mmdbFile)
-	log.Err(err).Str("file", mmdbFile).Msg("open geoip2 db")
+	log.InfoWarn(err).Str("file", mmdbFile).Msg("open geoip2 db")
 
 	return &r
 }

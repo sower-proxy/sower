@@ -5,7 +5,7 @@ import (
 	"net"
 	"time"
 
-	"github.com/rs/zerolog/log"
+	"github.com/wweir/deferlog/log"
 )
 
 func (r *Router) localSite(domain string) bool {

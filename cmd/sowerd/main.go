@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/cristalhq/aconfig"
-	"github.com/rs/zerolog/log"
 	"github.com/wweir/deferlog"
+	"github.com/wweir/deferlog/log"
 	"github.com/wweir/sower/pkg/teeconn"
 	"github.com/wweir/sower/transport/sower"
 	"github.com/wweir/sower/transport/trojan"
@@ -36,7 +36,7 @@ var (
 
 func init() {
 	err := aconfig.LoaderFor(&conf, aconfig.Config{}).Load()
-	deferlog.Std.InfoFatal(err).
+	log.InfoFatal(err).
 		Str("version", version).
 		Str("date", date).
 		Interface("config", conf).
@@ -83,7 +83,7 @@ func main() {
 	}()
 
 	ln, err := tls.Listen("tcp", net.JoinHostPort(conf.ServeIP, "443"), tlsConf)
-	deferlog.Std.InfoFatal(err).
+	log.InfoFatal(err).
 		Str("IP", conf.ServeIP).
 		Msg("Start listen HTTPS service")
 

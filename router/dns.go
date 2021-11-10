@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/miekg/dns"
-	"github.com/wweir/deferlog"
+	"github.com/wweir/deferlog/log"
 )
 
 func (r *Router) ServeDNS(w dns.ResponseWriter, req *dns.Msg) {
@@ -79,7 +79,7 @@ func (r *dnsCache) Fulfill(question string) (err error) {
 	if err != nil {
 		r.Resp, rtt, err = r.dns.ExchangeWithConn(r.Req, conn)
 	}
-	deferlog.Std.DebugWarn(err).
+	log.DebugWarn(err).
 		Dur("rtt", rtt).
 		Str("question", question).
 		Msg("exchange dns record")

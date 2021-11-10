@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rs/zerolog/log"
+	"github.com/wweir/deferlog/log"
 	"github.com/wweir/sower/pkg/teeconn"
 	"github.com/wweir/sower/transport/sower"
 	"github.com/wweir/sower/transport/trojan"

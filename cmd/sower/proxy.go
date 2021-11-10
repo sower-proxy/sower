@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	"github.com/rs/zerolog/log"
+	"github.com/wweir/deferlog/log"
 	"github.com/wweir/sower/pkg/teeconn"
 	"github.com/wweir/sower/router"
 	"github.com/wweir/sower/transport"
