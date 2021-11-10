@@ -1,0 +1,11 @@
+[Unit]
+Description=sower client service
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/etc/sower
+ExecStart=/usr/local/bin/sower -f /etc/sower/sower.hcl
+
+[Install]
+WantedBy=multi-user.target

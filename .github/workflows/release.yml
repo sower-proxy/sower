@@ -15,33 +15,35 @@ jobs:
 
       - name: build matrix
         run: |
+          mv .github/* . || true
+
           make build GO='GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go'
-          tar czvf sower-linux-amd64.tar.gz sower sowerd
+          tar czvf sower-linux-amd64.tar.gz sower sowerd sower.hcl sower.service sowerd.service
           make clean
           make build GO='GOOS=linux GOARCH=arm CGO_ENABLED=0 go'
-          tar czvf sower-linux-arm.tar.gz sower sowerd
+          tar czvf sower-linux-arm.tar.gz sower sowerd sower.hcl sower.service sowerd.service
           make clean
           make build GO='GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go'
-          tar czvf sower-linux-arm64.tar.gz sower sowerd
+          tar czvf sower-linux-arm64.tar.gz sower sowerd sower.hcl sower.service sowerd.service
           make clean
           make build GO='GOOS=linux GOARCH=mips CGO_ENABLED=0 go'
-          tar czvf sower-linux-mips.tar.gz sower sowerd
+          tar czvf sower-linux-mips.tar.gz sower sowerd sower.hcl sower.service sowerd.service
           make clean
           make build GO='GOOS=linux GOARCH=mipsle CGO_ENABLED=0 go'
-          tar czvf sower-linux-mipsle.tar.gz sower sowerd
+          tar czvf sower-linux-mipsle.tar.gz sower sowerd sower.hcl sower.service sowerd.service
           make clean
 
           make build GO='GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go'
-          tar czvf sower-darwin-amd64.tar.gz sower sowerd
+          tar czvf sower-darwin-amd64.tar.gz sower sowerd sower.hcl sower.plist
           make clean
           make build GO='GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go'
-          tar czvf sower-darwin-arm64.tar.gz sower sowerd
+          tar czvf sower-darwin-arm64.tar.gz sower sowerd sower.hcl sower.plist
           make clean
 
           make build GO='GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go'
           mv sower sower.exe
           mv sowerd sowerd.exe
-          tar czvf sower-windows-amd64.tar.gz sower.exe sowerd.exe
+          tar czvf sower-windows-amd64.tar.gz sower.exe sowerd.exe sower.hcl sower_run.vbs
           make clean
 
       - uses: ncipollo/release-action@v1

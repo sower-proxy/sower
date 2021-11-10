@@ -1,0 +1,1 @@
+CreateObject("WScript.Shell").Run "C:\Software\Sower\sower.exe -f sower.hcl",0
