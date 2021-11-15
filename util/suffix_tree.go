@@ -26,6 +26,10 @@ func NewNodeFromRules(rules ...string) *Node {
 }
 
 func (n *node) lite() *node {
+	if n == nil {
+		return nil
+	}
+
 	lite := &node{
 		secs:     make([]string, 0, len(n.secs)),
 		subNodes: make([]*node, 0, len(n.subNodes)),
@@ -41,6 +45,9 @@ func (n *Node) String() string {
 	return n.string("", "     ")
 }
 func (n *node) string(prefix, indent string) (out string) {
+	if n == nil {
+		return
+	}
 	for key, val := range n.subNodes {
 		out += prefix + n.secs[key] + "\n" + val.string(prefix+indent, indent)
 	}
@@ -60,34 +67,39 @@ func (n *node) add(secs []string) {
 	case 0:
 	case 1:
 		sec := secs[length-1]
-		subNode := &node{secs: []string{""}, subNodes: []*node{{}}}
 		switch sec {
 		case "", "*", "**":
 			n.secs = append([]string{sec}, n.secs...)
-			n.subNodes = append([]*node{subNode}, n.subNodes...)
+			n.subNodes = append([]*node{nil}, n.subNodes...)
 		default:
 			n.secs = append(n.secs, sec)
-			n.subNodes = append(n.subNodes, subNode)
+			n.subNodes = append(n.subNodes, nil)
 		}
 	default:
 		sec := secs[length-1]
-		if sec == "**" {
+		if sec == "**" { // ** is only allowed in the last sec
 			sec = "*"
 		}
 
-		subNode, ok := n.find(sec)
-		if !ok {
-			subNode = &node{}
+		idx := n.index(sec)
+		if idx == -1 {
 			switch sec {
 			case "", "*", "**":
+				idx = 0
 				n.secs = append([]string{sec}, n.secs...)
-				n.subNodes = append([]*node{subNode}, n.subNodes...)
+				n.subNodes = append([]*node{{}}, n.subNodes...)
 			default:
+				idx = len(n.secs)
 				n.secs = append(n.secs, sec)
-				n.subNodes = append(n.subNodes, subNode)
+				n.subNodes = append(n.subNodes, &node{})
 			}
+
+		} else if n.subNodes[idx] == nil {
+			n.subNodes[idx] = &node{}
+			n.subNodes[idx].add([]string{""})
 		}
-		subNode.add(secs[:length-1])
+
+		n.subNodes[idx].add(secs[:length-1])
 	}
 }
 
@@ -102,45 +114,34 @@ func (n *Node) Match(item string) bool {
 func (n *node) matchSecs(secs []string, fuzzNode bool) bool {
 	length := len(secs)
 	if length == 0 {
-		if len(n.secs) == 0 {
+		if n == nil {
 			return true
 		}
-		if _, ok := n.find(""); ok {
-			return true
-		}
-		if _, ok := n.find("**"); ok {
-			return true
-		}
-		if _, ok := n.find("*"); ok {
-			return !fuzzNode
-		}
-		return false
+		return n.index("") != -1
 	}
 
-	if n, ok := n.find(secs[length-1]); ok {
-		if n.matchSecs(secs[:length-1], false) {
+	if idx := n.index(secs[length-1]); idx >= 0 {
+		if n.subNodes[idx].matchSecs(secs[:length-1], false) {
 			return true
 		}
 	}
-	if n, ok := n.find("*"); ok {
-		if n.matchSecs(secs[:length-1], true) {
+	if idx := n.index("*"); idx >= 0 {
+		if n.subNodes[idx].matchSecs(secs[:length-1], true) {
 			return true
 		}
 	}
-	if _, ok := n.find("**"); ok {
-		return true
-	}
-
-	return false
+	return n.index("**") >= 0
 }
-func (n *node) find(sec string) (*node, bool) {
+
+// index return the sec index in node, or -1 if not found
+func (n *node) index(sec string) int {
 	if n == nil {
-		return nil, false
+		return -1
 	}
 	for s := range n.secs {
 		if n.secs[s] == sec {
-			return n.subNodes[s], true
+			return s
 		}
 	}
-	return nil, false
+	return -1
 }

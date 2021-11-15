@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -96,8 +97,10 @@ func init() {
 func main() {
 	proxtDial := GenProxyDial(conf.Remote.Type, conf.Remote.Addr, conf.Remote.Password)
 	r := router.NewRouter(conf.DNS.Serve, conf.DNS.Fallback, conf.Router.Country.MMDB, proxtDial)
-	r.SetRules(conf.Router.Block.Rules, conf.Router.Direct.Rules, conf.Router.Proxy.Rules,
-		conf.Router.Country.Rules)
+	r.SetBlockRules(conf.Router.Block.Rules)
+	r.SetDirectRules(conf.Router.Direct.Rules)
+	r.SetProxyRules(conf.Router.Proxy.Rules)
+	r.SetCountryCIDRs(conf.Router.Country.Rules)
 
 	go func() {
 		if conf.DNS.Disable {
@@ -140,16 +143,14 @@ func main() {
 	}()
 
 	start := time.Now()
-	conf.Router.Block.Rules = append(conf.Router.Block.Rules,
-		loadRules(proxtDial, conf.Router.Block.File, conf.Router.Block.FilePrefix)...)
-	conf.Router.Direct.Rules = append(conf.Router.Direct.Rules,
-		loadRules(proxtDial, conf.Router.Direct.File, conf.Router.Direct.FilePrefix)...)
-	conf.Router.Proxy.Rules = append(conf.Router.Proxy.Rules,
-		loadRules(proxtDial, conf.Router.Proxy.File, conf.Router.Proxy.FilePrefix)...)
-	conf.Router.Country.Rules = append(conf.Router.Country.Rules,
-		loadRules(proxtDial, conf.Router.Country.File, conf.Router.Country.FilePrefix)...)
-	r.SetRules(conf.Router.Block.Rules, conf.Router.Direct.Rules, conf.Router.Proxy.Rules,
-		conf.Router.Country.Rules)
+	r.SetBlockRules(append(conf.Router.Block.Rules,
+		loadRules(proxtDial, conf.Router.Block.File, conf.Router.Block.FilePrefix)...))
+	r.SetDirectRules(append(conf.Router.Direct.Rules,
+		loadRules(proxtDial, conf.Router.Direct.File, conf.Router.Direct.FilePrefix)...))
+	r.SetProxyRules(append(conf.Router.Proxy.Rules,
+		loadRules(proxtDial, conf.Router.Proxy.File, conf.Router.Proxy.FilePrefix)...))
+	r.SetCountryCIDRs(append(conf.Router.Country.Rules,
+		loadRules(proxtDial, conf.Router.Country.File, conf.Router.Country.FilePrefix)...))
 
 	log.Info().
 		Dur("spend", time.Since(start)).
@@ -158,6 +159,7 @@ func main() {
 		Int("proxyRule", len(conf.Router.Proxy.Rules)).
 		Int("countryRule", len(conf.Router.Country.Rules)).
 		Msg("Loaded rules, proxy started")
+	runtime.GC()
 	select {}
 }
 

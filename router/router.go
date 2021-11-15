@@ -56,12 +56,16 @@ func NewRouter(serveIP, fallbackDNS, mmdbFile string, proxyDial ProxyDialFn) *Ro
 	return &r
 }
 
-func (r *Router) SetRules(blockList, directList, proxyList, directCIDRs []string) {
-
+func (r *Router) SetBlockRules(blockList []string) {
 	r.blockRule = util.NewNodeFromRules(blockList...)
+}
+func (r *Router) SetDirectRules(directList []string) {
 	r.directRule = util.NewNodeFromRules(directList...)
+}
+func (r *Router) SetProxyRules(proxyList []string) {
 	r.proxyRule = util.NewNodeFromRules(proxyList...)
-
+}
+func (r *Router) SetCountryCIDRs(directCIDRs []string) {
 	r.country.cidrs = make([]*net.IPNet, 0, len(directCIDRs))
 	for _, cidr := range directCIDRs {
 		_, ipnet, err := net.ParseCIDR(cidr)
