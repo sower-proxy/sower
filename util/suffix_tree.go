@@ -1,6 +1,7 @@
 package util
 
 import (
+	"runtime"
 	"strings"
 )
 
@@ -18,7 +19,22 @@ func NewNodeFromRules(rules ...string) *Node {
 	for i := range rules {
 		n.Add(rules[i])
 	}
+
+	n.node = n.node.lite()
+	runtime.GC()
 	return n
+}
+
+func (n *node) lite() *node {
+	lite := &node{
+		secs:     make([]string, 0, len(n.secs)),
+		subNodes: make([]*node, 0, len(n.subNodes)),
+	}
+	lite.secs = append(lite.secs, n.secs...)
+	for i := range n.subNodes {
+		lite.subNodes = append(lite.subNodes, n.subNodes[i].lite())
+	}
+	return lite
 }
 
 func (n *Node) String() string {
