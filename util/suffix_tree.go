@@ -2,20 +2,19 @@ package util
 
 import (
 	"strings"
-	"sync"
 )
 
 type Node struct {
-	node
+	*node
 	sep string
-	*sync.RWMutex
 }
 type node struct {
-	node map[string]*node
+	secs     []string
+	subNodes []*node
 }
 
 func NewNodeFromRules(rules ...string) *Node {
-	n := &Node{node{node: map[string]*node{}}, ".", &sync.RWMutex{}}
+	n := &Node{&node{}, "."}
 	for i := range rules {
 		n.Add(rules[i])
 	}
@@ -23,13 +22,11 @@ func NewNodeFromRules(rules ...string) *Node {
 }
 
 func (n *Node) String() string {
-	n.RLock()
-	defer n.RUnlock()
 	return n.string("", "     ")
 }
 func (n *node) string(prefix, indent string) (out string) {
-	for key, val := range n.node {
-		out += prefix + key + "\n" + val.string(prefix+indent, indent)
+	for key, val := range n.subNodes {
+		out += prefix + n.secs[key] + "\n" + val.string(prefix+indent, indent)
 	}
 	return
 }
@@ -39,27 +36,40 @@ func (n *Node) trim(item string) string {
 }
 
 func (n *Node) Add(item string) {
-	n.Lock()
-	defer n.Unlock()
 	n.add(strings.Split(n.trim(item), n.sep))
 }
 func (n *node) add(secs []string) {
 	length := len(secs)
 	switch length {
 	case 0:
-		return
 	case 1:
-		n.node[secs[length-1]] = &node{node: map[string]*node{"": {}}}
+		sec := secs[length-1]
+		subNode := &node{secs: []string{""}, subNodes: []*node{{}}}
+		switch sec {
+		case "", "*", "**":
+			n.secs = append([]string{sec}, n.secs...)
+			n.subNodes = append([]*node{subNode}, n.subNodes...)
+		default:
+			n.secs = append(n.secs, sec)
+			n.subNodes = append(n.subNodes, subNode)
+		}
 	default:
 		sec := secs[length-1]
 		if sec == "**" {
 			sec = "*"
 		}
 
-		subNode, ok := n.node[sec]
+		subNode, ok := n.find(sec)
 		if !ok {
-			subNode = &node{node: map[string]*node{}}
-			n.node[sec] = subNode
+			subNode = &node{}
+			switch sec {
+			case "", "*", "**":
+				n.secs = append([]string{sec}, n.secs...)
+				n.subNodes = append([]*node{subNode}, n.subNodes...)
+			default:
+				n.secs = append(n.secs, sec)
+				n.subNodes = append(n.subNodes, subNode)
+			}
 		}
 		subNode.add(secs[:length-1])
 	}
@@ -70,39 +80,51 @@ func (n *Node) Match(item string) bool {
 		return false
 	}
 
-	n.RLock()
-	defer n.RUnlock()
 	return n.matchSecs(strings.Split(n.trim(item), n.sep), false)
 }
 
 func (n *node) matchSecs(secs []string, fuzzNode bool) bool {
 	length := len(secs)
 	if length == 0 {
-		if _, ok := n.node[""]; ok {
+		if len(n.secs) == 0 {
 			return true
 		}
-		if _, ok := n.node["**"]; ok {
+		if _, ok := n.find(""); ok {
 			return true
 		}
-		if _, ok := n.node["*"]; ok {
+		if _, ok := n.find("**"); ok {
+			return true
+		}
+		if _, ok := n.find("*"); ok {
 			return !fuzzNode
 		}
 		return false
 	}
 
-	if n, ok := n.node[secs[length-1]]; ok {
+	if n, ok := n.find(secs[length-1]); ok {
 		if n.matchSecs(secs[:length-1], false) {
 			return true
 		}
 	}
-	if n, ok := n.node["*"]; ok {
+	if n, ok := n.find("*"); ok {
 		if n.matchSecs(secs[:length-1], true) {
 			return true
 		}
 	}
-	if _, ok := n.node["**"]; ok {
+	if _, ok := n.find("**"); ok {
 		return true
 	}
 
 	return false
+}
+func (n *node) find(sec string) (*node, bool) {
+	if n == nil {
+		return nil, false
+	}
+	for s := range n.secs {
+		if n.secs[s] == sec {
+			return n.subNodes[s], true
+		}
+	}
+	return nil, false
 }
