@@ -13,17 +13,17 @@ require (
 	github.com/oschwald/geoip2-golang v1.5.0
 	github.com/pkg/errors v0.9.1
 	github.com/ulule/deepcopier v0.0.0-20200430083143-45decc6639b6
-	github.com/wweir/deferlog v0.1.0
-	golang.org/x/crypto v0.0.0-20211108221036-ceb1ce70b4fa
+	github.com/wweir/deferlog v1.0.0
+	golang.org/x/crypto v0.0.0-20211202192323-5770296d904e
 )
 
 require (
-	github.com/BurntSushi/toml v0.4.1 // indirect
+	github.com/BurntSushi/toml v0.3.1 // indirect
 	github.com/hashicorp/hcl v1.0.0 // indirect
 	github.com/oschwald/maxminddb-golang v1.8.0 // indirect
-	github.com/rs/zerolog v1.23.0 // indirect
-	golang.org/x/net v0.0.0-20211109214657-ef0fda0de508 // indirect
-	golang.org/x/sys v0.0.0-20211109184856-51b60fd695b3 // indirect
-	golang.org/x/text v0.3.7 // indirect
-	gopkg.in/yaml.v2 v2.4.0 // indirect
+	github.com/rs/zerolog v1.26.0 // indirect
+	golang.org/x/net v0.0.0-20211112202133-69e39bad7dc2 // indirect
+	golang.org/x/sys v0.0.0-20210809222454-d867a43fc93e // indirect
+	golang.org/x/text v0.3.6 // indirect
+	gopkg.in/yaml.v2 v2.3.0 // indirect
 )
