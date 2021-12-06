@@ -18,7 +18,7 @@ import (
 	"github.com/cristalhq/aconfig/aconfigyaml"
 	"github.com/miekg/dns"
 	"github.com/pkg/errors"
-	"github.com/wweir/deferlog/log"
+	"github.com/sower-proxy/deferlog/log"
 	"github.com/wweir/sower/router"
 )
 

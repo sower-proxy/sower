@@ -8,18 +8,19 @@ import (
 	"github.com/miekg/dns"
 	geoip2 "github.com/oschwald/geoip2-golang"
 	"github.com/pkg/errors"
-	"github.com/wweir/deferlog"
-	"github.com/wweir/deferlog/log"
+	"github.com/sower-proxy/conns/relay"
+	"github.com/sower-proxy/deferlog"
+	"github.com/sower-proxy/deferlog/log"
+	"github.com/sower-proxy/mem"
 	"github.com/wweir/sower/pkg/dhcp"
-	"github.com/wweir/sower/pkg/mem"
-	"github.com/wweir/sower/util"
+	"github.com/wweir/sower/pkg/suffixtree"
 )
 
 type ProxyDialFn func(network, host string, port uint16) (net.Conn, error)
 type Router struct {
-	blockRule   *util.Node
-	directRule  *util.Node
-	proxyRule   *util.Node
+	blockRule   *suffixtree.Node
+	directRule  *suffixtree.Node
+	proxyRule   *suffixtree.Node
 	ProxyDial   ProxyDialFn
 	accessCache *mem.Cache
 
@@ -57,13 +58,13 @@ func NewRouter(serveIP, fallbackDNS, mmdbFile string, proxyDial ProxyDialFn) *Ro
 }
 
 func (r *Router) SetBlockRules(blockList []string) {
-	r.blockRule = util.NewNodeFromRules(blockList...)
+	r.blockRule = suffixtree.NewNodeFromRules(blockList...)
 }
 func (r *Router) SetDirectRules(directList []string) {
-	r.directRule = util.NewNodeFromRules(directList...)
+	r.directRule = suffixtree.NewNodeFromRules(directList...)
 }
 func (r *Router) SetProxyRules(proxyList []string) {
-	r.proxyRule = util.NewNodeFromRules(proxyList...)
+	r.proxyRule = suffixtree.NewNodeFromRules(proxyList...)
 }
 func (r *Router) SetCountryCIDRs(directCIDRs []string) {
 	r.country.cidrs = make([]*net.IPNet, 0, len(directCIDRs))
@@ -139,11 +140,11 @@ func (r *Router) ProxyHandle(conn net.Conn, domain string, port uint16) error {
 	}
 	defer rc.Close()
 
-	util.Relay(conn, rc)
+	relay.Relay(conn, rc)
 	return nil
 }
 
 func (r *Router) DirectHandle(conn net.Conn, addr string) error {
-	dur, err := util.RelayTo(conn, addr)
+	dur, err := relay.RelayTo(conn, addr)
 	return errors.Wrapf(err, "spend (%s)", dur)
 }

@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/wweir/deferlog/log"
-	"github.com/wweir/sower/pkg/teeconn"
+	"github.com/sower-proxy/conns/teeconn"
+	"github.com/sower-proxy/deferlog/log"
 	"github.com/wweir/sower/transport/sower"
 	"github.com/wweir/sower/transport/trojan"
 )

@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/miekg/dns"
-	"github.com/wweir/deferlog/log"
+	"github.com/sower-proxy/deferlog/log"
 )
 
 func (r *Router) ServeDNS(w dns.ResponseWriter, req *dns.Msg) {

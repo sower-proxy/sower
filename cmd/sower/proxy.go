@@ -8,14 +8,14 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	"github.com/wweir/deferlog/log"
-	"github.com/wweir/sower/pkg/teeconn"
+	"github.com/sower-proxy/conns/relay"
+	"github.com/sower-proxy/conns/teeconn"
+	"github.com/sower-proxy/deferlog/log"
 	"github.com/wweir/sower/router"
 	"github.com/wweir/sower/transport"
 	"github.com/wweir/sower/transport/socks5"
 	"github.com/wweir/sower/transport/sower"
 	"github.com/wweir/sower/transport/trojan"
-	"github.com/wweir/sower/util"
 )
 
 func GenProxyDial(proxyType, proxyHost, proxyPassword string) router.ProxyDialFn {
@@ -97,7 +97,7 @@ func ServeHTTP(ln net.Listener, r *router.Router) {
 	defer rc.Close()
 
 	teeconn.Stop().Reread()
-	util.Relay(teeconn, rc)
+	relay.Relay(teeconn, rc)
 	log.Debug().
 		Str("host", req.Host).
 		Dur("spend", time.Since(start)).
@@ -134,7 +134,7 @@ func ServeHTTPS(ln net.Listener, r *router.Router) {
 	defer rc.Close()
 
 	teeconn.Stop().Reread()
-	util.Relay(teeconn, rc)
+	relay.Relay(teeconn, rc)
 	log.Debug().
 		Str("host", domain).
 		Dur("spend", time.Since(start)).

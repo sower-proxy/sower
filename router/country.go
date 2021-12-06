@@ -5,7 +5,7 @@ import (
 	"net"
 	"time"
 
-	"github.com/wweir/deferlog/log"
+	"github.com/sower-proxy/deferlog/log"
 )
 
 func (r *Router) localSite(domain string) bool {

@@ -1,9 +1,9 @@
-package util_test
+package suffixtree_test
 
 import (
 	"testing"
 
-	"github.com/wweir/sower/util"
+	"github.com/wweir/sower/pkg/suffixtree"
 )
 
 func TestNode_Match(t *testing.T) {
@@ -13,18 +13,18 @@ func TestNode_Match(t *testing.T) {
 	}
 	tests := []struct {
 		name  string
-		node  *util.Node
+		node  *suffixtree.Node
 		tests []test
 	}{{
 		"simple",
-		util.NewNodeFromRules("a.wweir.cc", "b.wweir.cc"),
+		suffixtree.NewNodeFromRules("a.wweir.cc", "b.wweir.cc"),
 		[]test{
 			{"a.wweir.cc", true},
 			{"b.wweir.cc", true},
 		},
 	}, {
 		"parent",
-		util.NewNodeFromRules("wweir.cc", "a.wweir.cc"),
+		suffixtree.NewNodeFromRules("wweir.cc", "a.wweir.cc"),
 		[]test{
 			{"wweir.cc", true},
 			{"a.wweir.cc", true},
@@ -32,7 +32,7 @@ func TestNode_Match(t *testing.T) {
 		},
 	}, {
 		"fuzz1",
-		util.NewNodeFromRules("wweir.cc", "a.wweir.cc", "*.wweir.cc"),
+		suffixtree.NewNodeFromRules("wweir.cc", "a.wweir.cc", "*.wweir.cc"),
 		[]test{
 			{"wweir.cc", true},
 			{"a.wweir.cc", true},
@@ -41,7 +41,7 @@ func TestNode_Match(t *testing.T) {
 		},
 	}, {
 		"fuzz2",
-		util.NewNodeFromRules("a.*.cc", "c.wweir.*"),
+		suffixtree.NewNodeFromRules("a.*.cc", "c.wweir.*"),
 		[]test{
 			{"wweir.cc", false},
 			{"a.wweir.cc", true},
@@ -50,7 +50,7 @@ func TestNode_Match(t *testing.T) {
 		},
 	}, {
 		"fuzz3",
-		util.NewNodeFromRules("*.*.cc", "iamp.*.*"),
+		suffixtree.NewNodeFromRules("*.*.cc", "iamp.*.*"),
 		[]test{
 			{"wweir.cc", false},
 			{"a.wweir.cc", true},
@@ -59,7 +59,7 @@ func TestNode_Match(t *testing.T) {
 		},
 	}, {
 		"fuzz4",
-		util.NewNodeFromRules("**.cc", "a.**.com", "**.wweir.*"),
+		suffixtree.NewNodeFromRules("**.cc", "a.**.com", "**.wweir.*"),
 		[]test{
 			{"wweir.cc", true},
 			{"a.wweir.cc", true},

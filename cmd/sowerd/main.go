@@ -9,12 +9,12 @@ import (
 	"time"
 
 	"github.com/cristalhq/aconfig"
-	"github.com/wweir/deferlog"
-	"github.com/wweir/deferlog/log"
-	"github.com/wweir/sower/pkg/teeconn"
+	"github.com/sower-proxy/conns/relay"
+	"github.com/sower-proxy/conns/teeconn"
+	"github.com/sower-proxy/deferlog"
+	"github.com/sower-proxy/deferlog/log"
 	"github.com/wweir/sower/transport/sower"
 	"github.com/wweir/sower/transport/trojan"
-	"github.com/wweir/sower/util"
 	"golang.org/x/crypto/acme/autocert"
 )
 
@@ -124,7 +124,7 @@ func serve443(ln net.Listener, fakeSite string, sower *sower.Sower, trojan *troj
 	if addr, err = sower.Unwrap(teeconn); err == nil {
 		teeconn.Stop()
 
-		dur, err = util.RelayTo(teeconn, addr.String())
+		dur, err = relay.RelayTo(teeconn, addr.String())
 		return
 	}
 
@@ -133,11 +133,11 @@ func serve443(ln net.Listener, fakeSite string, sower *sower.Sower, trojan *troj
 	if addr, err = trojan.Unwrap(teeconn); err == nil {
 		teeconn.Stop()
 
-		dur, err = util.RelayTo(teeconn, addr.String())
+		dur, err = relay.RelayTo(teeconn, addr.String())
 		return
 	}
 
 	// 3. fallback to fake site
 	teeconn.Stop().Reread()
-	dur, err = util.RelayTo(teeconn, fakeSite)
+	dur, err = relay.RelayTo(teeconn, fakeSite)
 }
