@@ -68,6 +68,12 @@ func TestNode_Match(t *testing.T) {
 			{"b.fuzz.com", false},
 			{"www.wweir.com", true},
 		},
+	}, {
+		"github",
+		suffixtree.NewNodeFromRules("**.github.com"),
+		[]test{
+			{"github.com", true},
+		},
 	}}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

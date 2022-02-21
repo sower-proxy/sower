@@ -117,7 +117,7 @@ func (n *node) matchSecs(secs []string, fuzzNode bool) bool {
 		if n == nil {
 			return true
 		}
-		return n.index("") != -1
+		return n.index("") != -1 || n.index("**") != -1
 	}
 
 	if idx := n.index(secs[length-1]); idx >= 0 {
