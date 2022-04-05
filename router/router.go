@@ -84,7 +84,7 @@ func (r *Router) dialDNSConn() {
 			Str("DNS", server).
 			Str("fallback", r.dns.fallbackDNS).
 			Msg("get DNS server")
-		if server == "" {
+		if server == "" || server == r.dns.serveIP.String() {
 			server = r.dns.fallbackDNS
 		}
 
