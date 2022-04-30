@@ -12,7 +12,7 @@ dns {
 }
 
 socks_5 {
-    addr = ":1080"
+    addr = "127.0.0.1:1080"
 }
 
 router "block" {

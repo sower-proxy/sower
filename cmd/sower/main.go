@@ -39,7 +39,7 @@ var (
 		}
 		Socks5 struct {
 			Disable bool   `default:"false" usage:"disable sock5 proxy"`
-			Addr    string `default:":1080" usage:"socks5 listen address"`
+			Addr    string `default:"127.0.0.1:1080" usage:"socks5 listen address"`
 		} `flag:"socks5"`
 
 		Router struct {
