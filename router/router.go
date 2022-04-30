@@ -11,25 +11,22 @@ import (
 	"github.com/sower-proxy/conns/relay"
 	"github.com/sower-proxy/deferlog"
 	"github.com/sower-proxy/deferlog/log"
-	"github.com/sower-proxy/mem"
 	"github.com/wweir/sower/pkg/dhcp"
 	"github.com/wweir/sower/pkg/suffixtree"
 )
 
 type ProxyDialFn func(network, host string, port uint16) (net.Conn, error)
 type Router struct {
-	blockRule   *suffixtree.Node
-	directRule  *suffixtree.Node
-	proxyRule   *suffixtree.Node
-	ProxyDial   ProxyDialFn
-	accessCache *mem.Cache
+	blockRule  *suffixtree.Node
+	directRule *suffixtree.Node
+	proxyRule  *suffixtree.Node
+	ProxyDial  ProxyDialFn
 
 	dns struct {
 		dns.Client
 		fallbackDNS string
 		serveIP     net.IP
 		connCh      chan *dns.Conn
-		cache       *mem.Cache
 	}
 
 	country struct {
@@ -40,14 +37,12 @@ type Router struct {
 
 func NewRouter(serveIP, fallbackDNS, mmdbFile string, proxyDial ProxyDialFn) *Router {
 	r := Router{
-		ProxyDial:   proxyDial,
-		accessCache: mem.New(time.Hour), // TODO: config
+		ProxyDial: proxyDial,
 	}
 
 	r.dns.serveIP = net.ParseIP(serveIP)
 	r.dns.fallbackDNS = fallbackDNS
 	r.dns.connCh = make(chan *dns.Conn, 1)
-	r.dns.cache = mem.New(5 * time.Minute) // Tll: 10 minutes
 	go r.dialDNSConn()
 
 	var err error

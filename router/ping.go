@@ -6,11 +6,10 @@ import (
 	"time"
 
 	"github.com/sower-proxy/deferlog/log"
+	"github.com/sower-proxy/mem"
 )
 
-var pingClient = http.Client{
-	Timeout: 2 * time.Second,
-}
+var accessCache = mem.NewCache(time.Hour, httpPing)
 
 func (r *Router) isAccess(domain string, port uint16) bool {
 	switch port {
@@ -20,16 +19,15 @@ func (r *Router) isAccess(domain string, port uint16) bool {
 		return false
 	}
 
-	p := &ping{}
-	_ = r.accessCache.Remember(p, domain)
-	return p.isAccess
+	ok, _ := accessCache.Get(domain)
+	return ok
 }
 
-type ping struct {
-	isAccess bool
+var pingClient = http.Client{
+	Timeout: 2 * time.Second,
 }
 
-func (p *ping) Fulfill(key string) error {
+func httpPing(key string) (bool, error) {
 	wg := sync.WaitGroup{}
 	wg.Add(2)
 	var err80, err443 error
@@ -49,6 +47,5 @@ func (p *ping) Fulfill(key string) error {
 			Msg("Failed to ping")
 	}
 
-	p.isAccess = (err80 == nil && err443 == nil)
-	return nil
+	return err80 == nil && err443 == nil, nil
 }

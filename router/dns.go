@@ -2,7 +2,6 @@ package router
 
 import (
 	"net"
-	"time"
 
 	"github.com/miekg/dns"
 	"github.com/sower-proxy/deferlog/log"
@@ -30,15 +29,26 @@ func (r *Router) ServeDNS(w dns.ResponseWriter, req *dns.Msg) {
 	}
 
 	// 2. direct with cache, do not fallback to proxy to avoid side-effect
-	c := &dnsCache{Router: r, Req: req}
-	if err := r.dns.cache.Remember(c, req.Question[0].String()); err != nil {
-		_ = w.WriteMsg(r.dnsFail(req, dns.RcodeServerFailure))
-		return
+	conn := <-r.dns.connCh
+	resp, rtt, err := r.dns.ExchangeWithConn(req, conn)
+	if err != nil {
+		resp, rtt, err = r.dns.ExchangeWithConn(req, conn)
+	}
+	select {
+	case r.dns.connCh <- conn:
+	default:
+		conn.Close()
 	}
 
-	c.Resp.SetReply(req)
-	c.Resp.Compress = true
-	_ = w.WriteMsg(c.Resp)
+	log.DebugWarn(err).
+		Dur("rtt", rtt).
+		Str("question", req.Question[0].String()).
+		Msg("exchange dns record")
+	if err != nil {
+		_ = w.WriteMsg(r.dnsFail(req, dns.RcodeServerFailure))
+	} else {
+		_ = w.WriteMsg(resp)
+	}
 }
 
 func (r *Router) dnsFail(req *dns.Msg, rcode int) *dns.Msg {
@@ -64,30 +74,4 @@ func (r *Router) dnsProxyA(domain string, localIP net.IP, req *dns.Msg) *dns.Msg
 		}}
 	}
 	return m
-}
-
-type dnsCache struct {
-	*Router
-	Req, Resp *dns.Msg
-}
-
-func (r *dnsCache) Fulfill(question string) (err error) {
-	conn := <-r.dns.connCh
-
-	var rtt time.Duration
-	r.Resp, rtt, err = r.dns.ExchangeWithConn(r.Req, conn)
-	if err != nil {
-		r.Resp, rtt, err = r.dns.ExchangeWithConn(r.Req, conn)
-	}
-	log.DebugWarn(err).
-		Dur("rtt", rtt).
-		Str("question", question).
-		Msg("exchange dns record")
-
-	select {
-	case r.dns.connCh <- conn:
-	default:
-		conn.Close()
-	}
-	return err
 }
