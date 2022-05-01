@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"compress/gzip"
 	"io"
 	"net"
 	"net/http"
@@ -19,6 +20,7 @@ import (
 	"github.com/miekg/dns"
 	"github.com/pkg/errors"
 	"github.com/sower-proxy/deferlog/log"
+	"github.com/wweir/sower/pkg/suffixtree"
 	"github.com/wweir/sower/router"
 )
 
@@ -95,12 +97,12 @@ func init() {
 }
 
 func main() {
-	proxtDial := GenProxyDial(conf.Remote.Type, conf.Remote.Addr, conf.Remote.Password)
-	r := router.NewRouter(conf.DNS.Serve, conf.DNS.Fallback, conf.Router.Country.MMDB, proxtDial)
-	r.SetBlockRules(conf.Router.Block.Rules)
-	r.SetDirectRules(conf.Router.Direct.Rules)
-	r.SetProxyRules(conf.Router.Proxy.Rules)
-	r.SetCountryCIDRs(conf.Router.Country.Rules)
+	proxyDial := GenProxyDial(conf.Remote.Type, conf.Remote.Addr, conf.Remote.Password)
+	r := router.NewRouter(conf.DNS.Serve, conf.DNS.Fallback, conf.Router.Country.MMDB, proxyDial)
+	r.BlockRule = suffixtree.NewNodeFromRules(conf.Router.Block.Rules...)
+	r.DirectRule = suffixtree.NewNodeFromRules(conf.Router.Direct.Rules...)
+	r.ProxyRule = suffixtree.NewNodeFromRules(conf.Router.Proxy.Rules...)
+	r.AddCountryCIDRs(conf.Router.Country.Rules...)
 
 	go func() {
 		if conf.DNS.Disable {
@@ -143,27 +145,30 @@ func main() {
 	}()
 
 	start := time.Now()
-	r.SetBlockRules(append(conf.Router.Block.Rules,
-		loadRules(proxtDial, conf.Router.Block.File, conf.Router.Block.FilePrefix)...))
-	r.SetDirectRules(append(conf.Router.Direct.Rules,
-		loadRules(proxtDial, conf.Router.Direct.File, conf.Router.Direct.FilePrefix)...))
-	r.SetProxyRules(append(conf.Router.Proxy.Rules,
-		loadRules(proxtDial, conf.Router.Proxy.File, conf.Router.Proxy.FilePrefix)...))
-	r.SetCountryCIDRs(append(conf.Router.Country.Rules,
-		loadRules(proxtDial, conf.Router.Country.File, conf.Router.Country.FilePrefix)...))
+	loadRule(r.BlockRule, proxyDial, conf.Router.Block.File, conf.Router.Block.FilePrefix)
+	loadRule(r.DirectRule, proxyDial, conf.Router.Direct.File, conf.Router.Direct.FilePrefix)
+	loadRule(r.ProxyRule, proxyDial, conf.Router.Proxy.File, conf.Router.Proxy.FilePrefix)
+	for line := range featchRuleFile(proxyDial, conf.Router.Country.File) {
+		r.AddCountryCIDRs(line)
+	}
 
 	log.Info().
-		Dur("spend", time.Since(start)).
-		Int("blockRule", len(conf.Router.Block.Rules)).
-		Int("directRule", len(conf.Router.Direct.Rules)).
-		Int("proxyRule", len(conf.Router.Proxy.Rules)).
-		Int("countryRule", len(conf.Router.Country.Rules)).
+		Dur("took", time.Since(start)).
+		Uint64("blockRule", r.BlockRule.Count).
+		Uint64("directRule", r.DirectRule.Count).
+		Uint64("proxyRule", r.ProxyRule.Count).
 		Msg("Loaded rules, proxy started")
 	runtime.GC()
 	select {}
 }
 
-func loadRules(proxyDial router.ProxyDialFn, file, linePrefix string) []string {
+func loadRule(rule *suffixtree.Node, proxyDial router.ProxyDialFn, file, linePrefix string) {
+	for line := range featchRuleFile(proxyDial, file) {
+		rule.Add(linePrefix + line)
+	}
+	rule.GC()
+}
+func featchRuleFile(proxyDial router.ProxyDialFn, file string) <-chan string {
 	var loadFn func() (io.ReadCloser, error)
 	if _, err := url.Parse(file); err == nil {
 		// load rule file from remote by HTTP
@@ -178,7 +183,9 @@ func loadRules(proxyDial router.ProxyDialFn, file, linePrefix string) []string {
 		}
 
 		loadFn = func() (io.ReadCloser, error) {
-			resp, err := client.Get(file)
+			req, _ := http.NewRequest(http.MethodGet, file, nil)
+			req.Header.Add("Accept-Encoding", "gzip")
+			resp, err := client.Do(req)
 			if err != nil {
 				return nil, err
 			}
@@ -209,34 +216,37 @@ func loadRules(proxyDial router.ProxyDialFn, file, linePrefix string) []string {
 		time.Sleep(i * i * 100 * time.Millisecond)
 		rc, err = loadFn()
 	}
-	if err != nil {
-		log.Fatal().Err(err).
-			Str("file", file).
-			Msg("load config file")
-	}
-	defer rc.Close()
+	log.InfoFatal(err).
+		Str("file", file).
+		Msg("fetch rule file")
 
-	// parse rule file into rule tree
-	var lines []string
-	br := bufio.NewReader(rc)
-	for {
-		line, _, err := br.ReadLine()
-		if err == io.EOF {
-			break
-		} else if err != nil {
-			log.Error().Err(err).
-				Str("file", file).
-				Msg("read line")
-			return nil
+	ch := make(chan string, 100)
+	go func() {
+		defer rc.Close()
+		defer close(ch)
+		gr, err := gzip.NewReader(rc)
+		log.DebugFatal(err).Msg("gzip reader")
+		defer gr.Close()
+
+		br := bufio.NewReader(gr)
+		for {
+			line, _, err := br.ReadLine()
+			if err == io.EOF {
+				return
+			} else if err != nil {
+				log.Error().Err(err).
+					Str("file", file).
+					Msg("read line")
+				return
+			}
+
+			if strings.TrimSpace(string(line)) == "" {
+				continue
+			}
+
+			ch <- string(line)
 		}
+	}()
 
-		if strings.TrimSpace(string(line)) == "" {
-			continue
-		}
-
-		// use line content as suffix
-		lines = append(lines, linePrefix+string(line))
-	}
-
-	return lines
+	return ch
 }

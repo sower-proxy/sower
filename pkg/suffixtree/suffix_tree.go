@@ -1,13 +1,13 @@
 package suffixtree
 
 import (
-	"runtime"
 	"strings"
 )
 
 type Node struct {
 	*node
-	sep string
+	sep   string
+	Count uint64
 }
 type node struct {
 	secs     []string
@@ -15,30 +15,25 @@ type node struct {
 }
 
 func NewNodeFromRules(rules ...string) *Node {
-	n := &Node{&node{}, "."}
+	n := &Node{&node{}, ".", 0}
 	for i := range rules {
 		n.Add(rules[i])
 	}
 
-	n.node = n.node.lite()
-	runtime.GC()
+	n.GC()
 	return n
 }
 
-func (n *node) lite() *node {
+func (n *node) GC() {
 	if n == nil {
-		return nil
+		return
 	}
 
-	lite := &node{
-		secs:     make([]string, 0, len(n.secs)),
-		subNodes: make([]*node, 0, len(n.subNodes)),
-	}
-	lite.secs = append(lite.secs, n.secs...)
+	n.secs = GCSlice(n.secs)
+	n.subNodes = GCSlice(n.subNodes)
 	for i := range n.subNodes {
-		lite.subNodes = append(lite.subNodes, n.subNodes[i].lite())
+		n.subNodes[i].GC()
 	}
-	return lite
 }
 
 func (n *Node) String() string {
@@ -59,6 +54,7 @@ func (n *Node) trim(item string) string {
 }
 
 func (n *Node) Add(item string) {
+	n.Count++
 	n.add(strings.Split(n.trim(item), n.sep))
 }
 func (n *node) add(secs []string) {

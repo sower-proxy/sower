@@ -17,9 +17,9 @@ import (
 
 type ProxyDialFn func(network, host string, port uint16) (net.Conn, error)
 type Router struct {
-	blockRule  *suffixtree.Node
-	directRule *suffixtree.Node
-	proxyRule  *suffixtree.Node
+	BlockRule  *suffixtree.Node
+	DirectRule *suffixtree.Node
+	ProxyRule  *suffixtree.Node
 	ProxyDial  ProxyDialFn
 
 	dns struct {
@@ -52,24 +52,15 @@ func NewRouter(serveIP, fallbackDNS, mmdbFile string, proxyDial ProxyDialFn) *Ro
 	return &r
 }
 
-func (r *Router) SetBlockRules(blockList []string) {
-	r.blockRule = suffixtree.NewNodeFromRules(blockList...)
-}
-func (r *Router) SetDirectRules(directList []string) {
-	r.directRule = suffixtree.NewNodeFromRules(directList...)
-}
-func (r *Router) SetProxyRules(proxyList []string) {
-	r.proxyRule = suffixtree.NewNodeFromRules(proxyList...)
-}
-func (r *Router) SetCountryCIDRs(directCIDRs []string) {
-	r.country.cidrs = make([]*net.IPNet, 0, len(directCIDRs))
-	for _, cidr := range directCIDRs {
+func (r *Router) AddCountryCIDRs(cidrs ...string) {
+	for _, cidr := range cidrs {
 		_, ipnet, err := net.ParseCIDR(cidr)
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to parse CIDR")
 		}
 		r.country.cidrs = append(r.country.cidrs, ipnet)
 	}
+	r.country.cidrs = suffixtree.GCSlice(r.country.cidrs)
 }
 
 func (r *Router) dialDNSConn() {
@@ -111,13 +102,13 @@ func (r *Router) RouteHandle(conn net.Conn, domain string, port uint16) (err err
 	// 2. detect_based( CN IP || access site )
 	// 3. fallback( proxy )
 	switch {
-	case r.blockRule.Match(domain):
+	case r.BlockRule.Match(domain):
 		return nil
 
-	case r.directRule.Match(domain):
+	case r.DirectRule.Match(domain):
 		return r.DirectHandle(conn, addr)
 
-	case r.proxyRule.Match(domain):
+	case r.ProxyRule.Match(domain):
 		return r.ProxyHandle(conn, domain, port)
 
 	case r.localSite(domain), r.isAccess(domain, port):
