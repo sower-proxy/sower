@@ -6,6 +6,8 @@ After=network.target
 Type=simple
 WorkingDirectory=/etc/sower
 ExecStart=/usr/local/bin/sower -f /etc/sower/sower.hcl
+Restart=on-failure
+RestartSec=1min
 
 [Install]
 WantedBy=multi-user.target
