@@ -34,11 +34,6 @@ func (r *Router) ServeDNS(w dns.ResponseWriter, req *dns.Msg) {
 	if err != nil {
 		resp, rtt, err = r.dns.ExchangeWithConn(req, conn)
 	}
-	select {
-	case r.dns.connCh <- conn:
-	default:
-		conn.Close()
-	}
 
 	log.DebugWarn(err).
 		Dur("rtt", rtt).
@@ -46,8 +41,15 @@ func (r *Router) ServeDNS(w dns.ResponseWriter, req *dns.Msg) {
 		Msg("exchange dns record")
 	if err != nil {
 		_ = w.WriteMsg(r.dnsFail(req, dns.RcodeServerFailure))
+		conn.Close()
+
 	} else {
 		_ = w.WriteMsg(resp)
+		select {
+		case r.dns.connCh <- conn:
+		default:
+			conn.Close()
+		}
 	}
 }
 
