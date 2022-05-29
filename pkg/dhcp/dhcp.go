@@ -14,10 +14,10 @@ import (
 var xid = make([]byte, 4)
 var broadcastAddr, _ = net.ResolveUDPAddr("udp", "255.255.255.255:67")
 
-func GetDNSServer() (string, error) {
+func GetDNSServer() ([]string, error) {
 	iface, err := PickInternetInterface()
 	if err != nil {
-		return "", errors.Wrap(err, "pick interface")
+		return nil, errors.Wrap(err, "pick interface")
 	}
 
 	rand.Read(xid)
@@ -29,31 +29,36 @@ func GetDNSServer() (string, error) {
 	var conn net.PacketConn
 	if runtime.GOOS == "windows" {
 		if conn, err = reuseport.ListenPacket("udp4", iface.IP.String()+":68"); err != nil {
-			return "", errors.Wrap(err, "listen dhcp")
+			return nil, errors.Wrap(err, "listen dhcp")
 		}
 	} else {
 		if conn, err = reuseport.ListenPacket("udp4", "0.0.0.0:68"); err != nil {
-			return "", errors.Wrap(err, "listen dhcp")
+			return nil, errors.Wrap(err, "listen dhcp")
 		}
 	}
 	defer conn.Close()
 	conn.SetDeadline(time.Now().Add(3 * time.Second))
 
 	if _, err := conn.WriteTo([]byte(pack), broadcastAddr); err != nil {
-		return "", errors.Wrap(err, "write broadcast")
+		return nil, errors.Wrap(err, "write broadcast")
 	}
 
 	buf := make([]byte, 1500 /*MTU*/)
 	n, _, err := conn.ReadFrom(buf)
 	if err != nil {
-		return "", errors.Wrap(err, "read dhcp offer")
+		return nil, errors.Wrap(err, "read dhcp offer")
 	}
 
 	pack = dhcp4.Packet(buf[:n])
 	dnsBytes := pack.ParseOptions()[dhcp4.OptionDomainNameServer]
-	if len(dnsBytes) < 4 {
-		return "", errors.New("no DNS setting in upstream network device")
+	if len(dnsBytes) < 4 || len(dnsBytes)%4 != 0 {
+		return nil, errors.New("invalid DNS setting in upstream network device")
 	}
 
-	return net.IPv4(dnsBytes[0], dnsBytes[1], dnsBytes[2], dnsBytes[3]).String(), nil
+	ips := []string{}
+	for i := 0; i < len(dnsBytes); i += 4 {
+		ips = append(ips, net.IP(dnsBytes[i:i+4]).String())
+	}
+
+	return ips, nil
 }

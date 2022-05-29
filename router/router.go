@@ -11,7 +11,6 @@ import (
 	"github.com/sower-proxy/conns/relay"
 	"github.com/sower-proxy/deferlog"
 	"github.com/sower-proxy/deferlog/log"
-	"github.com/wweir/sower/pkg/dhcp"
 	"github.com/wweir/sower/pkg/suffixtree"
 )
 
@@ -26,7 +25,6 @@ type Router struct {
 		dns.Client
 		fallbackDNS string
 		serveIP     net.IP
-		connCh      chan *dns.Conn
 	}
 
 	country struct {
@@ -42,8 +40,6 @@ func NewRouter(serveIP, fallbackDNS, mmdbFile string, proxyDial ProxyDialFn) *Ro
 
 	r.dns.serveIP = net.ParseIP(serveIP)
 	r.dns.fallbackDNS = fallbackDNS
-	r.dns.connCh = make(chan *dns.Conn, 1)
-	go r.dialDNSConn()
 
 	var err error
 	r.country.Reader, err = geoip2.Open(mmdbFile)
@@ -61,29 +57,6 @@ func (r *Router) AddCountryCIDRs(cidrs ...string) {
 		r.country.cidrs = append(r.country.cidrs, ipnet)
 	}
 	r.country.cidrs = suffixtree.GCSlice(r.country.cidrs)
-}
-
-func (r *Router) dialDNSConn() {
-	for {
-		server, err := dhcp.GetDNSServer()
-		log.Err(err).
-			Str("DNS", server).
-			Str("fallback", r.dns.fallbackDNS).
-			Msg("get DNS server")
-		if server == "" || server == r.dns.serveIP.String() {
-			server = r.dns.fallbackDNS
-		}
-
-		for {
-			conn, err := dns.DialTimeout("udp", net.JoinHostPort(server, "53"), time.Second)
-			if err != nil {
-				log.Error().Err(err).Str("ip", server).Msg("dial dns server")
-				break
-			}
-
-			r.dns.connCh <- conn
-		}
-	}
 }
 
 func (r *Router) RouteHandle(conn net.Conn, domain string, port uint16) (err error) {

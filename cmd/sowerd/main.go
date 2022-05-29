@@ -24,7 +24,7 @@ var (
 	conf = struct {
 		ServeIP  string `usage:"listen to port 80 443 of this IP, eg: 0.0.0.0"`
 		Password string `required:"true"`
-		FakeSite string `required:"true" default:"127.0.0.1:8080" usage:"fake site address"`
+		FakeSite string `default:"127.0.0.1:8080" usage:"fake site address or directoy"`
 
 		Cert struct {
 			Email string
@@ -87,7 +87,12 @@ func main() {
 		Str("IP", conf.ServeIP).
 		Msg("Start listen HTTPS service")
 
-	go serve443(ln, conf.FakeSite, sower.New(conf.Password), trojan.New(conf.Password))
+	if si, err := os.Stat(conf.FakeSite); err == nil && si.IsDir() {
+		http.NewFileTransport(http.Dir(conf.FakeSite))
+	} else if _, _, err := net.SplitHostPort(conf.FakeSite); err == nil {
+		go serve443(ln, conf.FakeSite, sower.New(conf.Password), trojan.New(conf.Password))
+	}
+
 	select {}
 }
 

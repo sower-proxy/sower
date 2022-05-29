@@ -37,7 +37,7 @@ var (
 		DNS struct {
 			Disable  bool   `default:"false" usage:"disable DNS proxy"`
 			Serve    string `default:"127.0.0.1" required:"true" usage:"dns server ip"`
-			Fallback string `default:"223.5.5.5" usage:"fallback dns server"`
+			Fallback string `default:"223.5.5.5" required:"true" usage:"fallback dns server"`
 		}
 		Socks5 struct {
 			Disable bool   `default:"false" usage:"disable sock5 proxy"`

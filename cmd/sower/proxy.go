@@ -97,8 +97,8 @@ func ServeHTTP(ln net.Listener, r *router.Router) {
 	defer rc.Close()
 
 	teeconn.Stop().Reread()
-	relay.Relay(teeconn, rc)
-	log.Debug().
+	err = relay.Relay(teeconn, rc)
+	log.DebugWarn(err).
 		Str("host", req.Host).
 		Dur("spend", time.Since(start)).
 		Msg("serve http")
@@ -134,8 +134,8 @@ func ServeHTTPS(ln net.Listener, r *router.Router) {
 	defer rc.Close()
 
 	teeconn.Stop().Reread()
-	relay.Relay(teeconn, rc)
-	log.Debug().
+	err = relay.Relay(teeconn, rc)
+	log.DebugWarn(err).
 		Str("host", domain).
 		Dur("spend", time.Since(start)).
 		Msg("serve http")

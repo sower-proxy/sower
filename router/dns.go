@@ -2,9 +2,12 @@ package router
 
 import (
 	"net"
+	"time"
 
 	"github.com/miekg/dns"
 	"github.com/sower-proxy/deferlog/log"
+	"github.com/sower-proxy/mem"
+	"github.com/wweir/sower/pkg/dhcp"
 )
 
 func (r *Router) ServeDNS(w dns.ResponseWriter, req *dns.Msg) {
@@ -29,27 +32,11 @@ func (r *Router) ServeDNS(w dns.ResponseWriter, req *dns.Msg) {
 	}
 
 	// 2. direct with cache, do not fallback to proxy to avoid side-effect
-	conn := <-r.dns.connCh
-	resp, rtt, err := r.dns.ExchangeWithConn(req, conn)
-	if err != nil {
-		resp, rtt, err = r.dns.ExchangeWithConn(req, conn)
-	}
-
-	log.DebugWarn(err).
-		Dur("rtt", rtt).
-		Str("question", req.Question[0].String()).
-		Msg("exchange dns record")
+	resp, err := r.Exchange(req)
 	if err != nil {
 		_ = w.WriteMsg(r.dnsFail(req, dns.RcodeServerFailure))
-		conn.Close()
-
 	} else {
 		_ = w.WriteMsg(resp)
-		select {
-		case r.dns.connCh <- conn:
-		default:
-			conn.Close()
-		}
 	}
 }
 
@@ -76,4 +63,46 @@ func (r *Router) dnsProxyA(domain string, localIP net.IP, req *dns.Msg) *dns.Msg
 		}}
 	}
 	return m
+}
+
+var upstreamAddrs []string
+var upstreamIndex = -1
+var dhcpCache = mem.NewRotateCache(10*time.Minute, func(int) ([]string, error) {
+	return dhcp.GetDNSServer()
+})
+var queryCount = 0
+
+func (r *Router) Exchange(req *dns.Msg) (_ *dns.Msg, err error) {
+	queryCount++
+	if upstreamIndex < 0 {
+		dnsIPs, err := dhcpCache.Get(0)
+		log.Err(err).
+			Int("queryCount", queryCount).
+			Strs("dns", dnsIPs).
+			Msg("get dns server")
+
+		addrs := make([]string, 0, len(dnsIPs)+1)
+		for _, ip := range dnsIPs {
+			if ip != string(r.dns.serveIP) {
+				addrs = append(addrs, net.JoinHostPort(ip, "53"))
+			}
+		}
+		if len(addrs) == 0 {
+			addrs = append(addrs, net.JoinHostPort(r.dns.fallbackDNS, "53"))
+		}
+
+		queryCount = 0
+		upstreamAddrs = addrs
+		upstreamIndex = len(addrs) - 1
+	}
+
+	resp, err := dns.Exchange(req, upstreamAddrs[upstreamIndex])
+	if err != nil {
+		upstreamIndex--
+		if upstreamIndex >= 0 {
+			resp, err = dns.Exchange(req, upstreamAddrs[upstreamIndex])
+		}
+	}
+
+	return resp, err
 }

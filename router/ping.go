@@ -9,7 +9,7 @@ import (
 	"github.com/sower-proxy/mem"
 )
 
-var accessCache = mem.NewCache(time.Hour, httpPing)
+var accessCache = mem.NewRotateCache(time.Hour, httpPing)
 
 func (r *Router) isAccess(domain string, port uint16) bool {
 	switch port {
