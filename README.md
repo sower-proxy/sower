@@ -8,9 +8,9 @@
 
 中文介绍见 [Wiki](https://github.com/wweir/sower/wiki)
 
-The sower is a cross-platform intelligent transparent proxy tool. It provide both socks5 proxy and DNS-based proxy. All these kinds of proxy support intelligent router.
+The sower is a cross-platform intelligent transparent proxy tool. It provides both socks5 proxy and DNS-based proxy. All these kinds of proxies support intelligent routing.
 
-If you already have another proxy solution, you can use it's socks5(h) service as a parent proxy to enjoy the sower's intelligent router.
+If you already have another proxy solution, you can use its socks5(h) service as a parent proxy to enjoy the sower's intelligent routing.
 
 ## Installation
 
@@ -18,7 +18,7 @@ To enjoy the sower, you need to deploy sower on both server-side(sowerd) and cli
 
 ## Sowerd
 
-_If you wanna use sower as secondary proxy to provide intelligent router, you can skip sowerd._
+_If you wanna use sower as a secondary proxy to provide intelligent routing, you can skip sowerd._
 
 At the server-side, the sowerd runs just like a web server proxy. It will occupy two ports `80` / `443`.
 
@@ -51,11 +51,11 @@ There are two ways to run the sowerd service:
 
 ## Sower
 
-A config file is required in sower client side. [Here](https://github.com/wweir/sower/wiki/sower.hcl) is an usable example in China.
+A config file is required on the sower client side. [Here](https://github.com/wweir/sower/wiki/sower.hcl) is a usable example in China.
 
 `Sower` will take 4 port by default with root permission. They are: `udp(53)` / `tcp(80)` / `tcp(443)` / `tcp(1080)`.
 
-After do the next three step, you can enjoy the intelligent transparent proxy solution:
+After doing the next three steps, you can enjoy the intelligent transparent proxy solution:
 
 1. run the command line with root permission:
 
