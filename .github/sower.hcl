@@ -1,3 +1,4 @@
+# 远程、上游连接方式
 remote {
     type = "sower"
     addr = "proxy.com"
@@ -7,19 +8,30 @@ remote {
 }
 
 dns {
+    disable = false
+    # 必填，监听该 IP 的 UDP(53)、TCP(80、443) 端口，DNS 会将请求导向这个地址
     serve = "127.0.0.1"
+    # 必填，优先使用 DHCP 中的 DNS 服务器，如果没有则使用该地址
     fallback = "223.5.5.5"
 }
 
 socks_5 {
+    disable = false
+    # 不写 IP 则监听所有 IP
     addr = "127.0.0.1:1080"
 }
 
+# 路由规则，各规则优先级:
+# 禁止访问规则 > 直接访问规则 > 代理访问规则 > GEOIP 规则
+# file 字段可填 URL 或本地文件路径，URL 将通过代理请求
+
+# 禁止访问规则。被命中的请求，将被禁止访问。可用于广告过滤之类的目的
 router "block" {
     file = "https://raw.githubusercontent.com/pexcn/daily/gh-pages/adlist/adlist.txt"
     rules = []
 }
 
+# 直接访问规则。被命中的请求，将被直接访问，不再通过代理
 router "direct" {
     file = "https://raw.githubusercontent.com/pexcn/daily/gh-pages/chinalist/chinalist.txt"
     rules = [
@@ -35,6 +47,7 @@ router "direct" {
       ]
 }
 
+# 代理访问规则。被命中的请求，将通过代理进行转发
 router "proxy" {
     file = "https://raw.githubusercontent.com/pexcn/daily/gh-pages/gfwlist/gfwlist.txt"
     rules = [
@@ -65,8 +78,11 @@ router "proxy" {
     ]
 }
 
+# GEOIP 规则。大陆境内的 IP，将直接访问。
+# 非大陆境内的 IP，将通过另一套检测逻辑，确定是否需要进行代理。
+# 为避免误伤一些非标页面端口(除 80/443 外)，该规则只在 Socks5 模式下生效
 router "country" {
-    mmdb = "Country.mmdb"  # https://github.com/alecthw/mmdb_china_ip_list
+    // mmdb = "Country.mmdb"  # https://github.com/alecthw/mmdb_china_ip_list
     file = "https://raw.githubusercontent.com/pexcn/daily/gh-pages/chnroute/chnroute.txt"
     rules = [
         "127.0.0.0/8",
