@@ -169,6 +169,10 @@ func loadRule(rule *suffixtree.Node, proxyDial router.ProxyDialFn, file, linePre
 	rule.GC()
 }
 func featchRuleFile(proxyDial router.ProxyDialFn, file string) <-chan string {
+	if file == "" {
+		return make(chan string)
+	}
+
 	var loadFn func() (io.ReadCloser, error)
 	if _, err := url.Parse(file); err == nil {
 		// load rule file from remote by HTTP
