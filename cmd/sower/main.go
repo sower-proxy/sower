@@ -6,7 +6,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"runtime"
 	"strconv"
@@ -148,7 +147,7 @@ func main() {
 	loadRule(r.BlockRule, proxyDial, conf.Router.Block.File, conf.Router.Block.FilePrefix)
 	loadRule(r.DirectRule, proxyDial, conf.Router.Direct.File, conf.Router.Direct.FilePrefix)
 	loadRule(r.ProxyRule, proxyDial, conf.Router.Proxy.File, conf.Router.Proxy.FilePrefix)
-	for line := range featchRuleFile(proxyDial, conf.Router.Country.File) {
+	for line := range fetchRuleFile(proxyDial, conf.Router.Country.File) {
 		r.AddCountryCIDRs(line)
 	}
 
@@ -163,18 +162,23 @@ func main() {
 }
 
 func loadRule(rule *suffixtree.Node, proxyDial router.ProxyDialFn, file, linePrefix string) {
-	for line := range featchRuleFile(proxyDial, file) {
+	for line := range fetchRuleFile(proxyDial, file) {
 		rule.Add(linePrefix + line)
 	}
 	rule.GC()
 }
-func featchRuleFile(proxyDial router.ProxyDialFn, file string) <-chan string {
+func fetchRuleFile(proxyDial router.ProxyDialFn, file string) <-chan string {
 	if file == "" {
 		return make(chan string)
 	}
 
 	var loadFn func() (io.ReadCloser, error)
-	if _, err := url.Parse(file); err == nil {
+	if _, err := os.Stat(file); err == nil {
+		// load rule file from local file
+		loadFn = func() (io.ReadCloser, error) {
+			return os.Open(file)
+		}
+	} else {
 		// load rule file from remote by HTTP
 		client := &http.Client{
 			Transport: &http.Transport{
@@ -201,12 +205,6 @@ func featchRuleFile(proxyDial router.ProxyDialFn, file string) <-chan string {
 
 			return resp.Body, nil
 		}
-
-	} else {
-		// load rule file from local file
-		loadFn = func() (io.ReadCloser, error) {
-			return os.Open(file)
-		}
 	}
 
 	// load rule file, retry 10 times
@@ -228,11 +226,12 @@ func featchRuleFile(proxyDial router.ProxyDialFn, file string) <-chan string {
 	go func() {
 		defer rc.Close()
 		defer close(ch)
-		gr, err := gzip.NewReader(rc)
-		log.DebugFatal(err).Msg("gzip reader")
-		defer gr.Close()
+		if gr, err := gzip.NewReader(rc); err == nil {
+			rc = gr
+			defer gr.Close()
+		}
 
-		br := bufio.NewReader(gr)
+		br := bufio.NewReader(rc)
 		for {
 			line, _, err := br.ReadLine()
 			if err == io.EOF {
