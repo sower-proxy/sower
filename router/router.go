@@ -99,7 +99,7 @@ func (r *Router) ProxyHandle(conn net.Conn, domain string, port uint16) error {
 	}
 	defer rc.Close()
 
-	relay.Relay(conn, rc)
+	_ = relay.Relay(conn, rc)
 	return nil
 }
 

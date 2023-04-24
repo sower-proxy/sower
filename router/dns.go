@@ -2,11 +2,9 @@ package router
 
 import (
 	"net"
-	"time"
 
 	"github.com/miekg/dns"
 	"github.com/sower-proxy/deferlog/log"
-	"github.com/sower-proxy/mem"
 	"github.com/wweir/sower/pkg/dhcp"
 )
 
@@ -67,15 +65,12 @@ func (r *Router) dnsProxyA(domain string, localIP net.IP, req *dns.Msg) *dns.Msg
 
 var upstreamAddrs []string
 var upstreamIndex = -1
-var dhcpCache = mem.NewRotateCache(10*time.Minute, func(int) ([]string, error) {
-	return dhcp.GetDNSServer()
-})
 var queryCount = 0
 
 func (r *Router) Exchange(req *dns.Msg) (_ *dns.Msg, err error) {
 	queryCount++
 	if upstreamIndex < 0 {
-		dnsIPs, err := dhcpCache.Get(0)
+		dnsIPs, err := dhcp.GetDNSServer()
 		log.Err(err).
 			Int("queryCount", queryCount).
 			Strs("dns", dnsIPs).
