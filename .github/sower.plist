@@ -15,6 +15,6 @@
 		<key>RunAtLoad</key>
             <true/>
         <key>WorkingDirectory</key>
-            <string>/usr/local/etc</string>
+            <string>/usr/local/etc/sower</string>
 	</dict>
 </plist>
