@@ -1,8 +1,11 @@
 module github.com/wweir/sower
 
-go 1.18
+go 1.22
+
+toolchain go1.22.3
 
 require (
+	github.com/bobg/go-generics/v3 v3.4.0
 	github.com/cristalhq/aconfig v0.18.5
 	github.com/cristalhq/aconfig/aconfighcl v0.17.1
 	github.com/cristalhq/aconfig/aconfigtoml v0.17.1
@@ -13,7 +16,7 @@ require (
 	github.com/oschwald/geoip2-golang v1.9.0
 	github.com/pkg/errors v0.9.1
 	github.com/sower-proxy/conns v0.0.3
-	github.com/sower-proxy/deferlog v1.0.6
+	github.com/sower-proxy/deferlog v1.0.7
 	github.com/sower-proxy/mem v0.0.3
 	golang.org/x/crypto v0.23.0
 )

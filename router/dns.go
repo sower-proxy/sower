@@ -25,7 +25,9 @@ func (r *Router) ServeDNS(w dns.ResponseWriter, req *dns.Msg) {
 	case r.DirectRule.Match(domain):
 
 	case r.ProxyRule.Match(domain):
-		_ = w.WriteMsg(r.dnsProxyA(domain, r.dns.serveIP, req))
+		host, _, err := net.SplitHostPort(w.LocalAddr().String())
+		log.DebugWarn(err).Str("host", host).Msg("proxy dns")
+		_ = w.WriteMsg(r.dnsProxyA(domain, net.ParseIP(host), req))
 		return
 	}
 
@@ -40,7 +42,7 @@ func (r *Router) ServeDNS(w dns.ResponseWriter, req *dns.Msg) {
 
 func (r *Router) dnsFail(req *dns.Msg, rcode int) *dns.Msg {
 	m := new(dns.Msg)
-	m.SetRcode(req, dns.RcodeServerFailure)
+	m.SetRcode(req, rcode)
 	return m
 }
 
