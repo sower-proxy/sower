@@ -36,7 +36,7 @@ var (
 
 		DNS struct {
 			Disable    bool     `default:"false" usage:"disable DNS proxy"`
-			Serve      string   `default:"127.0.0.1"  usage:"Deprecated, use 'serve_ips' instead"`
+			Serve      string   `usage:"Deprecated, use 'serve_ips' instead"`
 			ServeIps   []string `usage:"dns server ip, eg: 127.0.0.1,::1"`
 			ServeIface string   `usage:"dns server interface, eg: eth0"`
 			Fallback   string   `default:"223.5.5.5" required:"true" usage:"fallback dns server"`

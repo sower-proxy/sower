@@ -9,8 +9,10 @@ remote {
 
 dns {
     disable = false
-    # 必填，监听该 IP 的 UDP(53)、TCP(80、443) 端口，DNS 会将请求导向这个地址
-    serve = "127.0.0.1"
+    # 监听该 IP 的 UDP(53)、TCP(80、443) 端口，DNS 会将请求导向这个地址
+    serve_ips = ["127.0.0.1"]
+    # 监听的网络接口
+    serve_iface = "lo"
     # 必填，优先使用 DHCP 中的 DNS 服务器，如果没有则使用该地址
     fallback = "223.5.5.5"
 }
