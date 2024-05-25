@@ -18,6 +18,7 @@
 .vscode
 .idea
 **.env
+/bin
 
 
 **.mmdb

@@ -5,7 +5,6 @@ go 1.22
 toolchain go1.22.3
 
 require (
-	github.com/bobg/go-generics/v3 v3.4.0
 	github.com/cristalhq/aconfig v0.18.5
 	github.com/cristalhq/aconfig/aconfighcl v0.17.1
 	github.com/cristalhq/aconfig/aconfigtoml v0.17.1

@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bobg/go-generics/v3/slices"
 	"github.com/cristalhq/aconfig"
 	"github.com/cristalhq/aconfig/aconfighcl"
 	"github.com/cristalhq/aconfig/aconfigtoml"
@@ -35,11 +34,10 @@ var (
 		}
 
 		DNS struct {
-			Disable    bool     `default:"false" usage:"disable DNS proxy"`
-			Serve      string   `usage:"Deprecated, use 'serve_ips' instead"`
-			ServeIps   []string `usage:"dns server ip, eg: 127.0.0.1,::1"`
-			ServeIface string   `usage:"dns server interface, eg: eth0"`
-			Fallback   string   `default:"223.5.5.5" required:"true" usage:"fallback dns server"`
+			Disable  bool   `default:"false" usage:"disable DNS proxy"`
+			Serve    string `default:"127.0.0.1" required:"true" usage:"dns server ip"`
+			Serve6   string `usage:"dns server ipv6, eg: ::1"`
+			Fallback string `default:"223.5.5.5" required:"true" usage:"fallback dns server"`
 		}
 		Socks5 struct {
 			Disable bool   `default:"false" usage:"disable sock5 proxy"`
@@ -89,25 +87,6 @@ func init() {
 			Msg("Load config")
 	}
 
-	if !slices.Contains(conf.DNS.ServeIps, conf.DNS.Serve) {
-		conf.DNS.ServeIps = append(conf.DNS.ServeIps, conf.DNS.Serve)
-	}
-	if conf.DNS.ServeIface != "" {
-		iface, err := net.InterfaceByName(conf.DNS.ServeIface)
-		log.DebugFatal(err).Str("iface", conf.DNS.ServeIface).Msg("get iface")
-		addrs, err := iface.Addrs()
-		log.InfoFatal(err).Str("iface", conf.DNS.ServeIface).Msg("get iface addrs")
-		for _, addr := range addrs {
-			ip, _, err := net.ParseCIDR(addr.String())
-			log.InfoFatal(err).Str("iface", conf.DNS.ServeIface).
-				Msg("parse iface addr: " + addr.String())
-
-			if !slices.Contains(conf.DNS.ServeIps, ip.String()) {
-				conf.DNS.ServeIps = append(conf.DNS.ServeIps, ip.String())
-			}
-		}
-	}
-
 	conf.Router.Direct.Rules = append(conf.Router.Direct.Rules,
 		conf.Remote.Addr, "**.in-addr.arpa", "**.ip6.arpa")
 	log.Info().
@@ -127,22 +106,29 @@ func main() {
 
 	if conf.DNS.Disable {
 		log.Info().Msg("DNS proxy disabled")
-		return
-	}
 
-	for _, ip := range conf.DNS.ServeIps {
-		lnHTTP, err := net.Listen("tcp", net.JoinHostPort(ip, "80"))
-		log.DebugFatal(err).Str("listen_on", ip).Msg("listen port 80")
-		go ServeHTTP(lnHTTP, r)
+	} else {
+		ips := make([]string, 0, 2)
+		if strings.TrimSpace(conf.DNS.Serve) != "" {
+			ips = append(ips, conf.DNS.Serve)
+		}
+		if strings.TrimSpace(conf.DNS.Serve6) != "" {
+			ips = append(ips, conf.DNS.Serve6)
+		}
+		for _, ip := range ips {
+			lnHTTP, err := net.Listen("tcp", net.JoinHostPort(ip, "80"))
+			log.DebugFatal(err).Str("listen_on", ip).Msg("listen port 80")
+			go ServeHTTP(lnHTTP, r)
 
-		lnHTTPS, err := net.Listen("tcp", net.JoinHostPort(ip, "443"))
-		log.DebugFatal(err).Str("listen_on", ip).Msg("listen port 443")
-		go ServeHTTPS(lnHTTPS, r)
+			lnHTTPS, err := net.Listen("tcp", net.JoinHostPort(ip, "443"))
+			log.DebugFatal(err).Str("listen_on", ip).Msg("listen port 443")
+			go ServeHTTPS(lnHTTPS, r)
 
-		go func(ip string) {
-			err := dns.ListenAndServe(net.JoinHostPort(ip, "53"), "udp", r)
-			log.InfoFatal(err).Str("listen_on", ip).Msg("serve dns")
-		}(ip)
+			go func(ip string) {
+				err := dns.ListenAndServe(net.JoinHostPort(ip, "53"), "udp", r)
+				log.InfoFatal(err).Str("listen_on", ip).Msg("serve dns")
+			}(ip)
+		}
 	}
 
 	go func() {
@@ -152,7 +138,10 @@ func main() {
 		}
 
 		ln, err := net.Listen("tcp", conf.Socks5.Addr)
-		log.InfoFatal(err).Str("listen_on", conf.Socks5.Addr).Msg("listen SOCKS5 proxy")
+		if err != nil {
+			log.Fatal().Err(err).Msg("listen port")
+		}
+		log.Info().Msgf("SOCKS5 proxy listening on %s", conf.Socks5.Addr)
 		go ServeSocks5(ln, r)
 	}()
 
