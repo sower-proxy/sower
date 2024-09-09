@@ -34,10 +34,11 @@ var (
 		}
 
 		DNS struct {
-			Disable  bool   `default:"false" usage:"disable DNS proxy"`
-			Serve    string `default:"127.0.0.1" required:"true" usage:"dns server ip"`
-			Serve6   string `usage:"dns server ipv6, eg: ::1"`
-			Fallback string `default:"223.5.5.5" required:"true" usage:"fallback dns server"`
+			Disable    bool   `default:"false" usage:"disable DNS proxy"`
+			Serve      string `default:"127.0.0.1" required:"true" usage:"dns server ip"`
+			Serve6     string `usage:"dns server ipv6, eg: ::1"`
+			ServeIface string `usage:"use the IP in the net interface, if serve ip not setted. eg: eth0"`
+			Fallback   string `default:"223.5.5.5" required:"true" usage:"fallback dns server"`
 		}
 		Socks5 struct {
 			Disable bool   `default:"false" usage:"disable sock5 proxy"`
@@ -87,6 +88,25 @@ func init() {
 			Msg("Load config")
 	}
 
+	if conf.DNS.ServeIface != "" {
+		iface, err := net.InterfaceByName(conf.DNS.ServeIface)
+		log.DebugFatal(err).Str("iface", conf.DNS.ServeIface).Msg("get iface")
+		addrs, err := iface.Addrs()
+		log.InfoFatal(err).Str("iface", conf.DNS.ServeIface).Msg("get iface addrs")
+		for _, addr := range addrs {
+			ip, _, err := net.ParseCIDR(addr.String())
+			log.InfoFatal(err).Str("iface", conf.DNS.ServeIface).
+				Msg("parse iface addr: " + addr.String())
+
+			if ip.To4() != nil && conf.DNS.Serve == "" {
+				conf.DNS.Serve = ip.String()
+			}
+			if ip.To16() != nil && conf.DNS.Serve6 == "" {
+				conf.DNS.Serve = ip.String()
+			}
+		}
+	}
+
 	conf.Router.Direct.Rules = append(conf.Router.Direct.Rules,
 		conf.Remote.Addr, "**.in-addr.arpa", "**.ip6.arpa")
 	log.Info().
@@ -106,7 +126,6 @@ func main() {
 
 	if conf.DNS.Disable {
 		log.Info().Msg("DNS proxy disabled")
-
 	} else {
 		ips := make([]string, 0, 2)
 		if strings.TrimSpace(conf.DNS.Serve) != "" {
@@ -169,6 +188,7 @@ func loadRule(rule *suffixtree.Node, proxyDial router.ProxyDialFn, file, linePre
 	}
 	rule.GC()
 }
+
 func fetchRuleFile(proxyDial router.ProxyDialFn, file string) <-chan string {
 	if file == "" {
 		return make(chan string)

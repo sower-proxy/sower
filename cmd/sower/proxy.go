@@ -150,7 +150,23 @@ func ServeSocks5(ln net.Listener, r *router.Router) {
 	go ServeSocks5(ln, r)
 	defer conn.Close()
 
-	addr, err := socks5.New().Unwrap(conn)
+	teeConn := teeconn.New(conn)
+
+	buf1 := make([]byte, 1)
+	if _, err := teeConn.Read(buf1); err != nil {
+		log.Warn().Err(err).
+			Msg("read socks5 version")
+		return
+	}
+
+	if buf1[0] != 5 {
+		teeConn.Reread()
+		serveHttpProxy(teeConn, r)
+		return
+	}
+
+	teeConn.Stop().Reread()
+	addr, err := socks5.New().Unwrap(teeConn)
 	if err != nil {
 		log.Warn().Err(err).
 			Msgf("parse socks5 target: %s", addr)
@@ -158,5 +174,46 @@ func ServeSocks5(ln net.Listener, r *router.Router) {
 	}
 
 	host, port := addr.(*socks5.AddrHead).Addr()
-	r.RouteHandle(conn, host, port)
+	r.RouteHandle(teeConn, host, port)
+}
+
+func serveHttpProxy(teeConn *teeconn.Conn, r *router.Router) {
+	req, err := http.ReadRequest(bufio.NewReader(teeConn))
+	if err != nil {
+		log.Warn().Err(err).
+			Msg("read http request")
+		return
+	}
+
+	teeConn.Stop()
+	switch req.Method {
+	case "CONNECT":
+		if _, err := teeConn.Write([]byte(req.Proto + " 200 Connection established\r\n\r\n")); err != nil {
+			log.Warn().Err(err).
+				Msg("write https proxy response")
+			return
+		}
+
+		host, port, err := router.ParseHostPort(req.Host, 443)
+		if err != nil {
+			log.Warn().Err(err).
+				Msg("parse https_proxy target")
+			return
+		}
+
+		rc, err := r.ProxyDial("tcp", host, port)
+		if err != nil {
+			log.Warn().Err(err).
+				Str("host", host).
+				Msg("dial proxy")
+			return
+		}
+		defer rc.Close()
+
+		relay.Relay(teeConn, rc)
+
+	default:
+		teeConn.Reread()
+		r.RouteHandle(teeConn, req.Host, 80)
+	}
 }
