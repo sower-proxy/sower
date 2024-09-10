@@ -27,6 +27,8 @@ var (
 	version, date string
 
 	conf = struct {
+		Debug bool `default:"false" usage:"debug mode"`
+
 		Remote struct {
 			Type     string `default:"sower" required:"true" usage:"option: sower/trojan/socks5"`
 			Addr     string `required:"true" usage:"proxy address, eg: proxy.com/127.0.0.1:7890"`
@@ -35,7 +37,7 @@ var (
 
 		DNS struct {
 			Disable    bool   `default:"false" usage:"disable DNS proxy"`
-			Serve      string `default:"127.0.0.1" required:"true" usage:"dns server ip"`
+			Serve      string `usage:"dns server ip"`
 			Serve6     string `usage:"dns server ipv6, eg: ::1"`
 			ServeIface string `usage:"use the IP in the net interface, if serve ip not setted. eg: eth0"`
 			Fallback   string `default:"223.5.5.5" required:"true" usage:"fallback dns server"`
@@ -98,13 +100,20 @@ func init() {
 			log.InfoFatal(err).Str("iface", conf.DNS.ServeIface).
 				Msg("parse iface addr: " + addr.String())
 
-			if ip.To4() != nil && conf.DNS.Serve == "" {
-				conf.DNS.Serve = ip.String()
-			}
-			if ip.To16() != nil && conf.DNS.Serve6 == "" {
-				conf.DNS.Serve = ip.String()
+			if ip.To4() != nil { // ipv4
+				if conf.DNS.Serve == "" {
+					conf.DNS.Serve = ip.String()
+				}
+			} else if ip.IsGlobalUnicast() { // ipv6 must be global unicast
+				if conf.DNS.Serve6 == "" {
+					conf.DNS.Serve6 = ip.String()
+				}
 			}
 		}
+	}
+
+	if !conf.DNS.Disable && conf.DNS.Serve == "" {
+		log.Fatal().Msg("dns serve ip and serve inteface not setted")
 	}
 
 	conf.Router.Direct.Rules = append(conf.Router.Direct.Rules,
@@ -134,13 +143,14 @@ func main() {
 		if strings.TrimSpace(conf.DNS.Serve6) != "" {
 			ips = append(ips, conf.DNS.Serve6)
 		}
+
 		for _, ip := range ips {
 			lnHTTP, err := net.Listen("tcp", net.JoinHostPort(ip, "80"))
-			log.DebugFatal(err).Str("listen_on", ip).Msg("listen port 80")
+			log.DebugFatal(err).Str("listen_on", net.JoinHostPort(ip, "80")).Msg("listen port 80")
 			go ServeHTTP(lnHTTP, r)
 
 			lnHTTPS, err := net.Listen("tcp", net.JoinHostPort(ip, "443"))
-			log.DebugFatal(err).Str("listen_on", ip).Msg("listen port 443")
+			log.DebugFatal(err).Str("listen_on", net.JoinHostPort(ip, "443")).Msg("listen port 443")
 			go ServeHTTPS(lnHTTPS, r)
 
 			go func(ip string) {
