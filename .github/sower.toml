@@ -8,7 +8,8 @@ password = "I_am_Passw0rd"
 [dns]
 disable = false
 # 监听该 IP 的 UDP(53)、TCP(80、443) 端口，DNS 会将请求导向这个地址
-serve_ips = ["127.0.0.1"]
+serve = "127.0.0.1"
+# serve6 = <ipv6>
 # 监听的网络接口
 # serve_iface = "lo"
 

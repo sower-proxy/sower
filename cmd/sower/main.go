@@ -37,7 +37,7 @@ var (
 
 		DNS struct {
 			Disable    bool   `default:"false" usage:"disable DNS proxy"`
-			Serve      string `usage:"dns server ip"`
+			Serve      string `default:"127.0.0.1" usage:"dns server ip"`
 			Serve6     string `usage:"dns server ipv6, eg: ::1"`
 			ServeIface string `usage:"use the IP in the net interface, if serve ip not setted. eg: eth0"`
 			Fallback   string `default:"223.5.5.5" required:"true" usage:"fallback dns server"`
