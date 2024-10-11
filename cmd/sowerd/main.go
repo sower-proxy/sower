@@ -10,7 +10,7 @@ import (
 
 	"github.com/cristalhq/aconfig"
 	"github.com/sower-proxy/conns/relay"
-	"github.com/sower-proxy/conns/teeconn"
+	"github.com/sower-proxy/conns/reread"
 	"github.com/sower-proxy/deferlog"
 	"github.com/sower-proxy/deferlog/log"
 	"github.com/wweir/sower/transport/sower"
@@ -46,7 +46,7 @@ func init() {
 func main() {
 	cacheDir, _ := os.UserCacheDir()
 	cacheDir = filepath.Join(cacheDir, "sower")
-	if err := os.MkdirAll(cacheDir, 0600); err != nil {
+	if err := os.MkdirAll(cacheDir, 0o600); err != nil {
 		log.Fatal().Err(err).
 			Str("dir", cacheDir).
 			Msg("make cache dir")
@@ -113,8 +113,8 @@ func serve443(ln net.Listener, fakeSite string, sower *sower.Sower, trojan *troj
 		log.Fatal().Err(err).Msg("serve 443 port")
 	}
 	go serve443(ln, fakeSite, sower, trojan)
-	teeconn := teeconn.New(conn)
-	defer teeconn.Close()
+	reread := reread.New(conn)
+	defer reread.Close()
 
 	var addr net.Addr
 	var dur time.Duration
@@ -125,24 +125,24 @@ func serve443(ln net.Listener, fakeSite string, sower *sower.Sower, trojan *troj
 	}()
 
 	// 1. detect if it's a sower underlaying connection
-	teeconn.Reread()
-	if addr, err = sower.Unwrap(teeconn); err == nil {
-		teeconn.Stop()
+	reread.Reread()
+	if addr, err = sower.Unwrap(reread); err == nil {
+		reread.Stop()
 
-		dur, err = relay.RelayTo(teeconn, addr.String())
+		dur, err = relay.RelayTo(reread, addr.String())
 		return
 	}
 
 	// 2. detect if it's a trojan underlaying connection
-	teeconn.Reread()
-	if addr, err = trojan.Unwrap(teeconn); err == nil {
-		teeconn.Stop()
+	reread.Reread()
+	if addr, err = trojan.Unwrap(reread); err == nil {
+		reread.Stop()
 
-		dur, err = relay.RelayTo(teeconn, addr.String())
+		dur, err = relay.RelayTo(reread, addr.String())
 		return
 	}
 
 	// 3. fallback to fake site
-	teeconn.Stop().Reread()
-	dur, err = relay.RelayTo(teeconn, fakeSite)
+	reread.Stop().Reread()
+	dur, err = relay.RelayTo(reread, fakeSite)
 }

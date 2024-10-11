@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sower-proxy/conns/teeconn"
+	"github.com/sower-proxy/conns/reread"
 	"github.com/sower-proxy/deferlog/log"
 	"github.com/wweir/sower/transport/sower"
 	"github.com/wweir/sower/transport/trojan"
@@ -24,7 +24,7 @@ func testPipe(tran Transport) (net.Addr, error) {
 		tran.Wrap(w, "sower", 443)
 	}(w)
 
-	return tran.Unwrap(teeconn.New(r))
+	return tran.Unwrap(reread.New(r))
 }
 
 func Test_Transports(t *testing.T) {

@@ -71,15 +71,16 @@ func (*domain) Network() string { return "tcp" }
 func (a *domain) String() string {
 	return net.JoinHostPort(a.ADDR, strconv.Itoa(int(a.PORT)))
 }
+
 func (a *domain) Fulfill(r io.Reader) error {
 	buf := make([]byte, 1)
-	if n, err := r.Read(buf); err != nil || n != 1 {
+	if n, err := io.ReadFull(r, buf); err != nil || n != 1 {
 		return errors.New("read domain length failed")
 	}
 
 	addrLen := int(buf[0])
 	buf = make([]byte, addrLen+4)
-	if n, err := r.Read(buf); err != nil || n != addrLen+4 {
+	if n, err := io.ReadFull(r, buf); err != nil || n != addrLen+4 {
 		return errors.Wrap(err, "read doamin failed")
 	}
 
@@ -127,12 +128,12 @@ func (t *Trojan) Unwrap(conn net.Conn) (net.Addr, error) {
 
 	head.CMD, head.ATYP = buf[58], buf[59]
 	switch head.ATYP {
-	case 0x01: //ipv4
+	case 0x01: // ipv4
 		addr := &ipv4Addr{}
 		err := binary.Read(conn, binary.BigEndian, addr)
 		return addr, errors.Wrap(err, "read addr")
 
-	case 0x04: //ipv6
+	case 0x04: // ipv6
 		addr := &ipv6Addr{}
 		err := binary.Read(conn, binary.BigEndian, addr)
 		return addr, errors.Wrap(err, "read addr")

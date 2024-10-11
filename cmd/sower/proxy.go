@@ -9,7 +9,7 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/sower-proxy/conns/relay"
-	"github.com/sower-proxy/conns/teeconn"
+	"github.com/sower-proxy/conns/reread"
 	"github.com/sower-proxy/deferlog/log"
 	"github.com/wweir/sower/router"
 	"github.com/wweir/sower/transport"
@@ -77,10 +77,10 @@ func ServeHTTP(ln net.Listener, r *router.Router) {
 
 	go ServeHTTP(ln, r)
 	start := time.Now()
-	teeconn := teeconn.New(conn)
-	defer teeconn.Close()
+	reread := reread.New(conn)
+	defer reread.Close()
 
-	req, err := http.ReadRequest(bufio.NewReader(teeconn))
+	req, err := http.ReadRequest(bufio.NewReader(reread))
 	if err != nil {
 		log.Error().Err(err).Msg("read http request")
 		return
@@ -96,8 +96,8 @@ func ServeHTTP(ln net.Listener, r *router.Router) {
 	}
 	defer rc.Close()
 
-	teeconn.Stop().Reread()
-	err = relay.Relay(teeconn, rc)
+	reread.Stop().Reread()
+	err = relay.Relay(reread, rc)
 	log.DebugWarn(err).
 		Str("host", req.Host).
 		Dur("spend", time.Since(start)).
@@ -113,11 +113,11 @@ func ServeHTTPS(ln net.Listener, r *router.Router) {
 
 	go ServeHTTPS(ln, r)
 	start := time.Now()
-	teeconn := teeconn.New(conn)
-	defer teeconn.Close()
+	reread := reread.New(conn)
+	defer reread.Close()
 
 	var domain string
-	tls.Server(teeconn, &tls.Config{
+	tls.Server(reread, &tls.Config{
 		GetConfigForClient: func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
 			domain = hello.ServerName
 			return nil, nil
@@ -133,8 +133,8 @@ func ServeHTTPS(ln net.Listener, r *router.Router) {
 	}
 	defer rc.Close()
 
-	teeconn.Stop().Reread()
-	err = relay.Relay(teeconn, rc)
+	reread.Stop().Reread()
+	err = relay.Relay(reread, rc)
 	log.DebugWarn(err).
 		Str("host", domain).
 		Dur("spend", time.Since(start)).
@@ -150,70 +150,46 @@ func ServeSocks5(ln net.Listener, r *router.Router) {
 	go ServeSocks5(ln, r)
 	defer conn.Close()
 
-	teeConn := teeconn.New(conn)
+	reread := reread.New(conn)
 
-	buf1 := make([]byte, 1)
-	if _, err := teeConn.Read(buf1); err != nil {
-		log.Warn().Err(err).
-			Msg("read socks5 version")
+	byte1 := make([]byte, 1)
+	if n, err := reread.Read(byte1); err != nil || n != 1 {
+		log.Error().Err(err).Msg("read first byte")
+		return
+	}
+	reread.Reread()
+
+	if byte1[0] == 5 {
+		reread.Stop()
+		if addr, err := socks5.New().Unwrap(reread); err != nil {
+			log.Error().Err(err).Msg("read socks5 request")
+		} else {
+			host, port := addr.(*socks5.AddrHead).Addr()
+			r.RouteHandle(reread, host, port)
+		}
 		return
 	}
 
-	if buf1[0] != 5 {
-		teeConn.Reread()
-		serveHttpProxy(teeConn, r)
-		return
-	}
-
-	teeConn.Stop().Reread()
-	addr, err := socks5.New().Unwrap(teeConn)
+	req, err := http.ReadRequest(bufio.NewReader(reread))
 	if err != nil {
-		log.Warn().Err(err).
-			Msgf("parse socks5 target: %s", addr)
+		log.Error().Err(err).Msg("read http request")
 		return
 	}
 
-	host, port := addr.(*socks5.AddrHead).Addr()
-	r.RouteHandle(teeConn, host, port)
-}
-
-func serveHttpProxy(teeConn *teeconn.Conn, r *router.Router) {
-	req, err := http.ReadRequest(bufio.NewReader(teeConn))
+	host, port, err := router.ParseHostPort(req.Host, req.URL)
 	if err != nil {
-		log.Warn().Err(err).
-			Msg("read http request")
+		reread.Stop().Write([]byte("HTTP/1.1 400 Bad Request\r\n\r\n"))
 		return
 	}
 
-	teeConn.Stop()
-	switch req.Method {
-	case "CONNECT":
-		if _, err := teeConn.Write([]byte(req.Proto + " 200 Connection established\r\n\r\n")); err != nil {
-			log.Warn().Err(err).
-				Msg("write https proxy response")
-			return
-		}
-
-		host, port, err := router.ParseHostPort(req.Host, 443)
-		if err != nil {
-			log.Warn().Err(err).
-				Msg("parse https_proxy target")
-			return
-		}
-
-		rc, err := r.ProxyDial("tcp", host, port)
-		if err != nil {
-			log.Warn().Err(err).
-				Str("host", host).
-				Msg("dial proxy")
-			return
-		}
-		defer rc.Close()
-
-		relay.Relay(teeConn, rc)
-
-	default:
-		teeConn.Reread()
-		r.RouteHandle(teeConn, req.Host, 80)
+	if req.Method == http.MethodConnect {
+		// https
+		reread.Stop().Reset()
+		reread.Write([]byte("HTTP/1.1 200 Connection established\r\n\r\n"))
+	} else {
+		// http
+		reread.Stop().Reread()
 	}
+
+	r.RouteHandle(reread, host, port)
 }

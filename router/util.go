@@ -2,16 +2,22 @@ package router
 
 import (
 	"net"
+	"net/url"
 	"strconv"
 )
 
-func ParseHostPort(hostport string, defaultPort uint16) (string, uint16, error) {
+func ParseHostPort(hostport string, u *url.URL) (string, uint16, error) {
 	host, port, err := net.SplitHostPort(hostport)
 	if err != nil {
+		if err.(*net.AddrError).Err == "missing port in address" {
+			switch u.Scheme {
+			case "http":
+				return hostport, 80, nil
+			case "https":
+				return hostport, 443, nil
+			}
+		}
 		return "", 0, err
-	}
-	if port == "" {
-		return host, defaultPort, nil
 	}
 
 	portInt, err := strconv.ParseUint(port, 10, 16)

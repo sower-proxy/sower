@@ -28,14 +28,16 @@ func New() *Socks5 {
 	return &Socks5{}
 }
 
-var noAuthResp = authResp{VER: 5, METHOD: 0}
-var succHeadResp = respHead{VER: 5, REP: 0, RSV: 0, ATYP: 1}
+var (
+	noAuthResp   = authResp{VER: 5, METHOD: 0}
+	succHeadResp = respHead{VER: 5, REP: 0, RSV: 0, ATYP: 1}
+)
 
 func (s *Socks5) Unwrap(conn net.Conn) (net.Addr, error) {
-	{ //auth
+	{ // auth
 		auth := new(authReq)
-		if err := auth.Fulfill(conn); err != nil && !auth.IsValid() {
-			return nil, errors.Errorf("read head: %v, err: %s", auth, err)
+		if err := auth.Fulfill(conn); err != nil || !auth.IsValid() {
+			return nil, errors.Errorf("read auth head: %v, err: %s", auth, err)
 		}
 
 		if err := binary.Write(conn, binary.BigEndian, noAuthResp); err != nil {
