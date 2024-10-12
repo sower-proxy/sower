@@ -37,7 +37,7 @@ var (
 
 		DNS struct {
 			Disable    bool   `default:"false" usage:"disable DNS proxy"`
-			Serve      string `default:"127.0.0.1" usage:"dns server ip"`
+			Serve      string `usage:"dns server ip"`
 			Serve6     string `usage:"dns server ipv6, eg: ::1"`
 			ServeIface string `usage:"use the IP in the net interface, if serve ip not setted. eg: eth0"`
 			Fallback   string `default:"223.5.5.5" required:"true" usage:"fallback dns server"`
@@ -78,6 +78,16 @@ func init() {
 	if err := aconfig.LoaderFor(&conf, aconfig.Config{
 		AllowUnknownFields: true,
 		FileFlag:           "f",
+		Files: []string{
+			"sower.hcl",
+			"sower.toml",
+			"sower.yaml",
+			"sower.yml",
+			"/etc/sower/sower.hcl",
+			"/etc/sower/sower.toml",
+			"/etc/sower/sower.yaml",
+			"/etc/sower/sower.yml",
+		},
 		FileDecoders: map[string]aconfig.FileDecoder{
 			".yml":  aconfigyaml.New(),
 			".yaml": aconfigyaml.New(),
@@ -98,7 +108,7 @@ func init() {
 		for _, addr := range addrs {
 			ip, _, err := net.ParseCIDR(addr.String())
 			log.InfoFatal(err).Str("iface", conf.DNS.ServeIface).
-				Msg("parse iface addr: " + addr.String())
+				Msg("parse iface IP: " + ip.String())
 
 			if ip.To4() != nil { // ipv4
 				if conf.DNS.Serve == "" {
