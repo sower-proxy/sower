@@ -126,7 +126,7 @@ func init() {
 }
 
 func main() {
-	proxyDial := GenProxyDial(conf.Remote.Type, conf.Remote.Addr, conf.Remote.Password)
+	proxyDial := GenProxyDial(conf.Remote.Type, conf.Remote.Addr, conf.Remote.Password, conf.DNS.Fallback)
 	r := router.NewRouter(conf.DNS.Serve, conf.DNS.Fallback, conf.Router.Country.MMDB, proxyDial)
 	r.BlockRule = suffixtree.NewNodeFromRules(conf.Router.Block.Rules...)
 	r.DirectRule = suffixtree.NewNodeFromRules(conf.Router.Direct.Rules...)

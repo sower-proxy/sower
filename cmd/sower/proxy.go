@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"crypto/tls"
 	"net"
 	"net/http"
@@ -18,29 +19,43 @@ import (
 	"github.com/wweir/sower/transport/trojan"
 )
 
-func GenProxyDial(proxyType, proxyHost, proxyPassword string) router.ProxyDialFn {
+func GenProxyDial(proxyType, proxyHost, proxyPassword, dnsFallback string) router.ProxyDialFn {
 	var proxy transport.Transport
 	var dialFn func() (net.Conn, error)
 
+	dialer := &net.Dialer{
+		Resolver: &net.Resolver{
+			PreferGo: true,
+			Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+				d := net.Dialer{}
+				c, err := d.DialContext(ctx, "udp", net.JoinHostPort(dnsFallback, "53"))
+				if err != nil {
+					log.Warn().Err(err).Msg("dial fallback dns failed, use default dns setting")
+					c, err = d.DialContext(ctx, network, address)
+				}
+				return c, err
+			},
+		},
+	}
 	switch conf.Remote.Type {
 	case "sower":
 		proxy = sower.New(conf.Remote.Password)
 		tlsCfg := &tls.Config{}
 		dialFn = func() (net.Conn, error) {
-			return tls.Dial("tcp", net.JoinHostPort(proxyHost, "443"), tlsCfg)
+			return tls.DialWithDialer(dialer, "tcp", net.JoinHostPort(proxyHost, "443"), tlsCfg)
 		}
 
 	case "trojan":
 		proxy = trojan.New(conf.Remote.Password)
 		tlsCfg := &tls.Config{}
 		dialFn = func() (net.Conn, error) {
-			return tls.Dial("tcp", net.JoinHostPort(proxyHost, "443"), tlsCfg)
+			return tls.DialWithDialer(dialer, "tcp", net.JoinHostPort(proxyHost, "443"), tlsCfg)
 		}
 
 	case "socks5":
 		proxy = socks5.New()
 		dialFn = func() (net.Conn, error) {
-			return net.Dial("tcp", proxyHost)
+			return dialer.Dial("tcp", proxyHost)
 		}
 
 	default:
