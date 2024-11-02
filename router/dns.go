@@ -55,7 +55,6 @@ func (r *Router) dnsProxyA(domain string, localIP net.IP, req *dns.Msg) *dns.Msg
 			Hdr: dns.RR_Header{Name: domain, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 20},
 			A:   localIP,
 		}}
-
 	} else {
 		m.Answer = []dns.RR{&dns.AAAA{
 			Hdr:  dns.RR_Header{Name: domain, Rrtype: dns.TypeAAAA, Class: dns.ClassINET, Ttl: 20},
@@ -65,9 +64,11 @@ func (r *Router) dnsProxyA(domain string, localIP net.IP, req *dns.Msg) *dns.Msg
 	return m
 }
 
-var upstreamAddrs []string
-var upstreamIndex = -1
-var queryCount = 0
+var (
+	upstreamAddrs []string
+	upstreamIndex = -1
+	queryCount    = 0
+)
 
 func (r *Router) Exchange(req *dns.Msg) (_ *dns.Msg, err error) {
 	queryCount++
@@ -79,24 +80,24 @@ func (r *Router) Exchange(req *dns.Msg) (_ *dns.Msg, err error) {
 			Msg("get dns server")
 
 		addrs := make([]string, 0, len(dnsIPs)+1)
+		addrs = append(addrs, net.JoinHostPort(r.dns.fallbackDNS, "53"))
 		for _, ip := range dnsIPs {
 			if ip != string(r.dns.serveIP) {
 				addrs = append(addrs, net.JoinHostPort(ip, "53"))
 			}
 		}
-		if len(addrs) == 0 {
-			addrs = append(addrs, net.JoinHostPort(r.dns.fallbackDNS, "53"))
-		}
 
 		queryCount = 0
 		upstreamAddrs = addrs
 		upstreamIndex = len(addrs) - 1
+		log.Info().Str("ip", upstreamAddrs[upstreamIndex]).Msg("use upstream dns")
 	}
 
 	resp, err := dns.Exchange(req, upstreamAddrs[upstreamIndex])
 	if err != nil {
 		upstreamIndex--
 		if upstreamIndex >= 0 {
+			log.Info().Str("ip", upstreamAddrs[upstreamIndex]).Msg("use upstream dns")
 			resp, err = dns.Exchange(req, upstreamAddrs[upstreamIndex])
 		}
 	}
