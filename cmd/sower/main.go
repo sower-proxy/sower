@@ -40,6 +40,7 @@ var (
 			Serve      string `usage:"dns server ip"`
 			Serve6     string `usage:"dns server ipv6, eg: ::1"`
 			ServeIface string `usage:"use the IP in the net interface, if serve ip not setted. eg: eth0"`
+			Upstream   string `usage:"upstream dns server"`
 			Fallback   string `default:"223.5.5.5" required:"true" usage:"fallback dns server"`
 		}
 		Socks5 struct {
@@ -136,8 +137,12 @@ func init() {
 }
 
 func main() {
-	proxyDial := GenProxyDial(conf.Remote.Type, conf.Remote.Addr, conf.Remote.Password, conf.DNS.Fallback)
-	r := router.NewRouter(conf.DNS.Serve, conf.DNS.Fallback, conf.Router.Country.MMDB, proxyDial)
+	upstreamDNS := conf.DNS.Upstream
+	if upstreamDNS == "" {
+		upstreamDNS = conf.DNS.Fallback
+	}
+	proxyDial := GenProxyDial(conf.Remote.Type, conf.Remote.Addr, conf.Remote.Password, upstreamDNS)
+	r := router.NewRouter(conf.DNS.Serve, conf.DNS.Upstream, conf.DNS.Fallback, conf.Router.Country.MMDB, proxyDial)
 	r.BlockRule = suffixtree.NewNodeFromRules(conf.Router.Block.Rules...)
 	r.DirectRule = suffixtree.NewNodeFromRules(conf.Router.Direct.Rules...)
 	r.ProxyRule = suffixtree.NewNodeFromRules(conf.Router.Proxy.Rules...)

@@ -14,30 +14,34 @@ import (
 	"github.com/wweir/sower/pkg/suffixtree"
 )
 
-type ProxyDialFn func(network, host string, port uint16) (net.Conn, error)
-type Router struct {
-	BlockRule  *suffixtree.Node
-	DirectRule *suffixtree.Node
-	ProxyRule  *suffixtree.Node
-	ProxyDial  ProxyDialFn
+type (
+	ProxyDialFn func(network, host string, port uint16) (net.Conn, error)
+	Router      struct {
+		BlockRule  *suffixtree.Node
+		DirectRule *suffixtree.Node
+		ProxyRule  *suffixtree.Node
+		ProxyDial  ProxyDialFn
 
-	dns struct {
-		dns.Client
-		fallbackDNS string
-		serveIP     net.IP
+		dns struct {
+			dns.Client
+			upstreamDNS string
+			fallbackDNS string
+			serveIP     net.IP
+		}
+
+		country struct {
+			*geoip2.Reader
+			cidrs []*net.IPNet
+		}
 	}
+)
 
-	country struct {
-		*geoip2.Reader
-		cidrs []*net.IPNet
-	}
-}
-
-func NewRouter(serveIP, fallbackDNS, mmdbFile string, proxyDial ProxyDialFn) *Router {
+func NewRouter(serveIP, upstreamDNS, fallbackDNS, mmdbFile string, proxyDial ProxyDialFn) *Router {
 	r := Router{
 		ProxyDial: proxyDial,
 	}
 
+	r.dns.upstreamDNS = upstreamDNS
 	r.dns.serveIP = net.ParseIP(serveIP)
 	r.dns.fallbackDNS = fallbackDNS
 

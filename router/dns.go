@@ -2,6 +2,7 @@ package router
 
 import (
 	"net"
+	"sync/atomic"
 
 	"github.com/miekg/dns"
 	"github.com/sower-proxy/deferlog/log"
@@ -66,18 +67,21 @@ func (r *Router) dnsProxyA(domain string, localIP net.IP, req *dns.Msg) *dns.Msg
 
 var (
 	upstreamAddrs []string
-	upstreamIndex = -1
-	queryCount    = 0
+	upstreamIndex int32 = -1
+	queryCount    int32 = 0
 )
 
 func (r *Router) Exchange(req *dns.Msg) (_ *dns.Msg, err error) {
-	queryCount++
-	if upstreamIndex < 0 {
-		dnsIPs, err := dhcp.GetDNSServer()
-		log.Err(err).
-			Int("queryCount", queryCount).
-			Strs("dns", dnsIPs).
-			Msg("get dns server")
+	atomic.AddInt32(&queryCount, 1)
+	if atomic.LoadInt32(&upstreamIndex) < 0 {
+		dnsIPs := []string{r.dns.upstreamDNS}
+		if r.dns.upstreamDNS == "" {
+			dnsIPs, err = dhcp.GetDNSServer()
+			log.Err(err).
+				Int32("queryCount", atomic.LoadInt32(&queryCount)).
+				Strs("dns", dnsIPs).
+				Msg("get dns server")
+		}
 
 		addrs := make([]string, 0, len(dnsIPs)+1)
 		addrs = append(addrs, net.JoinHostPort(r.dns.fallbackDNS, "53"))
@@ -87,18 +91,18 @@ func (r *Router) Exchange(req *dns.Msg) (_ *dns.Msg, err error) {
 			}
 		}
 
-		queryCount = 0
+		atomic.StoreInt32(&queryCount, 0)
 		upstreamAddrs = addrs
-		upstreamIndex = len(addrs) - 1
-		log.Info().Str("ip", upstreamAddrs[upstreamIndex]).Msg("use upstream dns")
+		atomic.StoreInt32(&upstreamIndex, int32(len(addrs)-1))
+		log.Info().Str("ip", upstreamAddrs[atomic.LoadInt32(&upstreamIndex)]).Msg("use upstream dns")
 	}
 
-	resp, err := dns.Exchange(req, upstreamAddrs[upstreamIndex])
+	resp, err := dns.Exchange(req, upstreamAddrs[atomic.LoadInt32(&upstreamIndex)])
 	if err != nil {
-		upstreamIndex--
-		if upstreamIndex >= 0 {
-			log.Info().Str("ip", upstreamAddrs[upstreamIndex]).Msg("use upstream dns")
-			resp, err = dns.Exchange(req, upstreamAddrs[upstreamIndex])
+		atomic.AddInt32(&upstreamIndex, -1)
+		if atomic.LoadInt32(&upstreamIndex) >= 0 {
+			log.Info().Str("ip", upstreamAddrs[atomic.LoadInt32(&upstreamIndex)]).Msg("use upstream dns")
+			resp, err = dns.Exchange(req, upstreamAddrs[atomic.LoadInt32(&upstreamIndex)])
 		}
 	}
 

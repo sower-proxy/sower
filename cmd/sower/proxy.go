@@ -19,7 +19,7 @@ import (
 	"github.com/wweir/sower/transport/trojan"
 )
 
-func GenProxyDial(proxyType, proxyHost, proxyPassword, dnsFallback string) router.ProxyDialFn {
+func GenProxyDial(proxyType, proxyHost, proxyPassword, dns string) router.ProxyDialFn {
 	var proxy transport.Transport
 	var dialFn func() (net.Conn, error)
 
@@ -28,7 +28,7 @@ func GenProxyDial(proxyType, proxyHost, proxyPassword, dnsFallback string) route
 			PreferGo: true,
 			Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
 				d := net.Dialer{}
-				c, err := d.DialContext(ctx, "udp", net.JoinHostPort(dnsFallback, "53"))
+				c, err := d.DialContext(ctx, "udp", net.JoinHostPort(dns, "53"))
 				if err != nil {
 					log.Warn().Err(err).Msg("dial fallback dns failed, use default dns setting")
 					c, err = d.DialContext(ctx, network, address)
