@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/tls"
+	"log"
 	"log/slog"
 	"net"
 	"net/http"
@@ -23,9 +24,9 @@ var (
 	version, date string
 
 	conf = struct {
-		ServeIP  string `usage:"listen to port 80 443 of this IP, eg: 0.0.0.0"`
+		ServeIP  string `required:"true" usage:"listen to port 80 443 of the IP"`
 		Password string `required:"true"`
-		FakeSite string `default:"127.0.0.1:8080" usage:"fake site address or directoy"`
+		FakeSite string `default:"/var/www" usage:"fake site address or directoy. serving on 127.0.0.1:80 if directory"`
 
 		Cert struct {
 			Email string
@@ -81,8 +82,12 @@ func main() {
 
 	// Redirect 80 to 443
 	go func() {
-		err := http.ListenAndServe(net.JoinHostPort(conf.ServeIP, "80"),
-			certManager.HTTPHandler(http.HandlerFunc(redirectToHTTPS)))
+		addr := net.JoinHostPort(conf.ServeIP, "80")
+		err := http.ListenAndServe(addr, certManager.HTTPHandler(http.HandlerFunc(
+			func(w http.ResponseWriter, r *http.Request) {
+				target := "https://" + r.Host + r.URL.RequestURI()
+				http.Redirect(w, r, target, http.StatusPermanentRedirect)
+			})))
 		if err != nil {
 			slog.Error("listen http", "error", err)
 			os.Exit(1)
@@ -96,23 +101,14 @@ func main() {
 	}
 
 	if si, err := os.Stat(conf.FakeSite); err == nil && si.IsDir() {
-		http.NewFileTransport(http.Dir(conf.FakeSite))
-	} else if _, _, err := net.SplitHostPort(conf.FakeSite); err == nil {
-		go serve443(ln, conf.FakeSite, sower.New(conf.Password), trojan.New(conf.Password))
+		go http.ListenAndServe("127.0.0.1:80", http.FileServer(http.Dir(conf.FakeSite)))
+		conf.FakeSite = "127.0.0.1:80"
+	}
+	if _, _, err := net.SplitHostPort(conf.FakeSite); err != nil {
+		log.Fatalln("fake site address must be a valid host:port")
 	}
 
-	select {}
-}
-
-func redirectToHTTPS(w http.ResponseWriter, r *http.Request) {
-	r.URL.Scheme = "https"
-	if host, _, err := net.SplitHostPort(r.Host); err != nil {
-		r.URL.Host = r.Host
-	} else {
-		r.URL.Host = host
-	}
-
-	http.Redirect(w, r, r.URL.String(), 301)
+	serve443(ln, conf.FakeSite, sower.New(conf.Password), trojan.New(conf.Password))
 }
 
 func serve443(ln net.Listener, fakeSite string, sower *sower.Sower, trojan *trojan.Trojan) {
