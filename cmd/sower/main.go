@@ -3,7 +3,9 @@ package main
 import (
 	"bufio"
 	"compress/gzip"
+	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -16,9 +18,10 @@ import (
 	"github.com/cristalhq/aconfig/aconfighcl"
 	"github.com/cristalhq/aconfig/aconfigtoml"
 	"github.com/cristalhq/aconfig/aconfigyaml"
+	"github.com/lmittmann/tint"
 	"github.com/miekg/dns"
 	"github.com/pkg/errors"
-	"github.com/sower-proxy/deferlog/log"
+	"github.com/sower-proxy/deferlog/v2"
 	"github.com/wweir/sower/pkg/suffixtree"
 	"github.com/wweir/sower/router"
 )
@@ -76,9 +79,14 @@ var (
 )
 
 func init() {
+	fi, _ := os.Stdout.Stat()
+	noColor := (fi.Mode() & os.ModeCharDevice) == 0
+	deferlog.SetDefault(slog.New(tint.NewHandler(os.Stdout,
+		&tint.Options{AddSource: true, NoColor: noColor})))
+
 	if err := aconfig.LoaderFor(&conf, aconfig.Config{
 		AllowUnknownFields: true,
-		FileFlag:           "f",
+		FileFlag:           "c",
 		Files: []string{
 			"sower.hcl",
 			"sower.toml",
@@ -96,20 +104,27 @@ func init() {
 			".hcl":  aconfighcl.New(),
 		},
 	}).Load(); err != nil {
-		log.Fatal().Err(err).
-			Interface("config", conf).
-			Msg("Load config")
+		slog.Error("load config", "error", err, "config", conf)
+		os.Exit(1)
 	}
 
 	if conf.DNS.ServeIface != "" {
 		iface, err := net.InterfaceByName(conf.DNS.ServeIface)
-		log.DebugFatal(err).Str("iface", conf.DNS.ServeIface).Msg("get iface")
+		if err != nil {
+			slog.Error("get interface", "error", err, "iface", conf.DNS.ServeIface)
+			os.Exit(1)
+		}
 		addrs, err := iface.Addrs()
-		log.InfoFatal(err).Str("iface", conf.DNS.ServeIface).Msg("get iface addrs")
+		if err != nil {
+			slog.Error("get interface addresses", "error", err, "iface", conf.DNS.ServeIface)
+			os.Exit(1)
+		}
 		for _, addr := range addrs {
 			ip, _, err := net.ParseCIDR(addr.String())
-			log.InfoFatal(err).Str("iface", conf.DNS.ServeIface).
-				Msg("parse iface IP: " + ip.String())
+			if err != nil {
+				slog.Error("parse interface IP", "error", err, "iface", conf.DNS.ServeIface, "ip", ip.String())
+				os.Exit(1)
+			}
 
 			if ip.To4() != nil { // ipv4
 				if conf.DNS.Serve == "" {
@@ -124,16 +139,13 @@ func init() {
 	}
 
 	if !conf.DNS.Disable && conf.DNS.Serve == "" {
-		log.Fatal().Msg("dns serve ip and serve inteface not setted")
+		slog.Error("dns serve ip and serve interface not set")
+		os.Exit(1)
 	}
 
 	conf.Router.Direct.Rules = append(conf.Router.Direct.Rules,
 		conf.Remote.Addr, "**.in-addr.arpa", "**.ip6.arpa")
-	log.Info().
-		Str("version", version).
-		Str("date", date).
-		Interface("config", conf).
-		Msg("Starting")
+	slog.Info("starting sower", "version", version, "date", date, "config", fmt.Sprint(conf))
 }
 
 func main() {
@@ -149,7 +161,7 @@ func main() {
 	r.AddCountryCIDRs(conf.Router.Country.Rules...)
 
 	if conf.DNS.Disable {
-		log.Info().Msg("DNS proxy disabled")
+		slog.Info("DNS proxy disabled")
 	} else {
 		ips := make([]string, 0, 2)
 		if strings.TrimSpace(conf.DNS.Serve) != "" {
@@ -161,31 +173,41 @@ func main() {
 
 		for _, ip := range ips {
 			lnHTTP, err := net.Listen("tcp", net.JoinHostPort(ip, "80"))
-			log.DebugFatal(err).Str("listen_on", net.JoinHostPort(ip, "80")).Msg("listen port 80")
+			if err != nil {
+				slog.Error("listen port 80", "error", err, "listen_on", net.JoinHostPort(ip, "80"))
+				os.Exit(1)
+			}
 			go ServeHTTP(lnHTTP, r)
 
 			lnHTTPS, err := net.Listen("tcp", net.JoinHostPort(ip, "443"))
-			log.DebugFatal(err).Str("listen_on", net.JoinHostPort(ip, "443")).Msg("listen port 443")
+			if err != nil {
+				slog.Error("listen port 443", "error", err, "listen_on", net.JoinHostPort(ip, "443"))
+				os.Exit(1)
+			}
 			go ServeHTTPS(lnHTTPS, r)
 
 			go func(ip string) {
 				err := dns.ListenAndServe(net.JoinHostPort(ip, "53"), "udp", r)
-				log.InfoFatal(err).Str("listen_on", ip).Msg("serve dns")
+				if err != nil {
+					slog.Error("serve dns", "error", err, "listen_on", ip)
+					os.Exit(1)
+				}
 			}(ip)
 		}
 	}
 
 	go func() {
 		if conf.Socks5.Disable {
-			log.Info().Msg("SOCKS5 proxy disabled")
+			slog.Info("SOCKS5 proxy disabled")
 			return
 		}
 
 		ln, err := net.Listen("tcp", conf.Socks5.Addr)
 		if err != nil {
-			log.Fatal().Err(err).Msg("listen port")
+			slog.Error("listen port", "error", err)
+			os.Exit(1)
 		}
-		log.Info().Msgf("SOCKS5 proxy listening on %s", conf.Socks5.Addr)
+		slog.Info("SOCKS5 proxy listening", "addr", conf.Socks5.Addr)
 		go ServeSocks5(ln, r)
 	}()
 
@@ -197,12 +219,8 @@ func main() {
 		r.AddCountryCIDRs(line)
 	}
 
-	log.Info().
-		Dur("took", time.Since(start)).
-		Uint64("blockRule", r.BlockRule.Count).
-		Uint64("directRule", r.DirectRule.Count).
-		Uint64("proxyRule", r.ProxyRule.Count).
-		Msg("Loaded rules, proxy started")
+	slog.Info("loaded rules, proxy started", "took", time.Since(start),
+		"blockRule", r.BlockRule.Count, "directRule", r.DirectRule.Count, "proxyRule", r.ProxyRule.Count)
 	runtime.GC()
 	select {}
 }
@@ -265,9 +283,10 @@ func fetchRuleFile(proxyDial router.ProxyDialFn, file string) <-chan string {
 		time.Sleep(i * i * 100 * time.Millisecond)
 		rc, err = loadFn()
 	}
-	log.InfoFatal(err).
-		Str("file", file).
-		Msg("fetch rule file")
+	if err != nil {
+		slog.Error("fetch rule file", "error", err, "file", file)
+		os.Exit(1)
+	}
 
 	ch := make(chan string, 100)
 	go func() {
@@ -284,9 +303,7 @@ func fetchRuleFile(proxyDial router.ProxyDialFn, file string) <-chan string {
 			if err == io.EOF {
 				return
 			} else if err != nil {
-				log.Error().Err(err).
-					Str("file", file).
-					Msg("read line")
+				slog.Error("read line", "error", err, "file", file)
 				return
 			}
 

@@ -2,10 +2,9 @@ package router
 
 import (
 	"context"
+	"log/slog"
 	"net"
 	"time"
-
-	"github.com/sower-proxy/deferlog/log"
 )
 
 func (r *Router) localSite(domain string) bool {
@@ -17,10 +16,7 @@ func (r *Router) localSite(domain string) bool {
 
 		ips, err := net.DefaultResolver.LookupIP(ctx, "ip", domain)
 		if err != nil || len(ips) == 0 {
-			log.Warn().Err(err).
-				Str("domain", domain).
-				Int("ips", len(ips)).
-				Msg("resolve domain")
+			slog.Warn("resolve domain", "error", err, "domain", domain, "ips", len(ips))
 			return false
 		}
 
@@ -38,10 +34,7 @@ func (r *Router) localSite(domain string) bool {
 	if r.country.Reader != nil {
 		city, err := r.country.City(ip)
 		if err != nil {
-			log.Warn().Err(err).
-				Str("domain", domain).
-				IPAddr("ip", ip).
-				Msg("mmdb search")
+			slog.Warn("mmdb search", "error", err, "domain", domain, "ip", ip)
 			return false
 		}
 

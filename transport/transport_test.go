@@ -6,14 +6,9 @@ import (
 	"testing"
 
 	"github.com/sower-proxy/conns/reread"
-	"github.com/sower-proxy/deferlog/log"
 	"github.com/wweir/sower/transport/sower"
 	"github.com/wweir/sower/transport/trojan"
 )
-
-func init() {
-	log.Logger = log.Logger.With().Caller().Logger()
-}
 
 func testPipe(tran Transport) (net.Addr, error) {
 	r, w := net.Pipe()

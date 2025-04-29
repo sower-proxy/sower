@@ -1,11 +1,11 @@
 package router
 
 import (
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
 
-	"github.com/sower-proxy/deferlog/log"
 	"github.com/sower-proxy/mem"
 )
 
@@ -42,9 +42,7 @@ func httpPing(key string) (bool, error) {
 	wg.Wait()
 
 	if err80 != nil && err443 != nil {
-		log.Warn().
-			Errs("errs", []error{err80, err443}).
-			Msg("Failed to ping")
+		slog.Warn("failed to ping", "err80", err80, "err443", err443)
 	}
 
 	return err80 == nil && err443 == nil, nil

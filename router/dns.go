@@ -1,11 +1,11 @@
 package router
 
 import (
+	"log/slog"
 	"net"
 	"sync/atomic"
 
 	"github.com/miekg/dns"
-	"github.com/sower-proxy/deferlog/log"
 	"github.com/wweir/sower/pkg/dhcp"
 )
 
@@ -27,7 +27,11 @@ func (r *Router) ServeDNS(w dns.ResponseWriter, req *dns.Msg) {
 
 	case r.ProxyRule.Match(domain):
 		host, _, err := net.SplitHostPort(w.LocalAddr().String())
-		log.DebugWarn(err).Str("host", host).Msg("proxy dns")
+		if err != nil {
+			slog.Warn("proxy dns", "error", err, "host", host)
+		} else {
+			slog.Debug("proxy dns", "host", host)
+		}
 		_ = w.WriteMsg(r.dnsProxyA(domain, net.ParseIP(host), req))
 		return
 	}
@@ -77,10 +81,7 @@ func (r *Router) Exchange(req *dns.Msg) (_ *dns.Msg, err error) {
 		dnsIPs := []string{r.dns.upstreamDNS}
 		if r.dns.upstreamDNS == "" {
 			dnsIPs, err = dhcp.GetDNSServer()
-			log.Err(err).
-				Int32("queryCount", atomic.LoadInt32(&queryCount)).
-				Strs("dns", dnsIPs).
-				Msg("get dns server")
+			slog.Error("get dns server", "error", err, "queryCount", atomic.LoadInt32(&queryCount), "dns", dnsIPs)
 		}
 
 		addrs := make([]string, 0, len(dnsIPs)+1)
@@ -94,14 +95,14 @@ func (r *Router) Exchange(req *dns.Msg) (_ *dns.Msg, err error) {
 		atomic.StoreInt32(&queryCount, 0)
 		upstreamAddrs = addrs
 		atomic.StoreInt32(&upstreamIndex, int32(len(addrs)-1))
-		log.Info().Str("ip", upstreamAddrs[atomic.LoadInt32(&upstreamIndex)]).Msg("use upstream dns")
+		slog.Info("use upstream dns", "ip", upstreamAddrs[atomic.LoadInt32(&upstreamIndex)])
 	}
 
 	resp, err := dns.Exchange(req, upstreamAddrs[atomic.LoadInt32(&upstreamIndex)])
 	if err != nil {
 		atomic.AddInt32(&upstreamIndex, -1)
 		if atomic.LoadInt32(&upstreamIndex) >= 0 {
-			log.Info().Str("ip", upstreamAddrs[atomic.LoadInt32(&upstreamIndex)]).Msg("use upstream dns")
+			slog.Info("use upstream dns", "ip", upstreamAddrs[atomic.LoadInt32(&upstreamIndex)])
 			resp, err = dns.Exchange(req, upstreamAddrs[atomic.LoadInt32(&upstreamIndex)])
 		}
 	}

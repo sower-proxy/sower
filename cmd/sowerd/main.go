@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/tls"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -9,10 +10,10 @@ import (
 	"time"
 
 	"github.com/cristalhq/aconfig"
+	"github.com/lmittmann/tint"
 	"github.com/sower-proxy/conns/relay"
 	"github.com/sower-proxy/conns/reread"
-	"github.com/sower-proxy/deferlog"
-	"github.com/sower-proxy/deferlog/log"
+	"github.com/sower-proxy/deferlog/v2"
 	"github.com/wweir/sower/transport/sower"
 	"github.com/wweir/sower/transport/trojan"
 	"golang.org/x/crypto/acme/autocert"
@@ -35,21 +36,25 @@ var (
 )
 
 func init() {
+	fi, _ := os.Stdout.Stat()
+	noColor := (fi.Mode() & os.ModeCharDevice) == 0
+	deferlog.SetDefault(slog.New(tint.NewHandler(os.Stdout,
+		&tint.Options{AddSource: true, NoColor: noColor})))
+
 	err := aconfig.LoaderFor(&conf, aconfig.Config{}).Load()
-	log.InfoFatal(err).
-		Str("version", version).
-		Str("date", date).
-		Interface("config", conf).
-		Msg("Load config")
+	if err != nil {
+		slog.Error("load config", "error", err)
+		os.Exit(1)
+	}
+	slog.Info("load config", "version", version, "date", date, "config", conf)
 }
 
 func main() {
 	cacheDir, _ := os.UserCacheDir()
 	cacheDir = filepath.Join(cacheDir, "sower")
 	if err := os.MkdirAll(cacheDir, 0o600); err != nil {
-		log.Fatal().Err(err).
-			Str("dir", cacheDir).
-			Msg("make cache dir")
+		slog.Error("create cache dir", "error", err)
+		os.Exit(1)
 	}
 
 	certManager := autocert.Manager{
@@ -66,7 +71,8 @@ func main() {
 	if conf.Cert.Cert != "" || conf.Cert.Key != "" {
 		cert, err := tls.LoadX509KeyPair(conf.Cert.Cert, conf.Cert.Key)
 		if err != nil {
-			log.Fatal().Err(err).Msg("load certificate")
+			slog.Error("load cert", "error", err)
+			os.Exit(1)
 		}
 
 		tlsConf.GetCertificate = nil
@@ -77,15 +83,17 @@ func main() {
 	go func() {
 		err := http.ListenAndServe(net.JoinHostPort(conf.ServeIP, "80"),
 			certManager.HTTPHandler(http.HandlerFunc(redirectToHTTPS)))
-		log.Fatal().Err(err).
-			Str("IP", conf.ServeIP).
-			Msg("Listen HTTP service")
+		if err != nil {
+			slog.Error("listen http", "error", err)
+			os.Exit(1)
+		}
 	}()
 
 	ln, err := tls.Listen("tcp", net.JoinHostPort(conf.ServeIP, "443"), tlsConf)
-	log.InfoFatal(err).
-		Str("IP", conf.ServeIP).
-		Msg("Start listen HTTPS service")
+	if err != nil {
+		slog.Error("listen https", "error", err)
+		os.Exit(1)
+	}
 
 	if si, err := os.Stat(conf.FakeSite); err == nil && si.IsDir() {
 		http.NewFileTransport(http.Dir(conf.FakeSite))
@@ -110,7 +118,8 @@ func redirectToHTTPS(w http.ResponseWriter, r *http.Request) {
 func serve443(ln net.Listener, fakeSite string, sower *sower.Sower, trojan *trojan.Trojan) {
 	conn, err := ln.Accept()
 	if err != nil {
-		log.Fatal().Err(err).Msg("serve 443 port")
+		slog.Error("serve 443 port", "error", err)
+		os.Exit(1)
 	}
 	go serve443(ln, fakeSite, sower, trojan)
 	reread := reread.New(conn)
@@ -119,9 +128,7 @@ func serve443(ln net.Listener, fakeSite string, sower *sower.Sower, trojan *troj
 	var addr net.Addr
 	var dur time.Duration
 	defer func() {
-		deferlog.DebugWarn(err).
-			Dur("spend", dur).
-			Msgf("relay conn to %s", addr)
+		deferlog.DebugWarn(err, "relay conn", "took", dur, "addr", addr)
 	}()
 
 	// 1. detect if it's a sower underlaying connection

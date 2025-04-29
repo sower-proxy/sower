@@ -4,14 +4,15 @@ import (
 	"bufio"
 	"context"
 	"crypto/tls"
+	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/pkg/errors"
 	"github.com/sower-proxy/conns/relay"
 	"github.com/sower-proxy/conns/reread"
-	"github.com/sower-proxy/deferlog/log"
 	"github.com/wweir/sower/router"
 	"github.com/wweir/sower/transport"
 	"github.com/wweir/sower/transport/socks5"
@@ -30,7 +31,7 @@ func GenProxyDial(proxyType, proxyHost, proxyPassword, dns string) router.ProxyD
 				d := net.Dialer{}
 				c, err := d.DialContext(ctx, "udp", net.JoinHostPort(dns, "53"))
 				if err != nil {
-					log.Warn().Err(err).Msg("dial fallback dns failed, use default dns setting")
+					slog.Warn("dial fallback dns failed, use default dns setting", "error", err)
 					c, err = d.DialContext(ctx, network, address)
 				}
 				return c, err
@@ -59,9 +60,8 @@ func GenProxyDial(proxyType, proxyHost, proxyPassword, dns string) router.ProxyD
 		}
 
 	default:
-		log.Fatal().
-			Str("type", conf.Remote.Type).
-			Msg("unknown proxy type")
+		slog.Error("unknown proxy type", "type", conf.Remote.Type)
+		os.Exit(1)
 	}
 
 	return func(network, host string, port uint16) (net.Conn, error) {
@@ -86,8 +86,8 @@ func GenProxyDial(proxyType, proxyHost, proxyPassword, dns string) router.ProxyD
 func ServeHTTP(ln net.Listener, r *router.Router) {
 	conn, err := ln.Accept()
 	if err != nil {
-		log.Fatal().Err(err).
-			Msg("serve socks5")
+		slog.Error("serve socks5", "error", err)
+		os.Exit(1)
 	}
 
 	go ServeHTTP(ln, r)
@@ -97,33 +97,29 @@ func ServeHTTP(ln net.Listener, r *router.Router) {
 
 	req, err := http.ReadRequest(bufio.NewReader(reread))
 	if err != nil {
-		log.Error().Err(err).Msg("read http request")
+		slog.Error("read http request", "error", err)
 		return
 	}
 
 	rc, err := r.ProxyDial("tcp", req.Host, 80)
 	if err != nil {
-		log.Error().Err(err).
-			Str("host", req.Host).
-			Interface("req", req.URL).
-			Msg("dial proxy")
+		slog.Error("dial proxy", "error", err, "host", req.Host, "req", req.URL)
 		return
 	}
 	defer rc.Close()
 
 	reread.Stop().Reread()
 	err = relay.Relay(reread, rc)
-	log.DebugWarn(err).
-		Str("host", req.Host).
-		Dur("spend", time.Since(start)).
-		Msg("serve http")
+	if err != nil {
+		slog.Debug("serve http", "error", err, "host", req.Host, "spend", time.Since(start))
+	}
 }
 
 func ServeHTTPS(ln net.Listener, r *router.Router) {
 	conn, err := ln.Accept()
 	if err != nil {
-		log.Fatal().Err(err).
-			Msg("serve socks5")
+		slog.Error("serve socks5", "error", err)
+		os.Exit(1)
 	}
 
 	go ServeHTTPS(ln, r)
@@ -141,26 +137,23 @@ func ServeHTTPS(ln net.Listener, r *router.Router) {
 
 	rc, err := r.ProxyDial("tcp", domain, 443)
 	if err != nil {
-		log.Error().Err(err).
-			Str("host", domain).
-			Msg("dial proxy")
+		slog.Error("dial proxy", "error", err, "host", domain)
 		return
 	}
 	defer rc.Close()
 
 	reread.Stop().Reread()
 	err = relay.Relay(reread, rc)
-	log.DebugWarn(err).
-		Str("host", domain).
-		Dur("spend", time.Since(start)).
-		Msg("serve http")
+	if err != nil {
+		slog.Debug("serve http", "error", err, "host", domain, "spend", time.Since(start))
+	}
 }
 
 func ServeSocks5(ln net.Listener, r *router.Router) {
 	conn, err := ln.Accept()
 	if err != nil {
-		log.Fatal().Err(err).
-			Msg("serve socks5")
+		slog.Error("serve socks5", "error", err)
+		os.Exit(1)
 	}
 	go ServeSocks5(ln, r)
 	defer conn.Close()
@@ -169,7 +162,7 @@ func ServeSocks5(ln net.Listener, r *router.Router) {
 
 	byte1 := make([]byte, 1)
 	if n, err := reread.Read(byte1); err != nil || n != 1 {
-		log.Error().Err(err).Msg("read first byte")
+		slog.Error("read first byte", "error", err)
 		return
 	}
 	reread.Reread()
@@ -177,7 +170,7 @@ func ServeSocks5(ln net.Listener, r *router.Router) {
 	if byte1[0] == 5 {
 		reread.Stop()
 		if addr, err := socks5.New().Unwrap(reread); err != nil {
-			log.Error().Err(err).Msg("read socks5 request")
+			slog.Error("read socks5 request", "error", err)
 		} else {
 			host, port := addr.(*socks5.AddrHead).Addr()
 			r.RouteHandle(reread, host, port)
@@ -187,7 +180,7 @@ func ServeSocks5(ln net.Listener, r *router.Router) {
 
 	req, err := http.ReadRequest(bufio.NewReader(reread))
 	if err != nil {
-		log.Error().Err(err).Msg("read http request")
+		slog.Error("read http request", "error", err)
 		return
 	}
 

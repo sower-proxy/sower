@@ -1,6 +1,7 @@
 package router
 
 import (
+	"log/slog"
 	"net"
 	"strconv"
 	"time"
@@ -9,8 +10,7 @@ import (
 	geoip2 "github.com/oschwald/geoip2-golang"
 	"github.com/pkg/errors"
 	"github.com/sower-proxy/conns/relay"
-	"github.com/sower-proxy/deferlog"
-	"github.com/sower-proxy/deferlog/log"
+	"github.com/sower-proxy/deferlog/v2"
 	"github.com/wweir/sower/pkg/suffixtree"
 )
 
@@ -47,7 +47,9 @@ func NewRouter(serveIP, upstreamDNS, fallbackDNS, mmdbFile string, proxyDial Pro
 
 	var err error
 	r.country.Reader, err = geoip2.Open(mmdbFile)
-	log.InfoWarn(err).Str("file", mmdbFile).Msg("open geoip2 db")
+	if err != nil {
+		slog.Warn("open geoip2 db", "error", err, "file", mmdbFile)
+	}
 
 	return &r
 }
@@ -56,7 +58,7 @@ func (r *Router) AddCountryCIDRs(cidrs ...string) {
 	for _, cidr := range cidrs {
 		_, ipnet, err := net.ParseCIDR(cidr)
 		if err != nil {
-			log.Error().Err(err).Msg("Failed to parse CIDR")
+			slog.Error("failed to parse CIDR", "error", err)
 		}
 		r.country.cidrs = append(r.country.cidrs, ipnet)
 	}
@@ -66,11 +68,7 @@ func (r *Router) AddCountryCIDRs(cidrs ...string) {
 func (r *Router) RouteHandle(conn net.Conn, domain string, port uint16) (err error) {
 	start := time.Now()
 	defer func() {
-		deferlog.DebugWarn(err).
-			Str("domain", domain).
-			Uint16("port", port).
-			Dur("spend", time.Since(start)).
-			Msg("serve socks5")
+		deferlog.DebugWarn(err, "route handle", "domain", domain, "port", port, "took", time.Since(start))
 	}()
 
 	addr := net.JoinHostPort(domain, strconv.FormatUint(uint64(port), 10))
