@@ -95,15 +95,15 @@ func (r *Router) Exchange(req *dns.Msg) (_ *dns.Msg, err error) {
 		atomic.StoreInt32(&queryCount, 0)
 		upstreamAddrs = addrs
 		atomic.StoreInt32(&upstreamIndex, int32(len(addrs)-1))
-		slog.Info("use upstream dns", "ip", upstreamAddrs[atomic.LoadInt32(&upstreamIndex)])
+		slog.Info("use upstream dns", "ips", upstreamAddrs)
 	}
 
-	resp, err := dns.Exchange(req, upstreamAddrs[atomic.LoadInt32(&upstreamIndex)])
+	index := atomic.LoadInt32(&upstreamIndex)
+	resp, err := dns.Exchange(req, upstreamAddrs[index])
 	if err != nil {
-		atomic.AddInt32(&upstreamIndex, -1)
-		if atomic.LoadInt32(&upstreamIndex) >= 0 {
-			slog.Info("use upstream dns", "ip", upstreamAddrs[atomic.LoadInt32(&upstreamIndex)])
-			resp, err = dns.Exchange(req, upstreamAddrs[atomic.LoadInt32(&upstreamIndex)])
+		if atomic.CompareAndSwapInt32(&upstreamIndex, index, index-1) && index > 0 {
+			slog.Info("use upstream dns", "ip", upstreamAddrs[index-1])
+			resp, err = dns.Exchange(req, upstreamAddrs[index-1])
 		}
 	}
 

@@ -108,7 +108,8 @@ func main() {
 		log.Fatalln("fake site address must be a valid host:port")
 	}
 
-	serve443(ln, conf.FakeSite, sower.New(conf.Password), trojan.New(conf.Password))
+	go serve443(ln, conf.FakeSite, sower.New(conf.Password), trojan.New(conf.Password))
+	select {}
 }
 
 func serve443(ln net.Listener, fakeSite string, sower *sower.Sower, trojan *trojan.Trojan) {
