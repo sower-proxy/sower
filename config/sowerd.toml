@@ -1,0 +1,16 @@
+# Sowerd configuration example (TOML format)
+# This is the daemon configuration for the sower server
+
+# Logging configuration
+logLevel = "info" # Log level: debug, info, warn, error
+
+# Server configuration
+serveIP = "0.0.0.0"               # IP address to listen on for ports 80 and 443
+password = "your_secure_password" # Password for client authentication
+fakeSite = "/var/www"             # Fake site directory or address (default: /var/www)
+
+# SSL/TLS certificate configuration
+[cert]
+email = "your-email@example.com" # Email for Let's Encrypt certificate
+cert = ""                        # Path to custom certificate file (optional)
+key = ""                         # Path to custom private key file (optional)

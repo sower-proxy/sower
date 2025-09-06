@@ -15,6 +15,7 @@ import (
 	"github.com/sower-proxy/conns/relay"
 	"github.com/sower-proxy/conns/reread"
 	"github.com/sower-proxy/deferlog/v2"
+	"github.com/sower-proxy/sower/config"
 	"github.com/sower-proxy/sower/transport/sower"
 	"github.com/sower-proxy/sower/transport/trojan"
 	"golang.org/x/crypto/acme/autocert"
@@ -22,18 +23,7 @@ import (
 
 var (
 	version, date string
-
-	conf = struct {
-		ServeIP  string `required:"true" usage:"listen to port 80 443 of the IP"`
-		Password string `required:"true"`
-		FakeSite string `default:"/var/www" usage:"fake site address or directoy. serving on 127.0.0.1:80 if directory"`
-
-		Cert struct {
-			Email string
-			Cert  string
-			Key   string
-		}
-	}{}
+	conf          config.SowerdConfig
 )
 
 func init() {

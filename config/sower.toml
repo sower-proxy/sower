@@ -1,0 +1,52 @@
+# Sower configuration example (TOML format)
+# This is the client configuration for the sower proxy
+
+# Logging configuration
+logLevel = "info" # Log level: debug, info, warn, error
+
+# Remote proxy configuration
+[remote]
+type = "sower"                    # Proxy type: sower, trojan, or socks5
+addr = "proxy.example.com"        # Proxy server address
+password = "your_secure_password" # Proxy password
+
+# DNS configuration
+[dns]
+disable = false        # Disable DNS proxy
+serve = "127.0.0.1"    # DNS server IP address
+serve6 = ""            # DNS server IPv6 address (optional)
+serveIface = ""        # Network interface to get IP from (optional)
+upstream = "8.8.8.8"   # Upstream DNS server (optional)
+fallback = "223.5.5.5" # Fallback DNS server
+
+# SOCKS5 proxy configuration
+[socks5]
+disable = false         # Disable SOCKS5 proxy
+addr = "127.0.0.1:1080" # SOCKS5 listen address
+
+# Router configuration
+[router]
+# Block list rules
+[router.block]
+file = ""          # Block list file path (local or remote)
+filePrefix = "**." # Prefix for block list rules
+rules = []         # Additional block rules
+
+# Direct list rules
+[router.direct]
+file = ""          # Direct list file path (local or remote)
+filePrefix = "**." # Prefix for direct list rules
+rules = []         # Additional direct rules
+
+# Proxy list rules
+[router.proxy]
+file = ""          # Proxy list file path (local or remote)
+filePrefix = "**." # Prefix for proxy list rules
+rules = []         # Additional proxy rules
+
+# Country-based routing
+[router.country]
+mmdb = ""       # MMDB file path for GeoIP
+file = ""       # CIDR block list file path
+filePrefix = "" # Prefix for CIDR rules
+rules = []      # Additional CIDR rules

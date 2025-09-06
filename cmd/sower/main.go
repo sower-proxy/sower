@@ -22,60 +22,14 @@ import (
 	"github.com/miekg/dns"
 	"github.com/pkg/errors"
 	"github.com/sower-proxy/deferlog/v2"
+	"github.com/sower-proxy/sower/config"
 	"github.com/sower-proxy/sower/pkg/suffixtree"
 	"github.com/sower-proxy/sower/router"
 )
 
 var (
 	version, date string
-
-	conf = struct {
-		Debug bool `default:"false" usage:"debug mode"`
-
-		Remote struct {
-			Type     string `default:"sower" required:"true" usage:"option: sower/trojan/socks5"`
-			Addr     string `required:"true" usage:"proxy address, eg: proxy.com/127.0.0.1:7890"`
-			Password string `usage:"remote proxy password"`
-		}
-
-		DNS struct {
-			Disable    bool   `default:"false" usage:"disable DNS proxy"`
-			Serve      string `usage:"dns server ip"`
-			Serve6     string `usage:"dns server ipv6, eg: ::1"`
-			ServeIface string `usage:"use the IP in the net interface, if serve ip not setted. eg: eth0"`
-			Upstream   string `usage:"upstream dns server"`
-			Fallback   string `default:"223.5.5.5" required:"true" usage:"fallback dns server"`
-		}
-		Socks5 struct {
-			Disable bool   `default:"false" usage:"disable sock5 proxy"`
-			Addr    string `default:"127.0.0.1:1080" usage:"socks5 listen address"`
-		} `flag:"socks5"`
-
-		Router struct {
-			Block struct {
-				File       string   `usage:"block list file, local file or remote"`
-				FilePrefix string   `default:"**." usage:"parsed as '<prefix>line_text'"`
-				Rules      []string `usage:"block list rules"`
-			}
-			Direct struct {
-				File       string   `usage:"direct list file, local file or remote"`
-				FilePrefix string   `default:"**." usage:"parsed as '<prefix>line_text'"`
-				Rules      []string `usage:"direct list rules"`
-			}
-			Proxy struct {
-				File       string   `usage:"proxy list file, local file or remote"`
-				FilePrefix string   `default:"**." usage:"parsed as '<prefix>line_text'"`
-				Rules      []string `usage:"proxy list rules"`
-			}
-
-			Country struct {
-				MMDB       string   `usage:"mmdb file"`
-				File       string   `usage:"CIDR block list file, local file or remote"`
-				FilePrefix string   `default:"" usage:"parsed as '<prefix>line_text'"`
-				Rules      []string `usage:"CIDR list rules"`
-			}
-		}
-	}{}
+	conf          config.SowerConfig
 )
 
 func init() {
@@ -108,43 +62,10 @@ func init() {
 		os.Exit(1)
 	}
 
-	if conf.DNS.ServeIface != "" {
-		iface, err := net.InterfaceByName(conf.DNS.ServeIface)
-		if err != nil {
-			slog.Error("get interface", "error", err, "iface", conf.DNS.ServeIface)
-			os.Exit(1)
-		}
-		addrs, err := iface.Addrs()
-		if err != nil {
-			slog.Error("get interface addresses", "error", err, "iface", conf.DNS.ServeIface)
-			os.Exit(1)
-		}
-		for _, addr := range addrs {
-			ip, _, err := net.ParseCIDR(addr.String())
-			if err != nil {
-				slog.Error("parse interface IP", "error", err, "iface", conf.DNS.ServeIface, "ip", ip.String())
-				os.Exit(1)
-			}
-
-			if ip.To4() != nil { // ipv4
-				if conf.DNS.Serve == "" {
-					conf.DNS.Serve = ip.String()
-				}
-			} else if ip.IsGlobalUnicast() { // ipv6 must be global unicast
-				if conf.DNS.Serve6 == "" {
-					conf.DNS.Serve6 = ip.String()
-				}
-			}
-		}
-	}
-
-	if !conf.DNS.Disable && conf.DNS.Serve == "" {
-		slog.Error("dns serve ip and serve interface not set")
+	if err := conf.Validate(); err != nil {
+		slog.Error("validate config", "error", err)
 		os.Exit(1)
 	}
-
-	conf.Router.Direct.Rules = append(conf.Router.Direct.Rules,
-		conf.Remote.Addr, "**.in-addr.arpa", "**.ip6.arpa")
 	slog.Info("starting sower", "version", version, "date", date, "config", fmt.Sprint(conf))
 }
 
