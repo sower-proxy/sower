@@ -6,7 +6,7 @@ import (
 	"sync/atomic"
 
 	"github.com/miekg/dns"
-	"github.com/wweir/sower/pkg/dhcp"
+	"github.com/sower-proxy/sower/pkg/dhcp"
 )
 
 func (r *Router) ServeDNS(w dns.ResponseWriter, req *dns.Msg) {

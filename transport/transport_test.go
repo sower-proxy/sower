@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/sower-proxy/conns/reread"
-	"github.com/wweir/sower/transport/sower"
-	"github.com/wweir/sower/transport/trojan"
+	"github.com/sower-proxy/sower/transport/sower"
+	"github.com/sower-proxy/sower/transport/trojan"
 )
 
 func testPipe(tran Transport) (net.Addr, error) {

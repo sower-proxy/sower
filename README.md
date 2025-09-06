@@ -1,12 +1,12 @@
 # sower
 
-[![GitHub release](http://img.shields.io/github/release/wweir/sower.svg?style=popout)](https://github.com/wweir/sower/releases)
-[![Actions Status](https://github.com/wweir/sower/workflows/Go/badge.svg)](https://github.com/wweir/sower/actions)
-[![GitHub issue](https://img.shields.io/github/issues/wweir/sower.svg?style=popout)](https://github.com/wweir/sower/issues)
-[![GitHub star](https://img.shields.io/github/stars/wweir/sower.svg?style=popout)](https://github.com/wweir/sower/stargazers)
-[![GitHub license](https://img.shields.io/github/license/wweir/sower.svg?style=popout)](LICENSE)
+[![GitHub release](http://img.shields.io/github/release/sower-proxy/sower.svg?style=popout)](https://github.com/sower-proxy/sower/releases)
+[![Actions Status](https://github.com/sower-proxy/sower/workflows/Go/badge.svg)](https://github.com/sower-proxy/sower/actions)
+[![GitHub issue](https://img.shields.io/github/issues/sower-proxy/sower.svg?style=popout)](https://github.com/sower-proxy/sower/issues)
+[![GitHub star](https://img.shields.io/github/stars/sower-proxy/sower.svg?style=popout)](https://github.com/sower-proxy/sower/stargazers)
+[![GitHub license](https://img.shields.io/github/license/sower-proxy/sower.svg?style=popout)](LICENSE)
 
-中文介绍见 [Wiki](https://github.com/wweir/sower/wiki)
+中文介绍见 [Wiki](https://github.com/sower-proxy/sower/wiki)
 
 Sower is a cross-platform intelligent transparent proxy tool. It provides both socks5 proxy and DNS-based proxy. All these kinds of proxies support intelligent routing.
 
@@ -51,7 +51,7 @@ There are two ways to run the sowerd service:
 
 ## Sower
 
-A config file is required on the sower client side. [Here](https://github.com/wweir/sower/wiki/sower.hcl) is a usable example in China.
+A config file is required on the sower client side. [Here](https://github.com/sower-proxy/sower/wiki/sower.hcl) is a usable example in China.
 
 `Sower` will bind 4 ports by default with root permission. They are: `udp(53)` / `tcp(80)` / `tcp(443)` / `tcp(1080)`.
 

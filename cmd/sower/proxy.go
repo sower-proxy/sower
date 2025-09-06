@@ -13,11 +13,11 @@ import (
 	"github.com/pkg/errors"
 	"github.com/sower-proxy/conns/relay"
 	"github.com/sower-proxy/conns/reread"
-	"github.com/wweir/sower/router"
-	"github.com/wweir/sower/transport"
-	"github.com/wweir/sower/transport/socks5"
-	"github.com/wweir/sower/transport/sower"
-	"github.com/wweir/sower/transport/trojan"
+	"github.com/sower-proxy/sower/router"
+	"github.com/sower-proxy/sower/transport"
+	"github.com/sower-proxy/sower/transport/socks5"
+	"github.com/sower-proxy/sower/transport/sower"
+	"github.com/sower-proxy/sower/transport/trojan"
 )
 
 func GenProxyDial(proxyType, proxyHost, proxyPassword, dns string) router.ProxyDialFn {

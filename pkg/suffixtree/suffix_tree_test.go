@@ -3,7 +3,7 @@ package suffixtree_test
 import (
 	"testing"
 
-	"github.com/wweir/sower/pkg/suffixtree"
+	"github.com/sower-proxy/sower/pkg/suffixtree"
 )
 
 func TestNode_Match(t *testing.T) {

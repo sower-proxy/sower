@@ -11,7 +11,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/sower-proxy/conns/relay"
 	"github.com/sower-proxy/deferlog/v2"
-	"github.com/wweir/sower/pkg/suffixtree"
+	"github.com/sower-proxy/sower/pkg/suffixtree"
 )
 
 type (

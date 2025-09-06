@@ -15,8 +15,8 @@ import (
 	"github.com/sower-proxy/conns/relay"
 	"github.com/sower-proxy/conns/reread"
 	"github.com/sower-proxy/deferlog/v2"
-	"github.com/wweir/sower/transport/sower"
-	"github.com/wweir/sower/transport/trojan"
+	"github.com/sower-proxy/sower/transport/sower"
+	"github.com/sower-proxy/sower/transport/trojan"
 	"golang.org/x/crypto/acme/autocert"
 )
 

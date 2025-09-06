@@ -3,7 +3,7 @@ package dhcp_test
 import (
 	"fmt"
 
-	"github.com/wweir/sower/pkg/dhcp"
+	"github.com/sower-proxy/sower/pkg/dhcp"
 )
 
 func Example_dns() {

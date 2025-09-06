@@ -1,4 +1,4 @@
-module github.com/wweir/sower
+module github.com/sower-proxy/sower
 
 go 1.24
 

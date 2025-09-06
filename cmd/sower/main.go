@@ -22,8 +22,8 @@ import (
 	"github.com/miekg/dns"
 	"github.com/pkg/errors"
 	"github.com/sower-proxy/deferlog/v2"
-	"github.com/wweir/sower/pkg/suffixtree"
-	"github.com/wweir/sower/router"
+	"github.com/sower-proxy/sower/pkg/suffixtree"
+	"github.com/sower-proxy/sower/router"
 )
 
 var (
