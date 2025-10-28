@@ -2,12 +2,12 @@ package main
 
 import (
 	"crypto/tls"
-	"log"
 	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/cristalhq/aconfig"
@@ -70,32 +70,28 @@ func main() {
 		tlsConf.Certificates = []tls.Certificate{cert}
 	}
 
-	// Redirect 80 to 443
-	go func() {
-		addr := net.JoinHostPort(conf.ServeIP, "80")
-		err := http.ListenAndServe(addr, certManager.HTTPHandler(http.HandlerFunc(
-			func(w http.ResponseWriter, r *http.Request) {
+	// Redirect 80 to 443, and serve fake site if it's a directory.
+	addr := net.JoinHostPort(conf.ServeIP, "80")
+	var dirServer http.Handler
+	if si, err := os.Stat(conf.FakeSite); err == nil && si.IsDir() {
+		slog.Info("serve fake site on http", "dir", conf.FakeSite)
+		dirServer = http.FileServer(http.Dir(conf.FakeSite))
+		conf.FakeSite = "127.0.0.1:80"
+	}
+	go http.ListenAndServe(addr, certManager.HTTPHandler(http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			if dirServer != nil && strings.HasPrefix(r.RemoteAddr, "127.0.0.1:") {
+				dirServer.ServeHTTP(w, r)
+			} else {
 				target := "https://" + r.Host + r.URL.RequestURI()
 				http.Redirect(w, r, target, http.StatusPermanentRedirect)
-			})))
-		if err != nil {
-			slog.Error("listen http", "error", err)
-			os.Exit(1)
-		}
-	}()
+			}
+		})))
 
 	ln, err := tls.Listen("tcp", net.JoinHostPort(conf.ServeIP, "443"), tlsConf)
 	if err != nil {
 		slog.Error("listen https", "error", err)
 		os.Exit(1)
-	}
-
-	if si, err := os.Stat(conf.FakeSite); err == nil && si.IsDir() {
-		go http.ListenAndServe("127.0.0.1:80", http.FileServer(http.Dir(conf.FakeSite)))
-		conf.FakeSite = "127.0.0.1:80"
-	}
-	if _, _, err := net.SplitHostPort(conf.FakeSite); err != nil {
-		log.Fatalln("fake site address must be a valid host:port")
 	}
 
 	go serve443(ln, conf.FakeSite, sower.New(conf.Password), trojan.New(conf.Password))
