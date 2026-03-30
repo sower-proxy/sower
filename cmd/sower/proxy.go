@@ -49,19 +49,16 @@ func GenProxyDial(proxyType, proxyHost, proxyPassword, dns string, tlsOptions up
 	}
 
 	switch proxyType {
-	case "sower":
+	case "sower", "trojan":
 		tlsDialFn, err := newTLSDialFn(dialer, proxyHost, tlsOptions)
 		if err != nil {
 			return nil, err
 		}
-		proxy = sower.New(proxyPassword)
-		dialFn = tlsDialFn
-	case "trojan":
-		tlsDialFn, err := newTLSDialFn(dialer, proxyHost, tlsOptions)
-		if err != nil {
-			return nil, err
+		if proxyType == "sower" {
+			proxy = sower.New(proxyPassword)
+		} else {
+			proxy = trojan.New(proxyPassword)
 		}
-		proxy = trojan.New(proxyPassword)
 		dialFn = tlsDialFn
 	case "socks5":
 		proxy = socks5.New()
