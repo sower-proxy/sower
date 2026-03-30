@@ -50,6 +50,10 @@ func (a *ipv4Addr) String() string {
 	return net.JoinHostPort(net.IP(a.ADDR[:]).String(), strconv.Itoa(int(a.PORT)))
 }
 
+func (a *ipv4Addr) IsValid() bool {
+	return a.CRLF == [2]byte{0x0D, 0x0A}
+}
+
 type ipv6Addr struct {
 	ADDR [16]byte
 	PORT uint16
@@ -59,6 +63,10 @@ type ipv6Addr struct {
 func (*ipv6Addr) Network() string { return "tcp" }
 func (a *ipv6Addr) String() string {
 	return net.JoinHostPort(net.IP(a.ADDR[:]).String(), strconv.Itoa(int(a.PORT)))
+}
+
+func (a *ipv6Addr) IsValid() bool {
+	return a.CRLF == [2]byte{0x0D, 0x0A}
 }
 
 type domain struct {
@@ -86,7 +94,12 @@ func (a *domain) Fulfill(r io.Reader) error {
 
 	a.ADDR = string(buf[:addrLen])
 	a.PORT = uint16(buf[addrLen])<<8 + uint16(buf[addrLen+1])
+	a.CRLF = [2]byte{buf[addrLen+2], buf[addrLen+3]}
 	return nil
+}
+
+func (a *domain) IsValid() bool {
+	return a.CRLF == [2]byte{0x0D, 0x0A}
 }
 
 type Trojan struct {
@@ -112,8 +125,7 @@ func New(password string) *Trojan {
 
 func (t *Trojan) Unwrap(conn net.Conn) (net.Addr, error) {
 	buf := make([]byte, headLen)
-	// do not use io.ReadFull to avoid hang
-	if n, err := conn.Read(buf); err != nil || n != headLen {
+	if n, err := io.ReadFull(conn, buf); err != nil || n != headLen {
 		return nil, errors.Errorf("n: %d, err: %s", n, err)
 	}
 
@@ -125,23 +137,45 @@ func (t *Trojan) Unwrap(conn net.Conn) (net.Addr, error) {
 	if !bytes.Equal(head.Passwd[:], []byte(t.headPasswd)) {
 		return nil, errors.New("auth fail")
 	}
-
-	head.CMD, head.ATYP = buf[58], buf[59]
+	if head.CRLF != [2]byte{0x0D, 0x0A} {
+		return nil, errors.New("invalid CRLF")
+	}
+	if head.CMD != 0x01 {
+		return nil, errors.Errorf("invalid CMD: %d", head.CMD)
+	}
 	switch head.ATYP {
 	case 0x01: // ipv4
 		addr := &ipv4Addr{}
 		err := binary.Read(conn, binary.BigEndian, addr)
-		return addr, errors.Wrap(err, "read addr")
+		if err != nil {
+			return nil, errors.Wrap(err, "read addr")
+		}
+		if !addr.IsValid() {
+			return nil, errors.New("invalid CRLF")
+		}
+		return addr, nil
 
 	case 0x04: // ipv6
 		addr := &ipv6Addr{}
 		err := binary.Read(conn, binary.BigEndian, addr)
-		return addr, errors.Wrap(err, "read addr")
+		if err != nil {
+			return nil, errors.Wrap(err, "read addr")
+		}
+		if !addr.IsValid() {
+			return nil, errors.New("invalid CRLF")
+		}
+		return addr, nil
 
 	case 0x03: // domain
 		addr := &domain{}
 		err := addr.Fulfill(conn)
-		return addr, errors.Wrap(err, "read addr")
+		if err != nil {
+			return nil, errors.Wrap(err, "read addr")
+		}
+		if !addr.IsValid() {
+			return nil, errors.New("invalid CRLF")
+		}
+		return addr, nil
 
 	default:
 		return nil, errors.New("invalid ATYP")
@@ -161,6 +195,9 @@ func (t *Trojan) Wrap(conn net.Conn, tgtHost string, tgtPort uint16) error {
 		buf.Write([]byte(ip.To16()))
 
 	default:
+		if len(tgtHost) > 255 {
+			return errors.Errorf("target host too long: %d", len(tgtHost))
+		}
 		buf.Write(t.headDomain)
 		buf.WriteByte(byte(len(tgtHost)))
 		buf.WriteString(tgtHost)

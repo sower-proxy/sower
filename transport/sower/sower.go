@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/md5"
 	"encoding/binary"
+	"io"
 	"net"
 	"strconv"
 
@@ -26,7 +27,10 @@ type Head struct {
 
 func (h *Head) Network() string { return "tcp" }
 func (h *Head) String() string {
-	idx := bytes.IndexRune(h.TgtAddr[:], 0)
+	idx := bytes.IndexByte(h.TgtAddr[:], 0)
+	if idx < 0 {
+		idx = len(h.TgtAddr)
+	}
 	addr := string(h.TgtAddr[:idx])
 	return net.JoinHostPort(addr, strconv.Itoa(int(h.Port)))
 }
@@ -43,7 +47,7 @@ func New(password string) *Sower {
 
 func (s *Sower) Unwrap(conn net.Conn) (net.Addr, error) {
 	buf := make([]byte, headSize)
-	if n, err := conn.Read(buf); err != nil || n != headSize {
+	if n, err := io.ReadFull(conn, buf); err != nil || n != headSize {
 		return nil, errors.Errorf("n: %d, err: %s", n, err)
 	}
 
@@ -63,6 +67,10 @@ func (s *Sower) Unwrap(conn net.Conn) (net.Addr, error) {
 }
 
 func (s *Sower) Wrap(conn net.Conn, tgtHost string, tgtPort uint16) error {
+	if len(tgtHost) > maxDomainLength {
+		return errors.Errorf("target host too long: %d", len(tgtHost))
+	}
+
 	tgtAddr := [maxDomainLength]byte{}
 	copy(tgtAddr[:len(tgtHost)], []byte(tgtHost))
 

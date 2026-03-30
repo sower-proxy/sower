@@ -1,16 +1,18 @@
 package router
 
 import (
+	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"strconv"
+	"sync"
 	"time"
 
-	"github.com/miekg/dns"
 	geoip2 "github.com/oschwald/geoip2-golang"
-	"github.com/pkg/errors"
 	"github.com/sower-proxy/conns/relay"
 	"github.com/sower-proxy/deferlog/v2"
+	"github.com/sower-proxy/sower/pkg/dhcp"
 	"github.com/sower-proxy/sower/pkg/suffixtree"
 )
 
@@ -23,10 +25,19 @@ type (
 		ProxyDial  ProxyDialFn
 
 		dns struct {
-			dns.Client
-			upstreamDNS string
-			fallbackDNS string
-			serveIP     net.IP
+			upstreamDNS  string
+			fallbackDNS  string
+			serveIPs     []net.IP
+			getDNSServer func() ([]string, error)
+
+			sync.Mutex
+			upstreamAddrs   []string
+			upstreamIndex   int
+			refreshAt       time.Time
+			refreshInFlight bool
+			lastRefreshErr  error
+			retryAt         time.Time
+			probeInFlight   bool
 		}
 
 		country struct {
@@ -36,14 +47,21 @@ type (
 	}
 )
 
-func NewRouter(serveIP, upstreamDNS, fallbackDNS, mmdbFile string, proxyDial ProxyDialFn) *Router {
+var ErrBlocked = errors.New("route blocked")
+
+func NewRouter(serveIPs []string, upstreamDNS, fallbackDNS, mmdbFile string, proxyDial ProxyDialFn) *Router {
 	r := Router{
 		ProxyDial: proxyDial,
 	}
 
 	r.dns.upstreamDNS = upstreamDNS
-	r.dns.serveIP = net.ParseIP(serveIP)
 	r.dns.fallbackDNS = fallbackDNS
+	r.dns.getDNSServer = dhcp.GetDNSServer
+	for _, serveIP := range serveIPs {
+		if ip := net.ParseIP(serveIP); ip != nil {
+			r.dns.serveIPs = append(r.dns.serveIPs, ip)
+		}
+	}
 
 	var err error
 	r.country.Reader, err = geoip2.Open(mmdbFile)
@@ -58,7 +76,8 @@ func (r *Router) AddCountryCIDRs(cidrs ...string) {
 	for _, cidr := range cidrs {
 		_, ipnet, err := net.ParseCIDR(cidr)
 		if err != nil {
-			slog.Error("failed to parse CIDR", "error", err)
+			slog.Error("failed to parse CIDR", "error", err, "cidr", cidr)
+			continue
 		}
 		r.country.cidrs = append(r.country.cidrs, ipnet)
 	}
@@ -71,6 +90,19 @@ func (r *Router) RouteHandle(conn net.Conn, domain string, port uint16) (err err
 		deferlog.DebugWarn(err, "route handle", "domain", domain, "port", port, "took", time.Since(start))
 	}()
 
+	rc, err := r.Dial("tcp", domain, port)
+	if err != nil {
+		return err
+	}
+	defer rc.Close()
+
+	if err := relay.Relay(conn, rc); err != nil {
+		return fmt.Errorf("relay %s:%d: %w", domain, port, err)
+	}
+	return nil
+}
+
+func (r *Router) Dial(network, domain string, port uint16) (net.Conn, error) {
 	addr := net.JoinHostPort(domain, strconv.FormatUint(uint64(port), 10))
 
 	// 1. rule_based( block > direct > proxy )
@@ -78,34 +110,32 @@ func (r *Router) RouteHandle(conn net.Conn, domain string, port uint16) (err err
 	// 3. fallback( proxy )
 	switch {
 	case r.BlockRule.Match(domain):
-		return nil
-
+		return nil, ErrBlocked
 	case r.DirectRule.Match(domain):
-		return r.DirectHandle(conn, addr)
-
+		return r.directDial(network, addr)
 	case r.ProxyRule.Match(domain):
-		return r.ProxyHandle(conn, domain, port)
-
+		return r.proxyDial(network, domain, port)
 	case r.localSite(domain), r.isAccess(domain, port):
-		return r.DirectHandle(conn, addr)
+		return r.directDial(network, addr)
 	default:
-		return r.ProxyHandle(conn, domain, port)
+		return r.proxyDial(network, domain, port)
 	}
 }
 
-func (r *Router) ProxyHandle(conn net.Conn, domain string, port uint16) error {
+func (r *Router) proxyDial(network, domain string, port uint16) (net.Conn, error) {
 	start := time.Now()
-	rc, err := r.ProxyDial("tcp", domain, port)
+	rc, err := r.ProxyDial(network, domain, port)
 	if err != nil {
-		return errors.Wrapf(err, "proxy dial (%s:%d), spend (%s)", domain, port, time.Since(start))
+		return nil, fmt.Errorf("proxy dial %s:%d, spend (%s): %w", domain, port, time.Since(start), err)
 	}
-	defer rc.Close()
-
-	_ = relay.Relay(conn, rc)
-	return nil
+	return rc, nil
 }
 
-func (r *Router) DirectHandle(conn net.Conn, addr string) error {
-	dur, err := relay.RelayTo(conn, addr)
-	return errors.Wrapf(err, "spend (%s)", dur)
+func (r *Router) directDial(network, addr string) (net.Conn, error) {
+	start := time.Now()
+	conn, err := net.DialTimeout(network, addr, 5*time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("direct dial %s, spend (%s): %w", addr, time.Since(start), err)
+	}
+	return conn, nil
 }

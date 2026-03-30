@@ -12,6 +12,7 @@ type Node struct {
 type node struct {
 	secs     []string
 	subNodes []*node
+	indexMap map[string]int
 }
 
 func NewNodeFromRules(rules ...string) *Node {
@@ -50,7 +51,7 @@ func (n *node) string(prefix, indent string) (out string) {
 }
 
 func (n *Node) trim(item string) string {
-	return strings.TrimSuffix(item, n.sep)
+	return strings.ToLower(strings.TrimSuffix(item, n.sep))
 }
 
 func (n *Node) Add(item string) {
@@ -63,13 +64,18 @@ func (n *node) add(secs []string) {
 	case 0:
 	case 1:
 		sec := secs[length-1]
+		if idx := n.index(sec); idx >= 0 {
+			if n.subNodes[idx] != nil {
+				n.subNodes[idx].add([]string{""})
+			}
+			return
+		}
+
 		switch sec {
 		case "", "*", "**":
-			n.secs = append([]string{sec}, n.secs...)
-			n.subNodes = append([]*node{nil}, n.subNodes...)
+			n.prepend(sec, nil)
 		default:
-			n.secs = append(n.secs, sec)
-			n.subNodes = append(n.subNodes, nil)
+			n.append(sec, nil)
 		}
 	default:
 		sec := secs[length-1]
@@ -81,13 +87,9 @@ func (n *node) add(secs []string) {
 		if idx == -1 {
 			switch sec {
 			case "", "*", "**":
-				idx = 0
-				n.secs = append([]string{sec}, n.secs...)
-				n.subNodes = append([]*node{{}}, n.subNodes...)
+				idx = n.prepend(sec, &node{})
 			default:
-				idx = len(n.secs)
-				n.secs = append(n.secs, sec)
-				n.subNodes = append(n.subNodes, &node{})
+				idx = n.append(sec, &node{})
 			}
 
 		} else if n.subNodes[idx] == nil {
@@ -104,10 +106,10 @@ func (n *Node) Match(item string) bool {
 		return false
 	}
 
-	return n.matchSecs(strings.Split(n.trim(item), n.sep), false)
+	return n.matchSecs(strings.Split(n.trim(item), n.sep))
 }
 
-func (n *node) matchSecs(secs []string, fuzzNode bool) bool {
+func (n *node) matchSecs(secs []string) bool {
 	length := len(secs)
 	if length == 0 {
 		if n == nil {
@@ -117,12 +119,12 @@ func (n *node) matchSecs(secs []string, fuzzNode bool) bool {
 	}
 
 	if idx := n.index(secs[length-1]); idx >= 0 {
-		if n.subNodes[idx].matchSecs(secs[:length-1], false) {
+		if n.subNodes[idx].matchSecs(secs[:length-1]) {
 			return true
 		}
 	}
 	if idx := n.index("*"); idx >= 0 {
-		if n.subNodes[idx].matchSecs(secs[:length-1], true) {
+		if n.subNodes[idx].matchSecs(secs[:length-1]) {
 			return true
 		}
 	}
@@ -134,10 +136,49 @@ func (n *node) index(sec string) int {
 	if n == nil {
 		return -1
 	}
-	for s := range n.secs {
-		if n.secs[s] == sec {
-			return s
+
+	if n.indexMap != nil {
+		if idx, ok := n.indexMap[sec]; ok {
+			return idx
+		}
+		return -1
+	}
+
+	for i := range n.secs {
+		if n.secs[i] == sec {
+			n.ensureIndexMap()
+			n.indexMap[sec] = i
+			return i
 		}
 	}
+
 	return -1
+}
+
+func (n *node) append(sec string, child *node) int {
+	n.secs = append(n.secs, sec)
+	n.subNodes = append(n.subNodes, child)
+	n.ensureIndexMap()
+	idx := len(n.secs) - 1
+	n.indexMap[sec] = idx
+	return idx
+}
+
+func (n *node) prepend(sec string, child *node) int {
+	n.secs = append([]string{sec}, n.secs...)
+	n.subNodes = append([]*node{child}, n.subNodes...)
+	n.indexMap = nil
+	n.ensureIndexMap()
+	return 0
+}
+
+func (n *node) ensureIndexMap() {
+	if n.indexMap != nil {
+		return
+	}
+
+	n.indexMap = make(map[string]int, len(n.secs))
+	for i := range n.secs {
+		n.indexMap[n.secs[i]] = i
+	}
 }

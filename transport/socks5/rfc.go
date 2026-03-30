@@ -33,7 +33,15 @@ func (req *authReq) Fulfill(r io.Reader) error {
 }
 
 func (r *authReq) IsValid() bool {
-	return r.VER == 5 && r.METHODS[0] == 0
+	if r.VER != 5 || len(r.METHODS) == 0 {
+		return false
+	}
+	for _, method := range r.METHODS {
+		if method == 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // 2. server response auth request
@@ -51,7 +59,7 @@ type reqHead struct {
 }
 
 func (r *reqHead) IsValid() bool {
-	return r.VER == 5 && r.CMD == 1
+	return r.VER == 5 && r.CMD == 1 && r.RSV == 0
 }
 
 // 4. server response with the address that assigned to connect to target address

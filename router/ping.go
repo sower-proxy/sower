@@ -1,9 +1,9 @@
 package router
 
 import (
+	"fmt"
 	"log/slog"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/sower-proxy/mem"
@@ -19,7 +19,7 @@ func (r *Router) isAccess(domain string, port uint16) bool {
 		return false
 	}
 
-	ok, _ := accessCache.Get(domain)
+	ok, _ := accessCache.Get(accessCacheKey(domain, port))
 	return ok
 }
 
@@ -28,22 +28,31 @@ var pingClient = http.Client{
 }
 
 func httpPing(key string) (bool, error) {
-	wg := sync.WaitGroup{}
-	wg.Add(2)
-	var err80, err443 error
-	go func() {
-		_, err80 = pingClient.Head("http://" + key)
-		wg.Done()
-	}()
-	go func() {
-		_, err443 = pingClient.Head("https://" + key)
-		wg.Done()
-	}()
-	wg.Wait()
-
-	if err80 != nil && err443 != nil {
-		slog.Warn("failed to ping", "err80", err80, "err443", err443)
+	scheme, host, err := accessProbeTarget(key)
+	if err != nil {
+		return false, err
 	}
 
-	return err80 == nil && err443 == nil, nil
+	resp, err := pingClient.Head(scheme + "://" + host)
+	if err != nil {
+		slog.Warn("failed to ping", "error", err, "scheme", scheme, "host", host)
+		return false, nil
+	}
+	_ = resp.Body.Close()
+	return true, nil
+}
+
+func accessCacheKey(domain string, port uint16) string {
+	return fmt.Sprintf("%d:%s", port, domain)
+}
+
+func accessProbeTarget(key string) (string, string, error) {
+	switch {
+	case len(key) > 3 && key[:3] == "80:":
+		return "http", key[3:], nil
+	case len(key) > 4 && key[:4] == "443:":
+		return "https", key[4:], nil
+	default:
+		return "", "", fmt.Errorf("invalid access probe key %q", key)
+	}
 }

@@ -1,7 +1,7 @@
 package dhcp
 
 import (
-	"math/rand"
+	"crypto/rand"
 	"net"
 	"runtime"
 	"time"
@@ -11,7 +11,6 @@ import (
 	"github.com/pkg/errors"
 )
 
-var xid = make([]byte, 4)
 var broadcastAddr, _ = net.ResolveUDPAddr("udp", "255.255.255.255:67")
 
 func GetDNSServer() ([]string, error) {
@@ -20,7 +19,10 @@ func GetDNSServer() ([]string, error) {
 		return nil, errors.Wrap(err, "pick interface")
 	}
 
-	rand.Read(xid)
+	xid := make([]byte, 4)
+	if _, err := rand.Read(xid); err != nil {
+		return nil, errors.Wrap(err, "generate xid")
+	}
 	pack := dhcp4.RequestPacket(dhcp4.Discover, iface.HardwareAddr, net.IPv4(0, 0, 0, 0), xid, true, []dhcp4.Option{
 		{Code: dhcp4.OptionRequestedIPAddress, Value: []byte(iface.IP.To4())},
 		{Code: dhcp4.End},

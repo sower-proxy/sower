@@ -74,6 +74,42 @@ func TestNode_Match(t *testing.T) {
 		[]test{
 			{"github.com", true},
 		},
+	}, {
+		"normalize domain",
+		suffixtree.NewNodeFromRules("GitHub.Com", "*.Example.Com", "**.Foo.Com"),
+		[]test{
+			{"github.com", true},
+			{"GitHub.com", true},
+			{"github.com.", true},
+			{"a.example.com", true},
+			{"A.Example.Com", true},
+			{"foo.com", true},
+			{"a.b.foo.com", true},
+		},
+	}, {
+		"parent after child",
+		suffixtree.NewNodeFromRules("a.wweir.cc", "wweir.cc"),
+		[]test{
+			{"wweir.cc", true},
+			{"a.wweir.cc", true},
+			{"b.wweir.cc", false},
+		},
+	}, {
+		"wildcard after child",
+		suffixtree.NewNodeFromRules("a.wweir.cc", "*.wweir.cc"),
+		[]test{
+			{"a.wweir.cc", true},
+			{"b.wweir.cc", true},
+			{"a.b.wweir.cc", false},
+		},
+	}, {
+		"deep wildcard after child",
+		suffixtree.NewNodeFromRules("a.b.foo.com", "**.foo.com"),
+		[]test{
+			{"foo.com", true},
+			{"a.b.foo.com", true},
+			{"z.foo.com", true},
+		},
 	}}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

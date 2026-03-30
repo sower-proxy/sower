@@ -28,12 +28,28 @@ func New() *Socks5 {
 	return &Socks5{}
 }
 
+const (
+	RepSucceeded            = 0x00
+	RepGeneralFailure       = 0x01
+	RepConnectionNotAllowed = 0x02
+)
+
 var (
-	noAuthResp   = authResp{VER: 5, METHOD: 0}
-	succHeadResp = respHead{VER: 5, REP: 0, RSV: 0, ATYP: 1}
+	noAuthResp = authResp{VER: 5, METHOD: 0}
 )
 
 func (s *Socks5) Unwrap(conn net.Conn) (net.Addr, error) {
+	addr, err := s.ReadRequest(conn)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.WriteReply(conn, RepSucceeded); err != nil {
+		return nil, errors.Wrap(err, "write head")
+	}
+	return addr, nil
+}
+
+func (s *Socks5) ReadRequest(conn net.Conn) (net.Addr, error) {
 	{ // auth
 		auth := new(authReq)
 		if err := auth.Fulfill(conn); err != nil || !auth.IsValid() {
@@ -65,15 +81,16 @@ func (s *Socks5) Unwrap(conn net.Conn) (net.Addr, error) {
 		if err := addr.Fulfill(conn); err != nil {
 			return nil, errors.Wrap(err, "read target")
 		}
-
-		if err := binary.Write(conn, binary.BigEndian, succHeadResp); err != nil {
-			return nil, errors.Wrap(err, "write head")
-		}
 	}
 
 	return &AddrHead{
 		addrType: addr,
 	}, nil
+}
+
+func (s *Socks5) WriteReply(conn net.Conn, rep byte) error {
+	head := respHead{VER: 5, REP: rep, RSV: 0, ATYP: 1}
+	return binary.Write(conn, binary.BigEndian, head)
 }
 
 var noAuthReq = struct {
@@ -84,6 +101,10 @@ var noAuthReq = struct {
 var domainHead = reqHead{VER: 5, CMD: 1, RSV: 0, ATYP: 3}
 
 func (s *Socks5) Wrap(conn net.Conn, tgtHost string, tgtPort uint16) error {
+	if len(tgtHost) > 255 {
+		return errors.Errorf("target host too long: %d", len(tgtHost))
+	}
+
 	{ // auth
 		if err := binary.Write(conn, binary.BigEndian, &noAuthReq); err != nil {
 			return errors.WithStack(err)
@@ -93,6 +114,9 @@ func (s *Socks5) Wrap(conn net.Conn, tgtHost string, tgtPort uint16) error {
 		if err := binary.Read(conn, binary.BigEndian, resp); err != nil {
 			return errors.WithStack(err)
 		}
+		if resp.VER != 5 || resp.METHOD != 0 {
+			return errors.Errorf("unexpected auth response: %+v", resp)
+		}
 	}
 	{ // head
 		buf := bytes.NewBuffer(make([]byte, 0, binary.Size(domainHead)+1+len(tgtHost)+2))
@@ -101,13 +125,34 @@ func (s *Socks5) Wrap(conn net.Conn, tgtHost string, tgtPort uint16) error {
 		buf.WriteString(tgtHost)
 		buf.Write([]byte{byte(tgtPort >> 8), byte(tgtPort)})
 
-		if _, err := conn.Write(buf.Bytes()); err != nil {
-			return errors.WithStack(err)
+		if n, err := conn.Write(buf.Bytes()); err != nil || n != len(buf.Bytes()) {
+			return errors.Errorf("n: %d, err: %s", n, err)
 		}
 
-		head := respHead{}
+		head := reqHead{}
 		if err := binary.Read(conn, binary.BigEndian, &head); err != nil {
 			return errors.WithStack(err)
+		}
+		if head.VER != 5 || head.RSV != 0 {
+			return errors.Errorf("unexpected response head: %+v", head)
+		}
+		if head.CMD != 0 {
+			return errors.Errorf("connect rejected, rep=%d", head.CMD)
+		}
+
+		var addr addrType
+		switch head.ATYP {
+		case 0x01:
+			addr = &addrTypeIPv4{}
+		case 0x03:
+			addr = &addrTypeDomain{}
+		case 0x04:
+			addr = &addrTypeIPv6{}
+		default:
+			return errors.Errorf("invalid response ATYP: %d", head.ATYP)
+		}
+		if err := addr.Fulfill(conn); err != nil {
+			return errors.Wrap(err, "read response address")
 		}
 	}
 
