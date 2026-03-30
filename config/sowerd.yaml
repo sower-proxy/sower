@@ -2,12 +2,12 @@
 # This is the daemon configuration for the sower server
 
 # Logging configuration
-logLevel: "info" # Log level: debug, info, warn, error
+log_level: "info" # Log level: debug, info, warn, error
 
 # Server configuration
-serveIP: "0.0.0.0" # IP address to listen on for ports 80 and 443
+serve_ip: "0.0.0.0" # IP address to listen on for ports 80 and 443
 password: "change_me" # Password for client authentication
-fakeSite: "/var/www" # Fake site directory or address (default: /var/www)
+fake_site: "/var/www" # Fake site directory or address (default: /var/www)
 
 # SSL/TLS certificate configuration
 cert:

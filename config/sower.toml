@@ -2,7 +2,7 @@
 # This is the client configuration for the sower proxy
 
 # Logging configuration
-logLevel = "info" # Log level: debug, info, warn, error
+log_level = "info" # Log level: debug, info, warn, error
 
 # Remote proxy configuration
 [remote]
@@ -11,21 +11,21 @@ addr = "proxy.example.com"        # Proxy server address, optional port for TLS 
 password = "your_secure_password" # Proxy password
 
 [remote.tls]
-serverName = ""           # Override upstream TLS server name (SNI)
-clientHello = ""          # Optional uTLS fingerprint: chrome, firefox, ios, android, edge, safari, 360, qq, randomized, randomized_alpn, randomized_no_alpn, golang
-insecureSkipVerify = false # Skip upstream TLS certificate verification
+server_name = ""            # Override upstream TLS server name (SNI)
+client_hello = ""           # Optional uTLS fingerprint: chrome, firefox, ios, android, edge, safari, 360, qq, randomized, randomized_alpn, randomized_no_alpn, golang
+insecure_skip_verify = false # Skip upstream TLS certificate verification
 
 # DNS configuration
 [dns]
 disable = false        # Disable DNS proxy
 serve = "127.0.0.1"    # DNS server IP address
-serve6 = ""            # DNS server IPv6 address (optional)
-serveIface = ""        # Network interface to get IP from (optional)
+serve_6 = ""           # DNS server IPv6 address (optional)
+serve_iface = ""       # Network interface to get IP from (optional)
 upstream = "8.8.8.8"   # Upstream DNS server (optional)
 fallback = "223.5.5.5" # Fallback DNS server
 
 # SOCKS5 proxy configuration
-[socks5]
+[socks_5]
 disable = false         # Disable SOCKS5 proxy
 addr = "127.0.0.1:1080" # SOCKS5 listen address
 
@@ -34,24 +34,24 @@ addr = "127.0.0.1:1080" # SOCKS5 listen address
 # Block list rules
 [router.block]
 file = ""          # Block list file path (local or remote)
-filePrefix = "**." # Prefix for block list rules
+file_prefix = "**." # Prefix for block list rules
 rules = []         # Additional block rules
 
 # Direct list rules
 [router.direct]
 file = ""          # Direct list file path (local or remote)
-filePrefix = "**." # Prefix for direct list rules
+file_prefix = "**." # Prefix for direct list rules
 rules = []         # Additional direct rules
 
 # Proxy list rules
 [router.proxy]
 file = ""          # Proxy list file path (local or remote)
-filePrefix = "**." # Prefix for proxy list rules
+file_prefix = "**." # Prefix for proxy list rules
 rules = []         # Additional proxy rules
 
 # Country-based routing
 [router.country]
 mmdb = ""       # MMDB file path for GeoIP
 file = ""       # CIDR block list file path
-filePrefix = "" # Prefix for CIDR rules
+file_prefix = "" # Prefix for CIDR rules
 rules = []      # Additional CIDR rules
