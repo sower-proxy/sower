@@ -22,32 +22,27 @@ _If you want to use sower as a secondary proxy to provide intelligent routing, y
 
 On the server-side, sowerd runs just like a web server proxy. It will bind two ports `80` / `443`.
 
+`sowerd` validates its configuration at startup, redacts secrets from logs, and exits immediately if `80` / `443` listeners cannot be established.
+
 You can use your own certificate or the certificate automatically applied for by sowerd from [`Let's Encrypt`](https://letsencrypt.org/).
+
+When `fake_site` points to a local directory, `sowerd` serves that directory only through loopback fallback traffic on `127.0.0.1:80`, while public HTTP traffic is still redirected to HTTPS.
 
 There are two ways to run the sowerd service:
 
 1. Run the command with root permission
 
-   ```shell
-   # sowerd -password XXX -fake_site 127.0.0.1:8080
-   ```
+    ```shell
+    # sowerd -password XXX -fake_site 127.0.0.1:8080
+    ```
 
-2. Install as a systemd service
+2. Install as a systemd service interactively
 
-   ```service
-   [Unit]
-   Description=sower server service
-   After=network.target
+    ```shell
+    sudo sowerd -i
+    ```
 
-   [Service]
-   Type=simple
-   ExecStart=/usr/local/bin/sowerd
-   Environment="FAKE_SITE=127.0.0.1:8080"
-   Environment="PASSWORD=XXX"
-
-   [Install]
-   WantedBy=multi-user.target
-   ```
+    The installer can copy the current binary to `/usr/local/bin/sowerd`, write `/etc/systemd/system/sowerd.service`, create `/etc/sower/sowerd.toml` when missing, and optionally start the service immediately.
 
 ## Sower
 
@@ -55,13 +50,15 @@ A config file is required on the sower client side. [Here](https://github.com/so
 
 `Sower` will bind 4 ports by default with root permission. They are: `udp(53)` / `tcp(80)` / `tcp(443)` / `tcp(1080)`.
 
+For `sower` and `trojan` upstreams, `remote.addr` now accepts either `host` or `host:port`. Optional `remote.tls` settings let the client override SNI, skip certificate verification, or use a uTLS client fingerprint such as `chrome` or `firefox`.
+
 After doing the next three steps, you can enjoy the intelligent transparent proxy solution:
 
 1. Run the command with root permission:
 
-   ```shell
-   # sower -f sower.hcl
-   ```
+    ```shell
+    # sower -f sower.hcl
+    ```
 
 2. Change your DNS server to `127.0.0.1`.
 
@@ -70,3 +67,5 @@ After doing the next three steps, you can enjoy the intelligent transparent prox
 ## Architecture
 
 ![Architecture diagram](./sower.drawio.svg)
+
+Detailed architecture and runtime design notes are in [ARCHITECTURE.md](./ARCHITECTURE.md).
