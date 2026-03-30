@@ -30,19 +30,21 @@ func (r *Router) ServeDNS(w dns.ResponseWriter, req *dns.Msg) {
 
 	case r.DirectRule.Match(domain):
 
-	case r.ProxyRule.Match(domain) && isAddressQuestion(qtype):
-		resp, err := r.dnsProxyReply(domain, w.LocalAddr(), req)
-		if err != nil {
-			slog.Warn("proxy dns", "error", err, "domain", domain)
-			_ = w.WriteMsg(r.dnsFail(req, dns.RcodeServerFailure))
+	case r.ProxyRule.Match(domain):
+		if isAddressQuestion(qtype) {
+			resp, err := r.dnsProxyReply(domain, w.LocalAddr(), req)
+			if err != nil {
+				slog.Warn("proxy dns", "error", err, "domain", domain)
+				_ = w.WriteMsg(r.dnsFail(req, dns.RcodeServerFailure))
+				return
+			}
+			_ = w.WriteMsg(resp)
 			return
 		}
-		_ = w.WriteMsg(resp)
-		return
-
-	case r.ProxyRule.Match(domain) && isProxySensitiveQuestion(qtype):
-		_ = w.WriteMsg(r.dnsNoData(req))
-		return
+		if isProxySensitiveQuestion(qtype) {
+			_ = w.WriteMsg(r.dnsNoData(req))
+			return
+		}
 	}
 
 	// 2. direct query, do not fallback to proxy to avoid side-effect
@@ -61,45 +63,27 @@ func (r *Router) dnsFail(req *dns.Msg, rcode int) *dns.Msg {
 }
 
 func (r *Router) dnsNoData(req *dns.Msg) *dns.Msg {
-	m := new(dns.Msg)
-	m.SetReply(req)
-	return m
+	return dnsReply(req)
 }
 
 func (r *Router) dnsProxyReply(domain string, localAddr net.Addr, req *dns.Msg) (*dns.Msg, error) {
 	qtype := req.Question[0].Qtype
-	m := new(dns.Msg)
-	m.SetReply(req)
+	reply := dnsReply(req)
 
-	switch qtype {
-	case dns.TypeA:
-		localIP, err := r.proxyReplyIP(localAddr, qtype)
-		if err != nil {
-			if errors.Is(err, errNoLocalIPForQuestionType) {
-				return m, nil
-			}
-			return nil, err
+	localIP, err := r.proxyReplyIP(localAddr, qtype)
+	if err != nil {
+		if errors.Is(err, errNoLocalIPForQuestionType) {
+			return reply, nil
 		}
-		m.Answer = []dns.RR{&dns.A{
-			Hdr: dns.RR_Header{Name: domain, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 20},
-			A:   localIP,
-		}}
-	case dns.TypeAAAA:
-		localIP, err := r.proxyReplyIP(localAddr, qtype)
-		if err != nil {
-			if errors.Is(err, errNoLocalIPForQuestionType) {
-				return m, nil
-			}
-			return nil, err
-		}
-		m.Answer = []dns.RR{&dns.AAAA{
-			Hdr:  dns.RR_Header{Name: domain, Rrtype: dns.TypeAAAA, Class: dns.ClassINET, Ttl: 20},
-			AAAA: localIP,
-		}}
-	default:
-		// ServeDNS only calls dnsProxyReply for A/AAAA questions.
+		return nil, err
 	}
-	return m, nil
+
+	record, err := proxyReplyRecord(domain, qtype, localIP)
+	if err != nil {
+		return nil, err
+	}
+	reply.Answer = []dns.RR{record}
+	return reply, nil
 }
 
 func (r *Router) proxyReplyIP(localAddr net.Addr, qtype uint16) (net.IP, error) {
@@ -146,11 +130,29 @@ func isAddressQuestion(qtype uint16) bool {
 }
 
 func isProxySensitiveQuestion(qtype uint16) bool {
+	return qtype == dns.TypeHTTPS || qtype == dns.TypeSVCB
+}
+
+func dnsReply(req *dns.Msg) *dns.Msg {
+	reply := new(dns.Msg)
+	reply.SetReply(req)
+	return reply
+}
+
+func proxyReplyRecord(domain string, qtype uint16, localIP net.IP) (dns.RR, error) {
 	switch qtype {
-	case dns.TypeHTTPS, dns.TypeSVCB:
-		return true
+	case dns.TypeA:
+		return &dns.A{
+			Hdr: dns.RR_Header{Name: domain, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 20},
+			A:   localIP,
+		}, nil
+	case dns.TypeAAAA:
+		return &dns.AAAA{
+			Hdr:  dns.RR_Header{Name: domain, Rrtype: dns.TypeAAAA, Class: dns.ClassINET, Ttl: 20},
+			AAAA: localIP,
+		}, nil
 	default:
-		return false
+		return nil, fmt.Errorf("unsupported question type %d", qtype)
 	}
 }
 
