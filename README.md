@@ -24,6 +24,8 @@ On the server-side, sowerd runs just like a web server proxy. It will bind two p
 
 `sowerd` validates its configuration at startup, redacts secrets from logs, and exits immediately if `80` / `443` listeners cannot be established.
 
+When `sowerd` runs as a system service without `HOME` or `XDG_CACHE_HOME`, it falls back to `/var/cache/sower` for certificate cache state so environment-only startup still works without a config file.
+
 You can use your own certificate or the certificate automatically applied for by sowerd from [`Let's Encrypt`](https://letsencrypt.org/).
 
 When `fake_site` points to a local directory, `sowerd` serves that directory only through loopback fallback traffic on `127.0.0.1:80`, while public HTTP traffic is still redirected to HTTPS.

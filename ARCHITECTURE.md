@@ -92,6 +92,7 @@
 - Upstream TLS behavior is configured only on the client side; `sowerd` remains a normal TLS server and does not need uTLS-specific logic.
 - Rule loading supports local files and remote gzip-compressed HTTP sources.
 - Fake site directory mode is loopback-only on port `80` to avoid exposing local static assets directly to the public internet.
+- `sowerd` prefers the user cache directory for ACME state, but falls back to `/var/cache/sower` so systemd services can start without `HOME`/`XDG_CACHE_HOME` or a config file.
 
 ## Operational Notes
 

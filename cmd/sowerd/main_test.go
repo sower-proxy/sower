@@ -1,7 +1,9 @@
 package main
 
 import (
+	"errors"
 	"log/slog"
+	"path/filepath"
 	"testing"
 
 	"github.com/sower-proxy/sower/config"
@@ -72,6 +74,54 @@ func TestHasInstallFlag(t *testing.T) {
 			t.Parallel()
 			if got := hasInstallFlag(tt.args); got != tt.want {
 				t.Fatalf("hasInstallFlag(%q) = %v, want %v", tt.args, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResolveCacheDir(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		userCache   func() (string, error)
+		fallbackDir string
+		wantDir     string
+		wantErr     bool
+	}{
+		{
+			name: "user cache dir available",
+			userCache: func() (string, error) {
+				return "/tmp/cache", nil
+			},
+			fallbackDir: "/var/cache/sower",
+			wantDir:     filepath.Join("/tmp/cache", "sower"),
+		},
+		{
+			name: "fallback to system cache dir",
+			userCache: func() (string, error) {
+				return "", errors.New("missing home")
+			},
+			fallbackDir: "/var/cache/sower",
+			wantDir:     "/var/cache/sower",
+			wantErr:     true,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			gotDir, err := resolveCacheDir(tt.userCache, tt.fallbackDir)
+			if tt.wantErr && err == nil {
+				t.Fatal("expected error")
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if gotDir != tt.wantDir {
+				t.Fatalf("resolveCacheDir() = %q, want %q", gotDir, tt.wantDir)
 			}
 		})
 	}

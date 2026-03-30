@@ -33,6 +33,7 @@ import (
 const (
 	httpShutdownTimeout = 5 * time.Second
 	probeTimeout        = 10 * time.Second
+	systemCacheDir      = "/var/cache/sower"
 )
 
 var (
@@ -174,16 +175,24 @@ func run(ctx context.Context, conf config.SowerdConfig) error {
 }
 
 func cacheDir() (string, error) {
-	base, err := os.UserCacheDir()
-	if err != nil {
-		return "", fmt.Errorf("get user cache dir: %w", err)
+	dir, fallbackErr := resolveCacheDir(os.UserCacheDir, systemCacheDir)
+	if fallbackErr != nil {
+		slog.Warn("user cache dir unavailable, fallback to system cache dir",
+			"error", fallbackErr,
+			"dir", dir)
 	}
-
-	dir := filepath.Join(base, "sower")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", fmt.Errorf("create cache dir: %w", err)
+		return "", fmt.Errorf("create cache dir %s: %w", dir, err)
 	}
 	return dir, nil
+}
+
+func resolveCacheDir(userCacheDir func() (string, error), fallbackDir string) (string, error) {
+	base, err := userCacheDir()
+	if err != nil {
+		return fallbackDir, err
+	}
+	return filepath.Join(base, "sower"), nil
 }
 
 func buildTLSConfig(cacheDir string, cfg config.SowerdConfig) (*autocert.Manager, *tls.Config, error) {
