@@ -3,15 +3,19 @@ package main
 import (
 	"bufio"
 	"compress/gzip"
+	"context"
+	stderrors "errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/cristalhq/aconfig"
@@ -24,6 +28,7 @@ import (
 	"github.com/sower-proxy/deferlog/v2"
 	"github.com/sower-proxy/sower/config"
 	"github.com/sower-proxy/sower/pkg/suffixtree"
+	"github.com/sower-proxy/sower/pkg/upstreamtls"
 	"github.com/sower-proxy/sower/router"
 )
 
@@ -37,9 +42,12 @@ func init() {
 	noColor := (fi.Mode() & os.ModeCharDevice) == 0
 	deferlog.SetDefault(slog.New(tint.NewHandler(os.Stdout,
 		&tint.Options{AddSource: true, NoColor: noColor})))
+	if strings.HasSuffix(os.Args[0], ".test") {
+		return
+	}
 
 	if err := aconfig.LoaderFor(&conf, aconfig.Config{
-		AllowUnknownFields: true,
+		AllowUnknownFields: false,
 		FileFlag:           "c",
 		Files: []string{
 			"sower.hcl",
@@ -66,20 +74,43 @@ func init() {
 		slog.Error("validate config", "error", err)
 		os.Exit(1)
 	}
-	slog.Info("starting sower", "version", version, "date", date, "config", fmt.Sprint(conf))
+	slog.Info("starting sower",
+		"version", version,
+		"date", date,
+		"log_level", conf.LogLevel,
+		"remote_type", conf.Remote.Type,
+		"remote_addr", conf.Remote.Addr,
+		"remote_password", deferlog.Secret(conf.Remote.Password),
+		"remote_tls", conf.Remote.TLS,
+		"dns", conf.DNS,
+		"socks5", conf.Socks5,
+		"router", conf.Router)
 }
 
 func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	upstreamDNS := conf.DNS.Upstream
 	if upstreamDNS == "" {
 		upstreamDNS = conf.DNS.Fallback
 	}
-	proxyDial := GenProxyDial(conf.Remote.Type, conf.Remote.Addr, conf.Remote.Password, upstreamDNS)
-	r := router.NewRouter(conf.DNS.Serve, conf.DNS.Upstream, conf.DNS.Fallback, conf.Router.Country.MMDB, proxyDial)
+	proxyDial, err := GenProxyDial(conf.Remote.Type, conf.Remote.Addr, conf.Remote.Password, upstreamDNS, upstreamtls.Options{
+		ServerName:         conf.Remote.TLS.ServerName,
+		ClientHello:        conf.Remote.TLS.ClientHello,
+		InsecureSkipVerify: conf.Remote.TLS.InsecureSkipVerify,
+	})
+	if err != nil {
+		slog.Error("build proxy dialer", "error", err)
+		os.Exit(1)
+	}
+	r := router.NewRouter([]string{conf.DNS.Serve, conf.DNS.Serve6}, upstreamDNS, conf.DNS.Fallback, conf.Router.Country.MMDB, proxyDial)
 	r.BlockRule = suffixtree.NewNodeFromRules(conf.Router.Block.Rules...)
 	r.DirectRule = suffixtree.NewNodeFromRules(conf.Router.Direct.Rules...)
 	r.ProxyRule = suffixtree.NewNodeFromRules(conf.Router.Proxy.Rules...)
 	r.AddCountryCIDRs(conf.Router.Country.Rules...)
+
+	errCh := make(chan error, 8)
 
 	if conf.DNS.Disable {
 		slog.Info("DNS proxy disabled")
@@ -98,22 +129,29 @@ func main() {
 				slog.Error("listen port 80", "error", err, "listen_on", net.JoinHostPort(ip, "80"))
 				os.Exit(1)
 			}
-			go ServeHTTP(lnHTTP, r)
+			go closeOnDone(ctx, lnHTTP)
+			go reportServeError(errCh, "http proxy", ServeHTTP(ctx, lnHTTP, r))
 
 			lnHTTPS, err := net.Listen("tcp", net.JoinHostPort(ip, "443"))
 			if err != nil {
 				slog.Error("listen port 443", "error", err, "listen_on", net.JoinHostPort(ip, "443"))
 				os.Exit(1)
 			}
-			go ServeHTTPS(lnHTTPS, r)
+			go closeOnDone(ctx, lnHTTPS)
+			go reportServeError(errCh, "https proxy", ServeHTTPS(ctx, lnHTTPS, r))
 
-			go func(ip string) {
-				err := dns.ListenAndServe(net.JoinHostPort(ip, "53"), "udp", r)
-				if err != nil {
-					slog.Error("serve dns", "error", err, "listen_on", ip)
-					os.Exit(1)
+			dnsServer := &dns.Server{
+				Addr:    net.JoinHostPort(ip, "53"),
+				Net:     "udp",
+				Handler: r,
+			}
+			go shutdownDNSServerOnDone(ctx, dnsServer)
+			go func(ip string, server *dns.Server) {
+				err := server.ListenAndServe()
+				if err != nil && !stderrors.Is(err, net.ErrClosed) {
+					reportServeError(errCh, "dns proxy", fmt.Errorf("listen on %s: %w", ip, err))
 				}
-			}(ip)
+			}(ip, dnsServer)
 		}
 	}
 
@@ -129,33 +167,43 @@ func main() {
 			os.Exit(1)
 		}
 		slog.Info("SOCKS5 proxy listening", "addr", conf.Socks5.Addr)
-		go ServeSocks5(ln, r)
+		go closeOnDone(ctx, ln)
+		reportServeError(errCh, "socks5 proxy", ServeSocks5(ctx, ln, r))
 	}()
 
 	start := time.Now()
-	loadRule(r.BlockRule, proxyDial, conf.Router.Block.File, conf.Router.Block.FilePrefix)
-	loadRule(r.DirectRule, proxyDial, conf.Router.Direct.File, conf.Router.Direct.FilePrefix)
-	loadRule(r.ProxyRule, proxyDial, conf.Router.Proxy.File, conf.Router.Proxy.FilePrefix)
-	for line := range fetchRuleFile(proxyDial, conf.Router.Country.File) {
+	loadRule(ctx, r.BlockRule, proxyDial, conf.Router.Block.File, conf.Router.Block.FilePrefix)
+	loadRule(ctx, r.DirectRule, proxyDial, conf.Router.Direct.File, conf.Router.Direct.FilePrefix)
+	loadRule(ctx, r.ProxyRule, proxyDial, conf.Router.Proxy.File, conf.Router.Proxy.FilePrefix)
+	for line := range fetchRuleFile(ctx, proxyDial, conf.Router.Country.File) {
 		r.AddCountryCIDRs(line)
 	}
 
 	slog.Info("loaded rules, proxy started", "took", time.Since(start),
 		"blockRule", r.BlockRule.Count, "directRule", r.DirectRule.Count, "proxyRule", r.ProxyRule.Count)
 	runtime.GC()
-	select {}
+
+	select {
+	case <-ctx.Done():
+		slog.Info("shutting down sower", "reason", ctx.Err())
+	case err := <-errCh:
+		slog.Error("serve failed", "error", err)
+		stop()
+	}
 }
 
-func loadRule(rule *suffixtree.Node, proxyDial router.ProxyDialFn, file, linePrefix string) {
-	for line := range fetchRuleFile(proxyDial, file) {
+func loadRule(ctx context.Context, rule *suffixtree.Node, proxyDial router.ProxyDialFn, file, linePrefix string) {
+	for line := range fetchRuleFile(ctx, proxyDial, file) {
 		rule.Add(linePrefix + line)
 	}
 	rule.GC()
 }
 
-func fetchRuleFile(proxyDial router.ProxyDialFn, file string) <-chan string {
+func fetchRuleFile(ctx context.Context, proxyDial router.ProxyDialFn, file string) <-chan string {
 	if file == "" {
-		return make(chan string)
+		ch := make(chan string)
+		close(ch)
+		return ch
 	}
 
 	var loadFn func() (io.ReadCloser, error)
@@ -167,8 +215,9 @@ func fetchRuleFile(proxyDial router.ProxyDialFn, file string) <-chan string {
 	} else {
 		// load rule file from remote by HTTP
 		client := &http.Client{
+			Timeout: 15 * time.Second,
 			Transport: &http.Transport{
-				Dial: func(network, addr string) (net.Conn, error) {
+				DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 					domain, port, _ := net.SplitHostPort(addr)
 					p, _ := strconv.Atoi(port)
 					return proxyDial("tcp", domain, uint16(p))
@@ -177,7 +226,10 @@ func fetchRuleFile(proxyDial router.ProxyDialFn, file string) <-chan string {
 		}
 
 		loadFn = func() (io.ReadCloser, error) {
-			req, _ := http.NewRequest(http.MethodGet, file, nil)
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, file, nil)
+			if err != nil {
+				return nil, err
+			}
 			req.Header.Add("Accept-Encoding", "gzip")
 			resp, err := client.Do(req)
 			if err != nil {
@@ -199,9 +251,20 @@ func fetchRuleFile(proxyDial router.ProxyDialFn, file string) <-chan string {
 		if err == nil {
 			break
 		}
+		if ctx.Err() != nil {
+			slog.Error("fetch rule file", "error", ctx.Err(), "file", file)
+			os.Exit(1)
+		}
 
 		// wait: 28.5s
-		time.Sleep(i * i * 100 * time.Millisecond)
+		timer := time.NewTimer(i * i * 100 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			slog.Error("fetch rule file", "error", ctx.Err(), "file", file)
+			os.Exit(1)
+		case <-timer.C:
+		}
 		rc, err = loadFn()
 	}
 	if err != nil {
@@ -237,4 +300,25 @@ func fetchRuleFile(proxyDial router.ProxyDialFn, file string) <-chan string {
 	}()
 
 	return ch
+}
+
+func closeOnDone(ctx context.Context, closer io.Closer) {
+	<-ctx.Done()
+	_ = closer.Close()
+}
+
+func shutdownDNSServerOnDone(ctx context.Context, server *dns.Server) {
+	<-ctx.Done()
+	_ = server.ShutdownContext(ctx)
+}
+
+func reportServeError(errCh chan<- error, service string, err error) {
+	if err == nil || stderrors.Is(err, net.ErrClosed) {
+		return
+	}
+
+	select {
+	case errCh <- fmt.Errorf("%s: %w", service, err):
+	default:
+	}
 }

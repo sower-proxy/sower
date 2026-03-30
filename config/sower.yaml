@@ -7,8 +7,12 @@ logLevel: "info" # Log level: debug, info, warn, error
 # Remote proxy configuration
 remote:
   type: "sower" # Proxy type: sower, trojan, or socks5
-  addr: "proxy.example.com" # Proxy server address
+  addr: "proxy.example.com" # Proxy server address, optional port for TLS remotes
   password: "your_secure_password" # Proxy password
+  tls:
+    serverName: "" # Override upstream TLS server name (SNI)
+    clientHello: "" # Optional uTLS fingerprint: chrome, firefox, ios, android, edge, safari, 360, qq, randomized, randomized_alpn, randomized_no_alpn, golang
+    insecureSkipVerify: false # Skip upstream TLS certificate verification
 
 # DNS configuration
 dns:
