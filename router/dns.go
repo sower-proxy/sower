@@ -23,15 +23,14 @@ func (r *Router) ServeDNS(w dns.ResponseWriter, req *dns.Msg) {
 	domain := req.Question[0].Name
 	qtype := req.Question[0].Qtype
 	// 1. rule_based( block > direct > proxy )
-	switch {
-	case r.BlockRule.Match(domain):
+	if r.BlockRule.Match(domain) {
 		_ = w.WriteMsg(r.dnsFail(req, dns.RcodeNameError))
 		return
+	}
 
-	case r.DirectRule.Match(domain):
-
-	case r.ProxyRule.Match(domain):
-		if isAddressQuestion(qtype) {
+	if !r.DirectRule.Match(domain) && r.ProxyRule.Match(domain) {
+		switch {
+		case isAddressQuestion(qtype):
 			resp, err := r.dnsProxyReply(domain, w.LocalAddr(), req)
 			if err != nil {
 				slog.Warn("proxy dns", "error", err, "domain", domain)
@@ -40,8 +39,7 @@ func (r *Router) ServeDNS(w dns.ResponseWriter, req *dns.Msg) {
 			}
 			_ = w.WriteMsg(resp)
 			return
-		}
-		if isProxySensitiveQuestion(qtype) {
+		case isProxySensitiveQuestion(qtype):
 			_ = w.WriteMsg(r.dnsNoData(req))
 			return
 		}
@@ -93,33 +91,20 @@ func (r *Router) proxyReplyIP(localAddr net.Addr, qtype uint16) (net.IP, error) 
 	}
 
 	ip := net.ParseIP(strings.Trim(host, "[]"))
-	if ip != nil && !ip.IsUnspecified() {
-		if qtype == dns.TypeA && ip.To4() != nil {
-			return ip, nil
-		}
-		if qtype == dns.TypeAAAA && ip.To4() == nil {
-			return ip, nil
-		}
+	if ip != nil && !ip.IsUnspecified() && matchesQuestionTypeIP(ip, qtype) {
+		return ip, nil
 	}
 	if ip == nil {
 		return nil, fmt.Errorf("parse local dns IP %q", host)
 	}
-
-	switch qtype {
-	case dns.TypeA:
-		for _, ip := range r.dns.serveIPs {
-			if ip.To4() != nil && !ip.IsUnspecified() {
-				return ip, nil
-			}
-		}
-	case dns.TypeAAAA:
-		for _, ip := range r.dns.serveIPs {
-			if ip.To4() == nil && !ip.IsUnspecified() {
-				return ip, nil
-			}
-		}
-	default:
+	if !isAddressQuestion(qtype) {
 		return nil, fmt.Errorf("unsupported question type %d", qtype)
+	}
+
+	for _, serveIP := range r.dns.serveIPs {
+		if !serveIP.IsUnspecified() && matchesQuestionTypeIP(serveIP, qtype) {
+			return serveIP, nil
+		}
 	}
 
 	return nil, fmt.Errorf("%w %d", errNoLocalIPForQuestionType, qtype)
@@ -153,6 +138,17 @@ func proxyReplyRecord(domain string, qtype uint16, localIP net.IP) (dns.RR, erro
 		}, nil
 	default:
 		return nil, fmt.Errorf("unsupported question type %d", qtype)
+	}
+}
+
+func matchesQuestionTypeIP(ip net.IP, qtype uint16) bool {
+	switch qtype {
+	case dns.TypeA:
+		return ip.To4() != nil
+	case dns.TypeAAAA:
+		return ip.To4() == nil
+	default:
+		return false
 	}
 }
 
