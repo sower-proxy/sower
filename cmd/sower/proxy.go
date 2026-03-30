@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pkg/errors"
 	"github.com/sower-proxy/conns/relay"
 	"github.com/sower-proxy/conns/reread"
 	"github.com/sower-proxy/sower/pkg/upstreamtls"
@@ -51,29 +50,19 @@ func GenProxyDial(proxyType, proxyHost, proxyPassword, dns string, tlsOptions up
 
 	switch proxyType {
 	case "sower":
-		dialAddr, err := upstreamDialAddr(proxyHost, "443")
+		tlsDialFn, err := newTLSDialFn(dialer, proxyHost, tlsOptions)
 		if err != nil {
-			return nil, err
-		}
-		if err := upstreamtls.ValidateClientHello(tlsOptions.ClientHello); err != nil && tlsOptions.ClientHello != "" {
 			return nil, err
 		}
 		proxy = sower.New(proxyPassword)
-		dialFn = func() (net.Conn, error) {
-			return upstreamtls.Dial(dialer, "tcp", dialAddr, tlsOptions)
-		}
+		dialFn = tlsDialFn
 	case "trojan":
-		dialAddr, err := upstreamDialAddr(proxyHost, "443")
+		tlsDialFn, err := newTLSDialFn(dialer, proxyHost, tlsOptions)
 		if err != nil {
 			return nil, err
 		}
-		if err := upstreamtls.ValidateClientHello(tlsOptions.ClientHello); err != nil && tlsOptions.ClientHello != "" {
-			return nil, err
-		}
 		proxy = trojan.New(proxyPassword)
-		dialFn = func() (net.Conn, error) {
-			return upstreamtls.Dial(dialer, "tcp", dialAddr, tlsOptions)
-		}
+		dialFn = tlsDialFn
 	case "socks5":
 		proxy = socks5.New()
 		dialFn = func() (net.Conn, error) {
@@ -85,7 +74,7 @@ func GenProxyDial(proxyType, proxyHost, proxyPassword, dns string, tlsOptions up
 
 	return func(network, host string, port uint16) (net.Conn, error) {
 		if host == "" || port == 0 {
-			return nil, errors.Errorf("invalid addr(%s:%d)", host, port)
+			return nil, fmt.Errorf("invalid addr(%s:%d)", host, port)
 		}
 
 		conn, err := dialFn()
@@ -99,6 +88,22 @@ func GenProxyDial(proxyType, proxyHost, proxyPassword, dns string, tlsOptions up
 		}
 
 		return conn, nil
+	}, nil
+}
+
+func newTLSDialFn(dialer *net.Dialer, proxyHost string, tlsOptions upstreamtls.Options) (func() (net.Conn, error), error) {
+	dialAddr, err := upstreamDialAddr(proxyHost, "443")
+	if err != nil {
+		return nil, err
+	}
+	if tlsOptions.ClientHello != "" {
+		if err := upstreamtls.ValidateClientHello(tlsOptions.ClientHello); err != nil {
+			return nil, err
+		}
+	}
+
+	return func() (net.Conn, error) {
+		return upstreamtls.Dial(dialer, "tcp", dialAddr, tlsOptions)
 	}, nil
 }
 
