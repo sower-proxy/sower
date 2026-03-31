@@ -1,9 +1,11 @@
 package main
 
 import (
+	"crypto/tls"
 	"io"
 	"net"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -110,6 +112,141 @@ func TestHandleSocks5ConnReturnsSocks5FailureForBlockedRequest(t *testing.T) {
 	if reply[1] != 0x02 {
 		t.Fatalf("expected connection-not-allowed reply, got %d", reply[1])
 	}
+}
+
+func TestPeekTLSClientHelloServerName(t *testing.T) {
+	t.Parallel()
+
+	server, client := net.Pipe()
+	defer client.Close()
+
+	hello := generateTLSClientHelloRecord(t, "github.com")
+	go func() {
+		_, _ = client.Write(hello)
+		_ = client.Close()
+	}()
+
+	got, err := peekTLSClientHelloServerName(server)
+	_ = server.Close()
+	if err != nil {
+		t.Fatalf("peek tls client hello: %v", err)
+	}
+	if got != "github.com" {
+		t.Fatalf("unexpected server name: %q", got)
+	}
+}
+
+func TestHandleHTTPSConnRelaysClientHelloToUpstream(t *testing.T) {
+	t.Parallel()
+
+	downstreamServer, downstreamClient := net.Pipe()
+	defer downstreamClient.Close()
+
+	upstreamClient, upstreamServer := net.Pipe()
+	defer upstreamServer.Close()
+
+	hello := generateTLSClientHelloRecord(t, "github.com")
+	response := []byte("upstream-response")
+
+	var (
+		gotHost string
+		gotPort uint16
+	)
+	r := &router.Router{
+		BlockRule:  suffixtree.NewNodeFromRules(),
+		DirectRule: suffixtree.NewNodeFromRules(),
+		ProxyRule:  suffixtree.NewNodeFromRules(),
+		ProxyDial: func(network, host string, port uint16) (net.Conn, error) {
+			gotHost = host
+			gotPort = port
+			return upstreamClient, nil
+		},
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		handleHTTPSConn(downstreamServer, r)
+	}()
+
+	writeErrCh := make(chan error, 1)
+	go func() {
+		_, err := downstreamClient.Write(hello)
+		writeErrCh <- err
+	}()
+
+	gotHello := make([]byte, len(hello))
+	upstreamServer.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if _, err := io.ReadFull(upstreamServer, gotHello); err != nil {
+		t.Fatalf("read upstream client hello: %v", err)
+	}
+	if string(gotHello) != string(hello) {
+		t.Fatal("client hello was not relayed intact")
+	}
+	if err := <-writeErrCh; err != nil {
+		t.Fatalf("write downstream client hello: %v", err)
+	}
+
+	readErrCh := make(chan error, 1)
+	gotResp := make([]byte, len(response))
+	go func() {
+		_, err := io.ReadFull(downstreamClient, gotResp)
+		readErrCh <- err
+	}()
+
+	upstreamServer.SetWriteDeadline(time.Now().Add(2 * time.Second))
+	if _, err := upstreamServer.Write(response); err != nil {
+		t.Fatalf("write upstream response: %v", err)
+	}
+	if err := <-readErrCh; err != nil {
+		t.Fatalf("read downstream response: %v", err)
+	}
+	if string(gotResp) != string(response) {
+		t.Fatalf("unexpected downstream response: %q", gotResp)
+	}
+	if gotHost != "github.com" || gotPort != 443 {
+		t.Fatalf("unexpected proxy target: %s:%d", gotHost, gotPort)
+	}
+
+	_ = downstreamClient.Close()
+	_ = upstreamServer.Close()
+	wg.Wait()
+}
+
+func generateTLSClientHelloRecord(t *testing.T, serverName string) []byte {
+	t.Helper()
+
+	clientConn, serverConn := net.Pipe()
+	defer clientConn.Close()
+	defer serverConn.Close()
+
+	errCh := make(chan error, 1)
+	go func() {
+		tlsConn := tls.Client(clientConn, &tls.Config{
+			ServerName:         serverName,
+			InsecureSkipVerify: true,
+		})
+		errCh <- tlsConn.Handshake()
+		_ = tlsConn.Close()
+	}()
+
+	serverConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	header := make([]byte, tlsRecordHeaderLen)
+	if _, err := io.ReadFull(serverConn, header); err != nil {
+		t.Fatalf("read tls record header: %v", err)
+	}
+
+	recordLen := int(header[3])<<8 | int(header[4])
+	record := make([]byte, len(header)+recordLen)
+	copy(record, header)
+	if _, err := io.ReadFull(serverConn, record[len(header):]); err != nil {
+		t.Fatalf("read tls record body: %v", err)
+	}
+
+	_ = serverConn.Close()
+	<-errCh
+	return record
 }
 
 func newTestRouter() *router.Router {

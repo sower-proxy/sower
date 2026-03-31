@@ -3,15 +3,16 @@ package main
 import (
 	"bufio"
 	"context"
-	"crypto/tls"
 	stderrors "errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"strings"
 	"time"
 
+	utls "github.com/refraction-networking/utls"
 	"github.com/sower-proxy/conns/relay"
 	"github.com/sower-proxy/conns/reread"
 	"github.com/sower-proxy/sower/pkg/upstreamtls"
@@ -25,6 +26,11 @@ import (
 const (
 	proxyDialTimeout = 10 * time.Second
 	proxyReadTimeout = 15 * time.Second
+
+	tlsRecordHeaderLen       = 5
+	tlsRecordTypeHandshake   = 22
+	tlsHandshakeTypeHello    = 1
+	maxTLSPlaintextRecordLen = 64 * 1024
 )
 
 func GenProxyDial(proxyType, proxyHost, proxyPassword, dns string, tlsOptions upstreamtls.Options) (router.ProxyDialFn, error) {
@@ -196,20 +202,13 @@ func handleHTTPSConn(conn net.Conn, r *router.Router) {
 	defer rereadConn.Close()
 
 	_ = rereadConn.SetDeadline(time.Now().Add(proxyReadTimeout))
-
-	var domain string
-	err := tls.Server(rereadConn, &tls.Config{
-		GetConfigForClient: func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
-			domain = hello.ServerName
-			return nil, nil
-		},
-	}).Handshake()
+	domain, err := peekTLSClientHelloServerName(rereadConn)
 	if err != nil {
-		slog.Debug("tls handshake failed", "error", err)
+		slog.Debug("read tls client hello", "error", err)
 		return
 	}
 	if domain == "" {
-		slog.Debug("tls handshake missing server name")
+		slog.Debug("tls client hello missing server name")
 		return
 	}
 	_ = rereadConn.SetDeadline(time.Time{})
@@ -225,6 +224,61 @@ func handleHTTPSConn(conn net.Conn, r *router.Router) {
 	err = relay.Relay(rereadConn, rc)
 	if err != nil {
 		slog.Debug("serve https", "error", err, "host", domain, "spend", time.Since(start))
+	}
+}
+
+func peekTLSClientHelloServerName(conn io.Reader) (string, error) {
+	clientHello, err := readTLSClientHello(conn)
+	if err != nil {
+		return "", err
+	}
+
+	hello := utls.UnmarshalClientHello(clientHello)
+	if hello == nil {
+		return "", fmt.Errorf("parse tls client hello")
+	}
+	return hello.ServerName, nil
+}
+
+func readTLSClientHello(conn io.Reader) ([]byte, error) {
+	clientHello := make([]byte, 0, 1024)
+
+	for {
+		header := make([]byte, tlsRecordHeaderLen)
+		if _, err := io.ReadFull(conn, header); err != nil {
+			return nil, fmt.Errorf("read tls record header: %w", err)
+		}
+		if header[0] != tlsRecordTypeHandshake {
+			return nil, fmt.Errorf("unexpected tls record type %d", header[0])
+		}
+
+		recordLen := int(header[3])<<8 | int(header[4])
+		if recordLen <= 0 || recordLen > maxTLSPlaintextRecordLen {
+			return nil, fmt.Errorf("invalid tls record length %d", recordLen)
+		}
+
+		recordBody := make([]byte, recordLen)
+		if _, err := io.ReadFull(conn, recordBody); err != nil {
+			return nil, fmt.Errorf("read tls record body: %w", err)
+		}
+		clientHello = append(clientHello, recordBody...)
+
+		if len(clientHello) < 4 {
+			continue
+		}
+		if clientHello[0] != tlsHandshakeTypeHello {
+			return nil, fmt.Errorf("unexpected tls handshake type %d", clientHello[0])
+		}
+
+		helloLen := int(clientHello[1])<<16 | int(clientHello[2])<<8 | int(clientHello[3])
+		if helloLen == 0 {
+			return nil, fmt.Errorf("empty tls client hello")
+		}
+		if len(clientHello) < 4+helloLen {
+			continue
+		}
+
+		return clientHello[:4+helloLen], nil
 	}
 }
 
