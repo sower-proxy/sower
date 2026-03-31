@@ -111,6 +111,7 @@ func main() {
 	r.AddCountryCIDRs(conf.Router.Country.Rules...)
 
 	errCh := make(chan error, 8)
+	go watchServeErrors(ctx, stop, errCh)
 
 	if conf.DNS.Disable {
 		slog.Info("DNS proxy disabled")
@@ -124,52 +125,35 @@ func main() {
 		}
 
 		for _, ip := range ips {
-			lnHTTP, err := net.Listen("tcp", net.JoinHostPort(ip, "80"))
-			if err != nil {
-				slog.Error("listen port 80", "error", err, "listen_on", net.JoinHostPort(ip, "80"))
+			if err := startTCPService(ctx, errCh, "http proxy", net.JoinHostPort(ip, "80"), func(ctx context.Context, ln net.Listener) error {
+				return ServeHTTP(ctx, ln, r)
+			}); err != nil {
+				slog.Error("start http proxy", "error", err, "listen_on", net.JoinHostPort(ip, "80"))
 				os.Exit(1)
 			}
-			go closeOnDone(ctx, lnHTTP)
-			go reportServeError(errCh, "http proxy", ServeHTTP(ctx, lnHTTP, r))
 
-			lnHTTPS, err := net.Listen("tcp", net.JoinHostPort(ip, "443"))
-			if err != nil {
-				slog.Error("listen port 443", "error", err, "listen_on", net.JoinHostPort(ip, "443"))
+			if err := startTCPService(ctx, errCh, "https proxy", net.JoinHostPort(ip, "443"), func(ctx context.Context, ln net.Listener) error {
+				return ServeHTTPS(ctx, ln, r)
+			}); err != nil {
+				slog.Error("start https proxy", "error", err, "listen_on", net.JoinHostPort(ip, "443"))
 				os.Exit(1)
 			}
-			go closeOnDone(ctx, lnHTTPS)
-			go reportServeError(errCh, "https proxy", ServeHTTPS(ctx, lnHTTPS, r))
 
-			dnsServer := &dns.Server{
-				Addr:    net.JoinHostPort(ip, "53"),
-				Net:     "udp",
-				Handler: r,
+			if err := startDNSService(ctx, errCh, net.JoinHostPort(ip, "53"), r); err != nil {
+				slog.Error("start dns proxy", "error", err, "listen_on", net.JoinHostPort(ip, "53"))
+				os.Exit(1)
 			}
-			go shutdownDNSServerOnDone(ctx, dnsServer)
-			go func(ip string, server *dns.Server) {
-				err := server.ListenAndServe()
-				if err != nil && !stderrors.Is(err, net.ErrClosed) {
-					reportServeError(errCh, "dns proxy", fmt.Errorf("listen on %s: %w", ip, err))
-				}
-			}(ip, dnsServer)
 		}
 	}
 
-	go func() {
-		if conf.Socks5.Disable {
-			slog.Info("SOCKS5 proxy disabled")
-			return
-		}
-
-		ln, err := net.Listen("tcp", conf.Socks5.Addr)
-		if err != nil {
-			slog.Error("listen port", "error", err)
-			os.Exit(1)
-		}
-		slog.Info("SOCKS5 proxy listening", "addr", conf.Socks5.Addr)
-		go closeOnDone(ctx, ln)
-		reportServeError(errCh, "socks5 proxy", ServeSocks5(ctx, ln, r))
-	}()
+	if conf.Socks5.Disable {
+		slog.Info("SOCKS5 proxy disabled")
+	} else if err := startTCPService(ctx, errCh, "socks5 proxy", conf.Socks5.Addr, func(ctx context.Context, ln net.Listener) error {
+		return ServeSocks5(ctx, ln, r)
+	}); err != nil {
+		slog.Error("start socks5 proxy", "error", err, "listen_on", conf.Socks5.Addr)
+		os.Exit(1)
+	}
 
 	start := time.Now()
 	loadRule(ctx, r.BlockRule, proxyDial, conf.Router.Block.File, conf.Router.Block.FilePrefix)
@@ -183,13 +167,8 @@ func main() {
 		"blockRule", r.BlockRule.Count, "directRule", r.DirectRule.Count, "proxyRule", r.ProxyRule.Count)
 	runtime.GC()
 
-	select {
-	case <-ctx.Done():
-		slog.Info("shutting down sower", "reason", ctx.Err())
-	case err := <-errCh:
-		slog.Error("serve failed", "error", err)
-		stop()
-	}
+	<-ctx.Done()
+	slog.Info("shutting down sower", "reason", ctx.Err())
 }
 
 func loadRule(ctx context.Context, rule *suffixtree.Node, proxyDial router.ProxyDialFn, file, linePrefix string) {
@@ -320,5 +299,53 @@ func reportServeError(errCh chan<- error, service string, err error) {
 	select {
 	case errCh <- fmt.Errorf("%s: %w", service, err):
 	default:
+	}
+}
+
+func startTCPService(ctx context.Context, errCh chan<- error, service, addr string, serve func(context.Context, net.Listener) error) error {
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("listen on %s: %w", addr, err)
+	}
+
+	slog.Info("service listening", "service", service, "network", "tcp", "addr", addr)
+	go closeOnDone(ctx, ln)
+	go func() {
+		reportServeError(errCh, service, serve(ctx, ln))
+	}()
+	return nil
+}
+
+func startDNSService(ctx context.Context, errCh chan<- error, addr string, handler dns.Handler) error {
+	pc, err := net.ListenPacket("udp", addr)
+	if err != nil {
+		return fmt.Errorf("listen on %s: %w", addr, err)
+	}
+
+	server := &dns.Server{
+		PacketConn: pc,
+		Handler:    handler,
+	}
+	slog.Info("service listening", "service", "dns proxy", "network", "udp", "addr", addr)
+	go shutdownDNSServerOnDone(ctx, server)
+	go func() {
+		err := server.ActivateAndServe()
+		if err != nil && !stderrors.Is(err, net.ErrClosed) {
+			reportServeError(errCh, "dns proxy", fmt.Errorf("serve on %s: %w", addr, err))
+		}
+	}()
+	return nil
+}
+
+func watchServeErrors(ctx context.Context, stop context.CancelFunc, errCh <-chan error) {
+	select {
+	case <-ctx.Done():
+		return
+	case err := <-errCh:
+		if err == nil {
+			return
+		}
+		slog.Error("serve failed", "error", err)
+		stop()
 	}
 }
