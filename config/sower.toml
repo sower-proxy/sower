@@ -19,12 +19,13 @@ insecure_skip_verify = false # Skip upstream TLS certificate verification
 [dns]
 disable = false        # Disable DNS proxy
 serve = "127.0.0.1"    # DNS server IP address
-serve_6 = ""           # DNS server IPv6 address (optional)
+serve_6 = ""           # DNS server IPv6 address (optional); aconfig maps Serve6 -> serve_6
 serve_iface = ""       # Network interface to get IP from (optional)
 upstream = "8.8.8.8"   # Upstream DNS server (optional)
 fallback = "223.5.5.5" # Fallback DNS server
 
 # SOCKS5 proxy configuration
+# aconfig maps Socks5 -> socks_5 for file keys.
 [socks_5]
 disable = false         # Disable SOCKS5 proxy
 addr = "127.0.0.1:1080" # SOCKS5 listen address
