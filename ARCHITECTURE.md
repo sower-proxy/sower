@@ -56,7 +56,7 @@
 6. Build the router with suffix-tree rules and optional country CIDRs.
 7. Start enabled local listeners for `udp/53`, `tcp/80`, `tcp/443`, and `tcp/1080`.
 8. For DNS requests, return local proxy IPs for proxy-routed domains and query upstream DNS for direct domains.
-9. For HTTP, HTTPS, and SOCKS5 traffic, parse the target host, apply routing rules, and either dial directly or wrap traffic in the configured upstream transport.
+9. For HTTP traffic, parse the target host from the request line. For HTTPS transparent traffic, peek the TLS ClientHello to extract SNI without terminating TLS locally. For SOCKS5 traffic, read the SOCKS5 target address. Apply routing rules and either dial directly or wrap traffic in the configured upstream transport.
 10. On shutdown signal, stop listeners and DNS servers through `context` propagation.
 
 ## sowerd Data Flow
