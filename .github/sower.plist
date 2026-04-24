@@ -7,8 +7,8 @@
 		<key>ProgramArguments</key>
 		<array>
 			<string>/usr/local/bin/sower</string>
-			<string>-f</string>
-			<string>/usr/local/etc/sower/sower.hcl</string>
+			<string>-c</string>
+			<string>/usr/local/etc/sower/sower.toml</string>
 		</array>
 		<key>KeepAlive</key>
             <true/>
