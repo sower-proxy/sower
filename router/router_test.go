@@ -1,8 +1,10 @@
 package router
 
 import (
+	"bytes"
 	"errors"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"strings"
@@ -139,6 +141,26 @@ func TestAddCountryCIDRsSkipsInvalidEntries(t *testing.T) {
 	}
 	if r.localSite("127.0.0.1") {
 		t.Fatal("unexpected localSite match without valid CIDRs or MMDB")
+	}
+}
+
+func TestNewRouterSkipsEmptyCountryMMDB(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() {
+		slog.SetDefault(previous)
+	})
+
+	for _, mmdbFile := range []string{"", "   "} {
+		r := NewRouter(nil, "", "223.5.5.5", mmdbFile, nil)
+		if r.country.Reader != nil {
+			t.Fatalf("expected empty MMDB %q to disable GeoIP lookup", mmdbFile)
+		}
+	}
+
+	if strings.Contains(logs.String(), "open geoip2 db") {
+		t.Fatalf("empty MMDB should not emit open warning, logs: %s", logs.String())
 	}
 }
 

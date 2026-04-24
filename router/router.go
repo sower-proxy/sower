@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -63,10 +64,13 @@ func NewRouter(serveIPs []string, upstreamDNS, fallbackDNS, mmdbFile string, pro
 		}
 	}
 
-	var err error
-	r.country.Reader, err = geoip2.Open(mmdbFile)
-	if err != nil {
-		slog.Warn("open geoip2 db", "error", err, "file", mmdbFile)
+	mmdbFile = strings.TrimSpace(mmdbFile)
+	if mmdbFile != "" {
+		var err error
+		r.country.Reader, err = geoip2.Open(mmdbFile)
+		if err != nil {
+			slog.Warn("open geoip2 db", "error", err, "file", mmdbFile)
+		}
 	}
 
 	return &r
