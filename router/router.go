@@ -52,7 +52,10 @@ var ErrBlocked = errors.New("route blocked")
 
 func NewRouter(serveIPs []string, upstreamDNS, fallbackDNS, mmdbFile string, proxyDial ProxyDialFn) *Router {
 	r := Router{
-		ProxyDial: proxyDial,
+		BlockRule:  suffixtree.NewNodeFromRules(),
+		DirectRule: suffixtree.NewNodeFromRules(),
+		ProxyRule:  suffixtree.NewNodeFromRules(),
+		ProxyDial:  proxyDial,
 	}
 
 	r.dns.upstreamDNS = upstreamDNS

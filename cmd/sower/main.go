@@ -102,7 +102,7 @@ func run(ctx context.Context, stop context.CancelFunc, cfg config.SowerConfig) e
 	if err != nil {
 		return fmt.Errorf("build proxy dialer: %w", err)
 	}
-	r := newRouter(cfg, upstreamDNS, proxyDial)
+	r := newRouter(cfg, proxyDial)
 
 	start := time.Now()
 	if err := loadRouterRules(ctx, r, proxyDial, cfg); err != nil {
@@ -138,8 +138,8 @@ func effectiveUpstreamDNS(cfg config.SowerConfig) string {
 	return cfg.DNS.Fallback
 }
 
-func newRouter(cfg config.SowerConfig, upstreamDNS string, proxyDial router.ProxyDialFn) *router.Router {
-	r := router.NewRouter([]string{cfg.DNS.Serve, cfg.DNS.Serve6}, upstreamDNS, cfg.DNS.Fallback, cfg.Router.Country.MMDB, proxyDial)
+func newRouter(cfg config.SowerConfig, proxyDial router.ProxyDialFn) *router.Router {
+	r := router.NewRouter([]string{cfg.DNS.Serve, cfg.DNS.Serve6}, cfg.DNS.Upstream, cfg.DNS.Fallback, cfg.Router.Country.MMDB, proxyDial)
 	r.BlockRule = suffixtree.NewNodeFromRules(cfg.Router.Block.Rules...)
 	r.DirectRule = suffixtree.NewNodeFromRules(cfg.Router.Direct.Rules...)
 	r.ProxyRule = suffixtree.NewNodeFromRules(cfg.Router.Proxy.Rules...)

@@ -9,12 +9,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/sower-proxy/sower/config"
 	"github.com/sower-proxy/sower/pkg/suffixtree"
 )
 
@@ -27,6 +29,27 @@ func TestFetchRuleFileEmptyPathReturnsClosedChannel(t *testing.T) {
 	}
 	if len(lines) != 0 {
 		t.Fatalf("unexpected lines for empty rule file path: %v", lines)
+	}
+}
+
+func TestNewRouterPreservesEmptyUpstreamForDiscovery(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.SowerConfig{}
+	cfg.DNS.Serve = "127.0.0.1"
+	cfg.DNS.Upstream = ""
+	cfg.DNS.Fallback = "223.5.5.5"
+
+	r := newRouter(cfg, nil)
+	dnsState := reflect.ValueOf(r).Elem().FieldByName("dns")
+	upstreamDNS := dnsState.FieldByName("upstreamDNS").String()
+	fallbackDNS := dnsState.FieldByName("fallbackDNS").String()
+
+	if upstreamDNS != "" {
+		t.Fatalf("expected empty router upstream DNS to enable discovery, got %q", upstreamDNS)
+	}
+	if fallbackDNS != "223.5.5.5" {
+		t.Fatalf("unexpected fallback DNS: %q", fallbackDNS)
 	}
 }
 

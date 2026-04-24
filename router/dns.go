@@ -13,6 +13,14 @@ import (
 
 var errNoLocalIPForQuestionType = errors.New("no local IP for question type")
 
+type retryableDNSError struct {
+	rcode int
+}
+
+func (e retryableDNSError) Error() string {
+	return fmt.Sprintf("retryable dns response code %s", dns.RcodeToString[e.rcode])
+}
+
 func (r *Router) ServeDNS(w dns.ResponseWriter, req *dns.Msg) {
 	// https://stackoverflow.com/questions/4082081/requesting-a-and-aaaa-records-in-single-dns-query/4083071#4083071
 	if len(req.Question) != 1 {
@@ -22,13 +30,19 @@ func (r *Router) ServeDNS(w dns.ResponseWriter, req *dns.Msg) {
 
 	domain := req.Question[0].Name
 	qtype := req.Question[0].Qtype
+	if req.Question[0].Qclass != dns.ClassINET {
+		_ = w.WriteMsg(r.dnsFail(req, dns.RcodeNotImplemented))
+		return
+	}
+
 	// 1. rule_based( block > direct > proxy )
-	if r.BlockRule.Match(domain) {
+	routeDomains := dnsRouteDomains(domain, qtype)
+	if dnsRuleMatch(r.BlockRule, routeDomains) {
 		_ = w.WriteMsg(r.dnsFail(req, dns.RcodeNameError))
 		return
 	}
 
-	if !r.DirectRule.Match(domain) && r.ProxyRule.Match(domain) {
+	if !dnsRuleMatch(r.DirectRule, routeDomains) && dnsRuleMatch(r.ProxyRule, routeDomains) {
 		switch {
 		case isAddressQuestion(qtype):
 			resp, err := r.dnsProxyReply(domain, w.LocalAddr(), req)
@@ -39,7 +53,7 @@ func (r *Router) ServeDNS(w dns.ResponseWriter, req *dns.Msg) {
 			}
 			_ = w.WriteMsg(resp)
 			return
-		case isProxySensitiveQuestion(qtype):
+		default:
 			_ = w.WriteMsg(r.dnsNoData(req))
 			return
 		}
@@ -85,20 +99,24 @@ func (r *Router) dnsProxyReply(domain string, localAddr net.Addr, req *dns.Msg) 
 }
 
 func (r *Router) proxyReplyIP(localAddr net.Addr, qtype uint16) (net.IP, error) {
-	host, _, err := net.SplitHostPort(localAddr.String())
-	if err != nil {
-		return nil, fmt.Errorf("split local dns address %q: %w", localAddr.String(), err)
-	}
-
-	ip := net.ParseIP(strings.Trim(host, "[]"))
-	if ip != nil && !ip.IsUnspecified() && matchesQuestionTypeIP(ip, qtype) {
-		return ip, nil
-	}
-	if ip == nil {
-		return nil, fmt.Errorf("parse local dns IP %q", host)
-	}
 	if !isAddressQuestion(qtype) {
 		return nil, fmt.Errorf("unsupported question type %d", qtype)
+	}
+
+	var localAddrErr error
+	if localAddr != nil {
+		host, _, err := net.SplitHostPort(localAddr.String())
+		if err != nil {
+			localAddrErr = fmt.Errorf("split local dns address %q: %w", localAddr.String(), err)
+		} else {
+			ip := net.ParseIP(strings.Trim(host, "[]"))
+			switch {
+			case ip == nil:
+				localAddrErr = fmt.Errorf("parse local dns IP %q", host)
+			case !ip.IsUnspecified() && matchesQuestionTypeIP(ip, qtype):
+				return ip, nil
+			}
+		}
 	}
 
 	for _, serveIP := range r.dns.serveIPs {
@@ -107,6 +125,9 @@ func (r *Router) proxyReplyIP(localAddr net.Addr, qtype uint16) (net.IP, error) 
 		}
 	}
 
+	if localAddrErr != nil {
+		return nil, localAddrErr
+	}
 	return nil, fmt.Errorf("%w %d", errNoLocalIPForQuestionType, qtype)
 }
 
@@ -114,8 +135,43 @@ func isAddressQuestion(qtype uint16) bool {
 	return qtype == dns.TypeA || qtype == dns.TypeAAAA
 }
 
-func isProxySensitiveQuestion(qtype uint16) bool {
-	return qtype == dns.TypeHTTPS || qtype == dns.TypeSVCB
+func dnsRuleMatch(rule interface{ Match(string) bool }, domains []string) bool {
+	for _, domain := range domains {
+		if rule.Match(domain) {
+			return true
+		}
+	}
+	return false
+}
+
+func dnsRouteDomains(domain string, qtype uint16) []string {
+	if !isServiceDiscoveryQuestion(qtype) {
+		return []string{domain}
+	}
+
+	base, ok := stripDNSServicePrefix(domain)
+	if !ok {
+		return []string{domain}
+	}
+	return []string{domain, base}
+}
+
+func isServiceDiscoveryQuestion(qtype uint16) bool {
+	switch qtype {
+	case dns.TypeSRV, dns.TypeSVCB, dns.TypeHTTPS:
+		return true
+	default:
+		return false
+	}
+}
+
+func stripDNSServicePrefix(domain string) (string, bool) {
+	trimmed := strings.TrimSuffix(domain, ".")
+	labels := strings.Split(trimmed, ".")
+	if len(labels) <= 2 || !strings.HasPrefix(labels[0], "_") || !strings.HasPrefix(labels[1], "_") {
+		return "", false
+	}
+	return strings.Join(labels[2:], ".") + ".", true
 }
 
 func dnsReply(req *dns.Msg) *dns.Msg {
@@ -183,7 +239,15 @@ func (r *Router) Exchange(req *dns.Msg) (_ *dns.Msg, err error) {
 		}
 	}
 
+	if resp != nil && isRetryableDNSResponseErr(err) {
+		return resp, nil
+	}
 	return resp, err
+}
+
+func isRetryableDNSResponseErr(err error) bool {
+	var retryableErr retryableDNSError
+	return errors.As(err, &retryableErr)
 }
 
 func (r *Router) currentUpstreamState(now time.Time) ([]string, int, bool, error) {
@@ -383,10 +447,26 @@ func (r *Router) exchangeWithRetry(req *dns.Msg, addr string) (*dns.Msg, error) 
 		return nil, err
 	}
 	if !resp.Truncated {
-		return resp, nil
+		return resp, dnsResponseErr(resp)
 	}
 
-	return r.exchangeTCP(req, addr)
+	resp, err = r.exchangeTCP(req, addr)
+	if err != nil {
+		return nil, err
+	}
+	return resp, dnsResponseErr(resp)
+}
+
+func dnsResponseErr(resp *dns.Msg) error {
+	if resp == nil {
+		return fmt.Errorf("empty dns response")
+	}
+	switch resp.Rcode {
+	case dns.RcodeServerFailure, dns.RcodeRefused, dns.RcodeNotImplemented:
+		return retryableDNSError{rcode: resp.Rcode}
+	default:
+		return nil
+	}
 }
 
 func (r *Router) exchangeUDP(req *dns.Msg, addr string) (*dns.Msg, error) {

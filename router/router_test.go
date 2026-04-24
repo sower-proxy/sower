@@ -24,6 +24,15 @@ func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return fn(req)
 }
 
+func TestNewRouterInitializesRules(t *testing.T) {
+	t.Parallel()
+
+	r := NewRouter(nil, "", "223.5.5.5", "", nil)
+	if r.BlockRule == nil || r.DirectRule == nil || r.ProxyRule == nil {
+		t.Fatal("expected router rules to be initialized")
+	}
+}
+
 func TestDNSProxyReplyMatchesQuestionType(t *testing.T) {
 	t.Parallel()
 
@@ -98,6 +107,27 @@ func TestDNSProxyReplyIgnoresUnspecifiedLocalAddr(t *testing.T) {
 	}
 }
 
+func TestDNSProxyReplyFallsBackWhenLocalAddrMissing(t *testing.T) {
+	t.Parallel()
+
+	r := NewRouter([]string{"127.0.0.2"}, "", "223.5.5.5", "", nil)
+	req := new(dns.Msg)
+	req.SetQuestion("example.com.", dns.TypeA)
+
+	resp, err := r.dnsProxyReply("example.com.", nil, req)
+	if err != nil {
+		t.Fatalf("dnsProxyReply failed: %v", err)
+	}
+
+	answer, ok := resp.Answer[0].(*dns.A)
+	if !ok {
+		t.Fatalf("expected A record, got %T", resp.Answer[0])
+	}
+	if !answer.A.Equal(net.ParseIP("127.0.0.2")) {
+		t.Fatalf("expected configured serve IP 127.0.0.2, got %s", answer.A)
+	}
+}
+
 func TestExchangeSkipsServeIPInUpstreamList(t *testing.T) {
 	t.Parallel()
 
@@ -127,6 +157,153 @@ func TestBuildUpstreamAddrsPrefersConfiguredDNSBeforeFallback(t *testing.T) {
 	want := []string{"1.1.1.1:53", "9.9.9.9:53"}
 	if strings.Join(addrs, ",") != strings.Join(want, ",") {
 		t.Fatalf("unexpected upstream order: got %v want %v", addrs, want)
+	}
+}
+
+func TestExchangeFallsBackOnRetryableDNSResponse(t *testing.T) {
+	t.Parallel()
+
+	primaryAddr := startUDPTestDNSServer(t, dns.HandlerFunc(func(w dns.ResponseWriter, req *dns.Msg) {
+		resp := new(dns.Msg)
+		resp.SetRcode(req, dns.RcodeServerFailure)
+		_ = w.WriteMsg(resp)
+	}))
+	fallbackAddr := startUDPTestDNSServer(t, dns.HandlerFunc(func(w dns.ResponseWriter, req *dns.Msg) {
+		resp := new(dns.Msg)
+		resp.SetReply(req)
+		resp.Answer = []dns.RR{&dns.A{
+			Hdr: dns.RR_Header{Name: req.Question[0].Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 20},
+			A:   net.ParseIP("203.0.113.10"),
+		}}
+		_ = w.WriteMsg(resp)
+	}))
+
+	r := NewRouter(nil, "", "", "", nil)
+	r.dns.upstreamAddrs = []string{primaryAddr, fallbackAddr}
+	r.dns.upstreamIndex = 0
+
+	req := new(dns.Msg)
+	req.SetQuestion("example.com.", dns.TypeA)
+	resp, err := r.Exchange(req)
+	if err != nil {
+		t.Fatalf("exchange failed: %v", err)
+	}
+	if r.dns.upstreamIndex != 1 {
+		t.Fatalf("expected degraded upstream index 1, got %d", r.dns.upstreamIndex)
+	}
+	answer, ok := resp.Answer[0].(*dns.A)
+	if !ok {
+		t.Fatalf("expected fallback A answer, got %T", resp.Answer[0])
+	}
+	if !answer.A.Equal(net.ParseIP("203.0.113.10")) {
+		t.Fatalf("unexpected fallback answer: %s", answer.A)
+	}
+}
+
+func TestExchangeDoesNotFallbackOnTerminalDNSResponse(t *testing.T) {
+	t.Parallel()
+
+	var fallbackQueries atomic.Int32
+	primaryAddr := startUDPTestDNSServer(t, dns.HandlerFunc(func(w dns.ResponseWriter, req *dns.Msg) {
+		resp := new(dns.Msg)
+		resp.SetRcode(req, dns.RcodeNameError)
+		_ = w.WriteMsg(resp)
+	}))
+	fallbackAddr := startUDPTestDNSServer(t, dns.HandlerFunc(func(w dns.ResponseWriter, req *dns.Msg) {
+		fallbackQueries.Add(1)
+		resp := new(dns.Msg)
+		resp.SetReply(req)
+		_ = w.WriteMsg(resp)
+	}))
+
+	r := NewRouter(nil, "", "", "", nil)
+	r.dns.upstreamAddrs = []string{primaryAddr, fallbackAddr}
+	r.dns.upstreamIndex = 0
+
+	req := new(dns.Msg)
+	req.SetQuestion("example.com.", dns.TypeA)
+	resp, err := r.Exchange(req)
+	if err != nil {
+		t.Fatalf("exchange failed: %v", err)
+	}
+	if resp.Rcode != dns.RcodeNameError {
+		t.Fatalf("expected NXDOMAIN response, got rcode %d", resp.Rcode)
+	}
+	if r.dns.upstreamIndex != 0 {
+		t.Fatalf("expected preferred upstream to remain selected, got %d", r.dns.upstreamIndex)
+	}
+	if fallbackQueries.Load() != 0 {
+		t.Fatalf("expected fallback to remain unused, got %d queries", fallbackQueries.Load())
+	}
+}
+
+func TestServeDNSReturnsRetryableResponseWhenUpstreamsExhausted(t *testing.T) {
+	t.Parallel()
+
+	upstreamAddr := startUDPTestDNSServer(t, dns.HandlerFunc(func(w dns.ResponseWriter, req *dns.Msg) {
+		resp := new(dns.Msg)
+		resp.SetRcode(req, dns.RcodeRefused)
+		_ = w.WriteMsg(resp)
+	}))
+
+	r := NewRouter(nil, "", "", "", nil)
+	r.dns.upstreamAddrs = []string{upstreamAddr}
+	r.dns.upstreamIndex = 0
+
+	req := new(dns.Msg)
+	req.SetQuestion("example.com.", dns.TypeA)
+	writer := &mockDNSWriter{localAddr: &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 53}}
+
+	r.ServeDNS(writer, req)
+
+	if writer.msg == nil {
+		t.Fatal("expected response message")
+	}
+	if writer.msg.Rcode != dns.RcodeRefused {
+		t.Fatalf("expected upstream REFUSED response, got rcode %d", writer.msg.Rcode)
+	}
+}
+
+func TestExchangeDoesNotPromoteRetryableProbeResponse(t *testing.T) {
+	t.Parallel()
+
+	var primaryQueries atomic.Int32
+	var fallbackQueries atomic.Int32
+	primaryAddr := startUDPTestDNSServer(t, dns.HandlerFunc(func(w dns.ResponseWriter, req *dns.Msg) {
+		primaryQueries.Add(1)
+		resp := new(dns.Msg)
+		resp.SetRcode(req, dns.RcodeRefused)
+		_ = w.WriteMsg(resp)
+	}))
+	fallbackAddr := startUDPTestDNSServer(t, dns.HandlerFunc(func(w dns.ResponseWriter, req *dns.Msg) {
+		fallbackQueries.Add(1)
+		resp := new(dns.Msg)
+		resp.SetReply(req)
+		resp.Answer = []dns.RR{&dns.A{
+			Hdr: dns.RR_Header{Name: req.Question[0].Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 20},
+			A:   net.ParseIP("203.0.113.20"),
+		}}
+		_ = w.WriteMsg(resp)
+	}))
+
+	r := NewRouter(nil, "", "", "", nil)
+	r.dns.upstreamAddrs = []string{primaryAddr, fallbackAddr}
+	r.dns.upstreamIndex = 1
+	r.dns.retryAt = time.Now().Add(-time.Second)
+
+	req := new(dns.Msg)
+	req.SetQuestion("example.com.", dns.TypeA)
+	if _, err := r.Exchange(req); err != nil {
+		t.Fatalf("exchange failed: %v", err)
+	}
+	if r.dns.upstreamIndex != 1 {
+		t.Fatalf("expected retryable probe response to keep fallback index 1, got %d", r.dns.upstreamIndex)
+	}
+	if primaryQueries.Load() != 1 {
+		t.Fatalf("expected one preferred probe, got %d", primaryQueries.Load())
+	}
+	if fallbackQueries.Load() != 1 {
+		t.Fatalf("expected one fallback query, got %d", fallbackQueries.Load())
 	}
 }
 
@@ -195,7 +372,7 @@ func TestIsAccessChecksRequestedPortOnly(t *testing.T) {
 	}
 }
 
-func TestServeDNSForProxyRuleForwardsNonAddressQuestion(t *testing.T) {
+func TestServeDNSForProxyRuleSuppressesNonAddressQuestion(t *testing.T) {
 	t.Parallel()
 
 	udpConn, err := net.ListenPacket("udp", "127.0.0.1:0")
@@ -204,7 +381,9 @@ func TestServeDNSForProxyRuleForwardsNonAddressQuestion(t *testing.T) {
 	}
 	defer udpConn.Close()
 
+	var upstreamQueries atomic.Int32
 	handler := dns.HandlerFunc(func(w dns.ResponseWriter, req *dns.Msg) {
+		upstreamQueries.Add(1)
 		resp := new(dns.Msg)
 		resp.SetReply(req)
 		resp.Answer = []dns.RR{&dns.TXT{
@@ -239,15 +418,11 @@ func TestServeDNSForProxyRuleForwardsNonAddressQuestion(t *testing.T) {
 	if writer.msg.Rcode != dns.RcodeSuccess {
 		t.Fatalf("expected successful response, got rcode %d", writer.msg.Rcode)
 	}
-	if len(writer.msg.Answer) != 1 {
-		t.Fatalf("expected forwarded TXT answer, got %d answers", len(writer.msg.Answer))
+	if len(writer.msg.Answer) != 0 {
+		t.Fatalf("expected NODATA response, got %d answers", len(writer.msg.Answer))
 	}
-	answer, ok := writer.msg.Answer[0].(*dns.TXT)
-	if !ok {
-		t.Fatalf("expected TXT record, got %T", writer.msg.Answer[0])
-	}
-	if len(answer.Txt) != 1 || answer.Txt[0] != "forwarded" {
-		t.Fatalf("unexpected TXT payload: %v", answer.Txt)
+	if upstreamQueries.Load() != 0 {
+		t.Fatalf("expected TXT query to be suppressed locally, got %d upstream queries", upstreamQueries.Load())
 	}
 }
 
@@ -301,7 +476,7 @@ func TestServeDNSForProxyRuleSuppressesHTTPSQuestion(t *testing.T) {
 	}
 }
 
-func TestServeDNSForProxyRuleForwardsSRVQuestion(t *testing.T) {
+func TestServeDNSForProxyRuleSuppressesSRVQuestion(t *testing.T) {
 	t.Parallel()
 
 	udpConn, err := net.ListenPacket("udp", "127.0.0.1:0")
@@ -350,18 +525,65 @@ func TestServeDNSForProxyRuleForwardsSRVQuestion(t *testing.T) {
 	if writer.msg.Rcode != dns.RcodeSuccess {
 		t.Fatalf("expected successful response, got rcode %d", writer.msg.Rcode)
 	}
+	if len(writer.msg.Answer) != 0 {
+		t.Fatalf("expected NODATA response, got %d answers", len(writer.msg.Answer))
+	}
+	if upstreamQueries.Load() != 0 {
+		t.Fatalf("expected SRV query to be suppressed locally, got %d upstream queries", upstreamQueries.Load())
+	}
+}
+
+func TestServeDNSDoesNotStripServicePrefixForNonServiceQuestion(t *testing.T) {
+	t.Parallel()
+
+	udpConn, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen udp: %v", err)
+	}
+	defer udpConn.Close()
+
+	var upstreamQueries atomic.Int32
+	handler := dns.HandlerFunc(func(w dns.ResponseWriter, req *dns.Msg) {
+		upstreamQueries.Add(1)
+		resp := new(dns.Msg)
+		resp.SetReply(req)
+		resp.Answer = []dns.RR{&dns.TXT{
+			Hdr: dns.RR_Header{Name: req.Question[0].Name, Rrtype: dns.TypeTXT, Class: dns.ClassINET, Ttl: 20},
+			Txt: []string{"forwarded"},
+		}}
+		_ = w.WriteMsg(resp)
+	})
+
+	server := &dns.Server{PacketConn: udpConn, Handler: handler}
+	go func() { _ = server.ActivateAndServe() }()
+	t.Cleanup(func() {
+		_ = server.Shutdown()
+	})
+
+	r := NewRouter([]string{"127.0.0.2"}, "", "223.5.5.5", "", nil)
+	r.BlockRule = suffixtree.NewNodeFromRules()
+	r.DirectRule = suffixtree.NewNodeFromRules()
+	r.ProxyRule = suffixtree.NewNodeFromRules("example.com.")
+	r.dns.upstreamAddrs = []string{udpConn.LocalAddr().String()}
+	r.dns.upstreamIndex = 0
+
+	req := new(dns.Msg)
+	req.SetQuestion("_xmpp-client._tcp.example.com.", dns.TypeTXT)
+	writer := &mockDNSWriter{localAddr: &net.UDPAddr{IP: net.ParseIP("127.0.0.2"), Port: 53}}
+
+	r.ServeDNS(writer, req)
+
+	if writer.msg == nil {
+		t.Fatal("expected response message")
+	}
+	if writer.msg.Rcode != dns.RcodeSuccess {
+		t.Fatalf("expected successful response, got rcode %d", writer.msg.Rcode)
+	}
 	if len(writer.msg.Answer) != 1 {
-		t.Fatalf("expected forwarded SRV answer, got %d answers", len(writer.msg.Answer))
-	}
-	answer, ok := writer.msg.Answer[0].(*dns.SRV)
-	if !ok {
-		t.Fatalf("expected SRV record, got %T", writer.msg.Answer[0])
-	}
-	if answer.Target != "srv.example.com." || answer.Port != 5222 {
-		t.Fatalf("unexpected SRV answer: target=%s port=%d", answer.Target, answer.Port)
+		t.Fatalf("expected forwarded TXT answer, got %d answers", len(writer.msg.Answer))
 	}
 	if upstreamQueries.Load() != 1 {
-		t.Fatalf("expected SRV query to be forwarded once, got %d upstream queries", upstreamQueries.Load())
+		t.Fatalf("expected TXT query to be forwarded once, got %d upstream queries", upstreamQueries.Load())
 	}
 }
 
@@ -715,6 +937,25 @@ func TestServeDNSReturnsNXDomainForBlockedDomain(t *testing.T) {
 	}
 }
 
+func TestServeDNSRejectsUnsupportedQuestionClass(t *testing.T) {
+	t.Parallel()
+
+	r := NewRouter([]string{"127.0.0.1"}, "", "223.5.5.5", "", nil)
+	req := new(dns.Msg)
+	req.SetQuestion("example.com.", dns.TypeA)
+	req.Question[0].Qclass = dns.ClassCHAOS
+
+	writer := &mockDNSWriter{localAddr: &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 53}}
+	r.ServeDNS(writer, req)
+
+	if writer.msg == nil {
+		t.Fatal("expected response message")
+	}
+	if writer.msg.Rcode != dns.RcodeNotImplemented {
+		t.Fatalf("expected NOTIMP, got %d", writer.msg.Rcode)
+	}
+}
+
 func TestServeDNSRejectsMultipleQuestions(t *testing.T) {
 	t.Parallel()
 
@@ -803,3 +1044,20 @@ func (w *mockDNSWriter) Close() error                { return nil }
 func (w *mockDNSWriter) TsigStatus() error           { return nil }
 func (w *mockDNSWriter) TsigTimersOnly(bool)         {}
 func (w *mockDNSWriter) Hijack()                     {}
+
+func startUDPTestDNSServer(t *testing.T, handler dns.Handler) string {
+	t.Helper()
+
+	udpConn, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen udp: %v", err)
+	}
+
+	server := &dns.Server{PacketConn: udpConn, Handler: handler}
+	go func() { _ = server.ActivateAndServe() }()
+	t.Cleanup(func() {
+		_ = server.Shutdown()
+		_ = udpConn.Close()
+	})
+	return udpConn.LocalAddr().String()
+}

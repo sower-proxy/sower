@@ -51,13 +51,17 @@
 1. Load config from flags, env, and files.
 2. Validate remote type, listener addresses, and DNS IP fields.
 3. Log startup metadata with secrets redacted.
-4. Resolve the effective upstream DNS server, falling back to the configured fallback DNS when needed.
+4. Build the upstream proxy dialer with a stable DNS target. If `dns.upstream` is empty, the dialer uses `dns.fallback` to avoid recursive lookup through the local DNS listener.
 5. Build the upstream dialer for the configured remote transport, using standard TLS by default and optional uTLS fingerprints for `sower` and `trojan`.
 6. Build the router with suffix-tree rules and optional country CIDRs.
    Remote rule files are fetched through the configured upstream proxy dialer, never by direct outbound HTTP, so rule bootstrap uses the same stable egress path as proxied traffic.
    Remote domain rule files are filtered through per-router `file_skip_rules` before their prefixed entries are appended.
 7. Start enabled local listeners for `udp/53`, `tcp/80`, `tcp/443`, and `tcp/1080` only after rule loading completes.
 8. For DNS requests, return local proxy IPs for proxy-routed domains and query upstream DNS for direct domains.
+   Empty `dns.upstream` keeps router-side DHCP DNS discovery enabled; `dns.fallback` is appended as a backup upstream and is also used while initial discovery is in flight.
+   Proxy-routed domains return local A/AAAA records, suppress HTTPS/SVCB and other non-address metadata locally, and never leak proxy-matched names to direct upstream DNS.
+   Direct upstream DNS failures fall back only for retryable upstream service errors; when no fallback succeeds, the last upstream DNS response code is returned as-is.
+   Service discovery names are matched against both the full query name and the base domain only for service record types.
 9. For HTTP traffic, parse the target host from the request line. For HTTPS transparent traffic, peek the TLS ClientHello to extract SNI. For SOCKS5 traffic, read the SOCKS5 target address. Apply routing rules and either dial directly or wrap traffic in the configured upstream transport.
    HTTPS transparent proxying reads only the TLS ClientHello, then replays the untouched bytes to the selected upstream; it must not complete or terminate TLS locally.
 10. On shutdown signal, stop listeners and DNS servers through `context` propagation.
