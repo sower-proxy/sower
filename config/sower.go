@@ -43,19 +43,22 @@ type SowerConfig struct {
 
 	Router struct {
 		Block struct {
-			File       string   `usage:"block list file, local file or remote"`
-			FilePrefix string   `default:"**." usage:"parsed as '<prefix>line_text'"`
-			Rules      []string `usage:"block list rules"`
+			File          string   `usage:"block list file, local file or remote"`
+			FilePrefix    string   `default:"**." usage:"parsed as '<prefix>line_text'"`
+			FileSkipRules []string `usage:"rules to skip when loading block list file"`
+			Rules         []string `usage:"block list rules"`
 		}
 		Direct struct {
-			File       string   `usage:"direct list file, local file or remote"`
-			FilePrefix string   `default:"**." usage:"parsed as '<prefix>line_text'"`
-			Rules      []string `usage:"direct list rules"`
+			File          string   `usage:"direct list file, local file or remote"`
+			FilePrefix    string   `default:"**." usage:"parsed as '<prefix>line_text'"`
+			FileSkipRules []string `usage:"rules to skip when loading direct list file"`
+			Rules         []string `usage:"direct list rules"`
 		}
 		Proxy struct {
-			File       string   `usage:"proxy list file, local file or remote"`
-			FilePrefix string   `default:"**." usage:"parsed as '<prefix>line_text'"`
-			Rules      []string `usage:"proxy list rules"`
+			File          string   `usage:"proxy list file, local file or remote"`
+			FilePrefix    string   `default:"**." usage:"parsed as '<prefix>line_text'"`
+			FileSkipRules []string `usage:"rules to skip when loading proxy list file"`
+			Rules         []string `usage:"proxy list rules"`
 		}
 
 		Country struct {

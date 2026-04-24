@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"compress/gzip"
 	"context"
-	stderrors "errors"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -19,12 +19,10 @@ import (
 	"time"
 
 	"github.com/cristalhq/aconfig"
-	"github.com/cristalhq/aconfig/aconfighcl"
 	"github.com/cristalhq/aconfig/aconfigtoml"
 	"github.com/cristalhq/aconfig/aconfigyaml"
 	"github.com/lmittmann/tint"
 	"github.com/miekg/dns"
-	"github.com/pkg/errors"
 	"github.com/sower-proxy/deferlog/v2"
 	"github.com/sower-proxy/sower/config"
 	"github.com/sower-proxy/sower/pkg/suffixtree"
@@ -50,11 +48,9 @@ func init() {
 		AllowUnknownFields: false,
 		FileFlag:           "c",
 		Files: []string{
-			"sower.hcl",
 			"sower.toml",
 			"sower.yaml",
 			"sower.yml",
-			"/etc/sower/sower.hcl",
 			"/etc/sower/sower.toml",
 			"/etc/sower/sower.yaml",
 			"/etc/sower/sower.yml",
@@ -63,7 +59,6 @@ func init() {
 			".yml":  aconfigyaml.New(),
 			".yaml": aconfigyaml.New(),
 			".toml": aconfigtoml.New(),
-			".hcl":  aconfighcl.New(),
 		},
 	}).Load(); err != nil {
 		slog.Error("load config", "error", err, "config", conf)
@@ -91,115 +86,228 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	upstreamDNS := conf.DNS.Upstream
-	if upstreamDNS == "" {
-		upstreamDNS = conf.DNS.Fallback
+	if err := run(ctx, stop, conf); err != nil {
+		slog.Error("run sower", "error", err)
+		os.Exit(1)
 	}
-	proxyDial, err := GenProxyDial(conf.Remote.Type, conf.Remote.Addr, conf.Remote.Password, upstreamDNS, upstreamtls.Options{
-		ServerName:         conf.Remote.TLS.ServerName,
-		ClientHello:        conf.Remote.TLS.ClientHello,
-		InsecureSkipVerify: conf.Remote.TLS.InsecureSkipVerify,
+}
+
+func run(ctx context.Context, stop context.CancelFunc, cfg config.SowerConfig) error {
+	upstreamDNS := effectiveUpstreamDNS(cfg)
+	proxyDial, err := GenProxyDial(cfg.Remote.Type, cfg.Remote.Addr, cfg.Remote.Password, upstreamDNS, upstreamtls.Options{
+		ServerName:         cfg.Remote.TLS.ServerName,
+		ClientHello:        cfg.Remote.TLS.ClientHello,
+		InsecureSkipVerify: cfg.Remote.TLS.InsecureSkipVerify,
 	})
 	if err != nil {
-		slog.Error("build proxy dialer", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("build proxy dialer: %w", err)
 	}
-	r := router.NewRouter([]string{conf.DNS.Serve, conf.DNS.Serve6}, upstreamDNS, conf.DNS.Fallback, conf.Router.Country.MMDB, proxyDial)
-	r.BlockRule = suffixtree.NewNodeFromRules(conf.Router.Block.Rules...)
-	r.DirectRule = suffixtree.NewNodeFromRules(conf.Router.Direct.Rules...)
-	r.ProxyRule = suffixtree.NewNodeFromRules(conf.Router.Proxy.Rules...)
-	r.AddCountryCIDRs(conf.Router.Country.Rules...)
-
-	errCh := make(chan error, 8)
-	go watchServeErrors(ctx, stop, errCh)
-
-	if conf.DNS.Disable {
-		slog.Info("DNS proxy disabled")
-	} else {
-		ips := make([]string, 0, 2)
-		if strings.TrimSpace(conf.DNS.Serve) != "" {
-			ips = append(ips, conf.DNS.Serve)
-		}
-		if strings.TrimSpace(conf.DNS.Serve6) != "" {
-			ips = append(ips, conf.DNS.Serve6)
-		}
-
-		for _, ip := range ips {
-			if err := startTCPService(ctx, errCh, "http proxy", net.JoinHostPort(ip, "80"), func(ctx context.Context, ln net.Listener) error {
-				return ServeHTTP(ctx, ln, r)
-			}); err != nil {
-				slog.Error("start http proxy", "error", err, "listen_on", net.JoinHostPort(ip, "80"))
-				os.Exit(1)
-			}
-
-			if err := startTCPService(ctx, errCh, "https proxy", net.JoinHostPort(ip, "443"), func(ctx context.Context, ln net.Listener) error {
-				return ServeHTTPS(ctx, ln, r)
-			}); err != nil {
-				slog.Error("start https proxy", "error", err, "listen_on", net.JoinHostPort(ip, "443"))
-				os.Exit(1)
-			}
-
-			if err := startDNSService(ctx, errCh, net.JoinHostPort(ip, "53"), r); err != nil {
-				slog.Error("start dns proxy", "error", err, "listen_on", net.JoinHostPort(ip, "53"))
-				os.Exit(1)
-			}
-		}
-	}
-
-	if conf.Socks5.Disable {
-		slog.Info("SOCKS5 proxy disabled")
-	} else if err := startTCPService(ctx, errCh, "socks5 proxy", conf.Socks5.Addr, func(ctx context.Context, ln net.Listener) error {
-		return ServeSocks5(ctx, ln, r)
-	}); err != nil {
-		slog.Error("start socks5 proxy", "error", err, "listen_on", conf.Socks5.Addr)
-		os.Exit(1)
-	}
+	r := newRouter(cfg, upstreamDNS, proxyDial)
 
 	start := time.Now()
-	loadRule(ctx, r.BlockRule, proxyDial, conf.Router.Block.File, conf.Router.Block.FilePrefix)
-	loadRule(ctx, r.DirectRule, proxyDial, conf.Router.Direct.File, conf.Router.Direct.FilePrefix)
-	loadRule(ctx, r.ProxyRule, proxyDial, conf.Router.Proxy.File, conf.Router.Proxy.FilePrefix)
-	for line := range fetchRuleFile(ctx, proxyDial, conf.Router.Country.File) {
-		r.AddCountryCIDRs(line)
+	if err := loadRouterRules(ctx, r, proxyDial, cfg); err != nil {
+		return err
+	}
+
+	errCh := make(chan error, 8)
+	if err := startDNSListeners(ctx, cfg, r, errCh); err != nil {
+		return err
+	}
+	if err := startSocks5Listener(ctx, cfg, r, errCh); err != nil {
+		return err
 	}
 
 	slog.Info("loaded rules, proxy started", "took", time.Since(start),
 		"blockRule", r.BlockRule.Count, "directRule", r.DirectRule.Count, "proxyRule", r.ProxyRule.Count)
 	runtime.GC()
 
-	<-ctx.Done()
-	slog.Info("shutting down sower", "reason", ctx.Err())
+	select {
+	case <-ctx.Done():
+		slog.Info("shutting down sower", "reason", ctx.Err())
+	case err := <-errCh:
+		slog.Error("serve failed", "error", err)
+		stop()
+	}
+	return nil
 }
 
-func loadRule(ctx context.Context, rule *suffixtree.Node, proxyDial router.ProxyDialFn, file, linePrefix string) {
-	for line := range fetchRuleFile(ctx, proxyDial, file) {
-		rule.Add(linePrefix + line)
+func effectiveUpstreamDNS(cfg config.SowerConfig) string {
+	if cfg.DNS.Upstream != "" {
+		return cfg.DNS.Upstream
+	}
+	return cfg.DNS.Fallback
+}
+
+func newRouter(cfg config.SowerConfig, upstreamDNS string, proxyDial router.ProxyDialFn) *router.Router {
+	r := router.NewRouter([]string{cfg.DNS.Serve, cfg.DNS.Serve6}, upstreamDNS, cfg.DNS.Fallback, cfg.Router.Country.MMDB, proxyDial)
+	r.BlockRule = suffixtree.NewNodeFromRules(cfg.Router.Block.Rules...)
+	r.DirectRule = suffixtree.NewNodeFromRules(cfg.Router.Direct.Rules...)
+	r.ProxyRule = suffixtree.NewNodeFromRules(cfg.Router.Proxy.Rules...)
+	r.AddCountryCIDRs(cfg.Router.Country.Rules...)
+	return r
+}
+
+func loadRouterRules(ctx context.Context, r *router.Router, proxyDial router.ProxyDialFn, cfg config.SowerConfig) error {
+	if err := loadRule(ctx, r.BlockRule, proxyDial, cfg.Router.Block.File, cfg.Router.Block.FilePrefix, cfg.Router.Block.FileSkipRules); err != nil {
+		return fmt.Errorf("load block rules: %w", err)
+	}
+	if err := loadRule(ctx, r.DirectRule, proxyDial, cfg.Router.Direct.File, cfg.Router.Direct.FilePrefix, cfg.Router.Direct.FileSkipRules); err != nil {
+		return fmt.Errorf("load direct rules: %w", err)
+	}
+	if err := loadRule(ctx, r.ProxyRule, proxyDial, cfg.Router.Proxy.File, cfg.Router.Proxy.FilePrefix, cfg.Router.Proxy.FileSkipRules); err != nil {
+		return fmt.Errorf("load proxy rules: %w", err)
+	}
+	countryLines, err := fetchRuleFile(ctx, proxyDial, cfg.Router.Country.File)
+	if err != nil {
+		return fmt.Errorf("load country rules: %w", err)
+	}
+	for _, line := range countryLines {
+		r.AddCountryCIDRs(line)
+	}
+	return nil
+}
+
+func startDNSListeners(ctx context.Context, cfg config.SowerConfig, r *router.Router, errCh chan<- error) error {
+	if cfg.DNS.Disable {
+		slog.Info("DNS proxy disabled")
+		return nil
+	}
+
+	for _, ip := range dnsListenIPs(cfg) {
+		if err := startHTTPListener(ctx, ip, r, errCh); err != nil {
+			return err
+		}
+		if err := startHTTPSListener(ctx, ip, r, errCh); err != nil {
+			return err
+		}
+		if err := startDNSUDPListener(ctx, ip, r, errCh); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func dnsListenIPs(cfg config.SowerConfig) []string {
+	ips := make([]string, 0, 2)
+	if strings.TrimSpace(cfg.DNS.Serve) != "" {
+		ips = append(ips, cfg.DNS.Serve)
+	}
+	if strings.TrimSpace(cfg.DNS.Serve6) != "" {
+		ips = append(ips, cfg.DNS.Serve6)
+	}
+	return ips
+}
+
+func startHTTPListener(ctx context.Context, ip string, r *router.Router, errCh chan<- error) error {
+	addr := net.JoinHostPort(ip, "80")
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("listen http proxy on %s: %w", addr, err)
+	}
+	slog.Info("service listening", "service", "http proxy", "network", "tcp", "addr", addr)
+	go closeOnDone(ctx, ln)
+	go serveAndReport(errCh, "http proxy", func() error {
+		return ServeHTTP(ctx, ln, r)
+	})
+	return nil
+}
+
+func startHTTPSListener(ctx context.Context, ip string, r *router.Router, errCh chan<- error) error {
+	addr := net.JoinHostPort(ip, "443")
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("listen https proxy on %s: %w", addr, err)
+	}
+	slog.Info("service listening", "service", "https proxy", "network", "tcp", "addr", addr)
+	go closeOnDone(ctx, ln)
+	go serveAndReport(errCh, "https proxy", func() error {
+		return ServeHTTPS(ctx, ln, r)
+	})
+	return nil
+}
+
+func startDNSUDPListener(ctx context.Context, ip string, r *router.Router, errCh chan<- error) error {
+	addr := net.JoinHostPort(ip, "53")
+	pc, err := net.ListenPacket("udp", addr)
+	if err != nil {
+		return fmt.Errorf("listen dns proxy on %s: %w", addr, err)
+	}
+
+	server := &dns.Server{
+		PacketConn: pc,
+		Handler:    r,
+	}
+	slog.Info("service listening", "service", "dns proxy", "network", "udp", "addr", addr)
+	go shutdownDNSServerOnDone(ctx, server)
+	go func() {
+		if err := server.ActivateAndServe(); err != nil && !errors.Is(err, net.ErrClosed) {
+			reportServeError(errCh, "dns proxy", fmt.Errorf("serve on %s: %w", addr, err))
+		}
+	}()
+	return nil
+}
+
+func startSocks5Listener(ctx context.Context, cfg config.SowerConfig, r *router.Router, errCh chan<- error) error {
+	if cfg.Socks5.Disable {
+		slog.Info("SOCKS5 proxy disabled")
+		return nil
+	}
+
+	ln, err := net.Listen("tcp", cfg.Socks5.Addr)
+	if err != nil {
+		return fmt.Errorf("listen socks5 proxy on %s: %w", cfg.Socks5.Addr, err)
+	}
+	slog.Info("service listening", "service", "socks5 proxy", "network", "tcp", "addr", cfg.Socks5.Addr)
+	go closeOnDone(ctx, ln)
+	go serveAndReport(errCh, "socks5 proxy", func() error {
+		return ServeSocks5(ctx, ln, r)
+	})
+	return nil
+}
+
+func loadRule(ctx context.Context, rule *suffixtree.Node, proxyDial router.ProxyDialFn, file, linePrefix string, skipRules []string) error {
+	skipRule := suffixtree.NewNodeFromRules(skipRules...)
+	lines, err := fetchRuleFile(ctx, proxyDial, file)
+	if err != nil {
+		return err
+	}
+	for _, line := range lines {
+		item := linePrefix + line
+		if skipRule.Match(line) || skipRule.Match(item) {
+			continue
+		}
+		rule.Add(item)
 	}
 	rule.GC()
+	return nil
 }
 
-func fetchRuleFile(ctx context.Context, proxyDial router.ProxyDialFn, file string) <-chan string {
+func fetchRuleFile(ctx context.Context, proxyDial router.ProxyDialFn, file string) ([]string, error) {
 	if file == "" {
-		ch := make(chan string)
-		close(ch)
-		return ch
+		return nil, nil
 	}
 
 	var loadFn func() (io.ReadCloser, error)
 	if _, err := os.Stat(file); err == nil {
-		// load rule file from local file
 		loadFn = func() (io.ReadCloser, error) {
 			return os.Open(file)
 		}
 	} else {
-		// load rule file from remote by HTTP
+		if proxyDial == nil {
+			return nil, fmt.Errorf("remote rule file %q requires upstream proxy dialer", file)
+		}
+		var lastDialErr error
 		client := &http.Client{
 			Timeout: 15 * time.Second,
 			Transport: &http.Transport{
 				DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 					domain, port, _ := net.SplitHostPort(addr)
 					p, _ := strconv.Atoi(port)
-					return proxyDial("tcp", domain, uint16(p))
+					conn, err := proxyDial("tcp", domain, uint16(p))
+					if err != nil {
+						lastDialErr = err
+					}
+					return conn, err
 				},
 			},
 		}
@@ -212,12 +320,15 @@ func fetchRuleFile(ctx context.Context, proxyDial router.ProxyDialFn, file strin
 			req.Header.Add("Accept-Encoding", "gzip")
 			resp, err := client.Do(req)
 			if err != nil {
+				if ctx.Err() != nil && lastDialErr != nil {
+					return nil, fmt.Errorf("proxy dial failed before request cancellation: %v: %w", lastDialErr, ctx.Err())
+				}
 				return nil, err
 			}
 
 			if resp.StatusCode != http.StatusOK {
 				resp.Body.Close()
-				return nil, errors.Errorf("status code: %d", resp.StatusCode)
+				return nil, fmt.Errorf("status code: %d", resp.StatusCode)
 			}
 
 			return resp.Body, nil
@@ -231,8 +342,7 @@ func fetchRuleFile(ctx context.Context, proxyDial router.ProxyDialFn, file strin
 			break
 		}
 		if ctx.Err() != nil {
-			slog.Error("fetch rule file", "error", ctx.Err(), "file", file)
-			os.Exit(1)
+			return nil, fmt.Errorf("fetch rule file %q canceled after previous error %v: %w", file, err, ctx.Err())
 		}
 
 		// wait: 28.5s
@@ -240,45 +350,55 @@ func fetchRuleFile(ctx context.Context, proxyDial router.ProxyDialFn, file strin
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			slog.Error("fetch rule file", "error", ctx.Err(), "file", file)
-			os.Exit(1)
+			return nil, fmt.Errorf("fetch rule file %q canceled after previous error %v: %w", file, err, ctx.Err())
 		case <-timer.C:
 		}
 		rc, err = loadFn()
 	}
 	if err != nil {
-		slog.Error("fetch rule file", "error", err, "file", file)
-		os.Exit(1)
+		return nil, fmt.Errorf("fetch rule file %q: %w", file, err)
 	}
 
-	ch := make(chan string, 100)
-	go func() {
-		defer rc.Close()
-		defer close(ch)
-		if gr, err := gzip.NewReader(rc); err == nil {
-			rc = gr
-			defer gr.Close()
+	lines, err := readRuleLines(rc)
+	if err != nil {
+		return nil, fmt.Errorf("read rule file %q: %w", file, err)
+	}
+	return lines, nil
+}
+
+func readRuleLines(rc io.ReadCloser) ([]string, error) {
+	defer rc.Close()
+
+	br := bufio.NewReader(rc)
+	reader := io.Reader(br)
+	magic, err := br.Peek(2)
+	if err != nil && err != io.EOF && err != bufio.ErrBufferFull {
+		return nil, err
+	}
+	if len(magic) == 2 && magic[0] == 0x1f && magic[1] == 0x8b {
+		gr, err := gzip.NewReader(br)
+		if err != nil {
+			return nil, err
 		}
+		defer gr.Close()
+		reader = gr
+	}
 
-		br := bufio.NewReader(rc)
-		for {
-			line, _, err := br.ReadLine()
-			if err == io.EOF {
-				return
-			} else if err != nil {
-				slog.Error("read line", "error", err, "file", file)
-				return
-			}
-
-			if strings.TrimSpace(string(line)) == "" {
-				continue
-			}
-
-			ch <- string(line)
+	lines := make([]string, 0)
+	lineReader := bufio.NewReader(reader)
+	for {
+		line, err := lineReader.ReadString('\n')
+		if err != nil && err != io.EOF {
+			return nil, err
 		}
-	}()
-
-	return ch
+		line = strings.TrimSpace(line)
+		if line != "" {
+			lines = append(lines, line)
+		}
+		if err == io.EOF {
+			return lines, nil
+		}
+	}
 }
 
 func closeOnDone(ctx context.Context, closer io.Closer) {
@@ -292,7 +412,7 @@ func shutdownDNSServerOnDone(ctx context.Context, server *dns.Server) {
 }
 
 func reportServeError(errCh chan<- error, service string, err error) {
-	if err == nil || stderrors.Is(err, net.ErrClosed) {
+	if err == nil || errors.Is(err, net.ErrClosed) {
 		return
 	}
 
@@ -302,50 +422,6 @@ func reportServeError(errCh chan<- error, service string, err error) {
 	}
 }
 
-func startTCPService(ctx context.Context, errCh chan<- error, service, addr string, serve func(context.Context, net.Listener) error) error {
-	ln, err := net.Listen("tcp", addr)
-	if err != nil {
-		return fmt.Errorf("listen on %s: %w", addr, err)
-	}
-
-	slog.Info("service listening", "service", service, "network", "tcp", "addr", addr)
-	go closeOnDone(ctx, ln)
-	go func() {
-		reportServeError(errCh, service, serve(ctx, ln))
-	}()
-	return nil
-}
-
-func startDNSService(ctx context.Context, errCh chan<- error, addr string, handler dns.Handler) error {
-	pc, err := net.ListenPacket("udp", addr)
-	if err != nil {
-		return fmt.Errorf("listen on %s: %w", addr, err)
-	}
-
-	server := &dns.Server{
-		PacketConn: pc,
-		Handler:    handler,
-	}
-	slog.Info("service listening", "service", "dns proxy", "network", "udp", "addr", addr)
-	go shutdownDNSServerOnDone(ctx, server)
-	go func() {
-		err := server.ActivateAndServe()
-		if err != nil && !stderrors.Is(err, net.ErrClosed) {
-			reportServeError(errCh, "dns proxy", fmt.Errorf("serve on %s: %w", addr, err))
-		}
-	}()
-	return nil
-}
-
-func watchServeErrors(ctx context.Context, stop context.CancelFunc, errCh <-chan error) {
-	select {
-	case <-ctx.Done():
-		return
-	case err := <-errCh:
-		if err == nil {
-			return
-		}
-		slog.Error("serve failed", "error", err)
-		stop()
-	}
+func serveAndReport(errCh chan<- error, service string, serve func() error) {
+	reportServeError(errCh, service, serve())
 }
