@@ -2,13 +2,14 @@ package dhcp
 
 import (
 	"crypto/rand"
+	"fmt"
 	"net"
 	"runtime"
 	"time"
 
+	"errors"
 	"github.com/krolaw/dhcp4"
 	"github.com/libp2p/go-reuseport"
-	"github.com/pkg/errors"
 )
 
 var broadcastAddr, _ = net.ResolveUDPAddr("udp", "255.255.255.255:67")
@@ -16,12 +17,12 @@ var broadcastAddr, _ = net.ResolveUDPAddr("udp", "255.255.255.255:67")
 func GetDNSServer() ([]string, error) {
 	iface, err := PickInternetInterface()
 	if err != nil {
-		return nil, errors.Wrap(err, "pick interface")
+		return nil, fmt.Errorf("pick interface: %w", err)
 	}
 
 	xid := make([]byte, 4)
 	if _, err := rand.Read(xid); err != nil {
-		return nil, errors.Wrap(err, "generate xid")
+		return nil, fmt.Errorf("generate xid: %w", err)
 	}
 	pack := dhcp4.RequestPacket(dhcp4.Discover, iface.HardwareAddr, net.IPv4(0, 0, 0, 0), xid, true, []dhcp4.Option{
 		{Code: dhcp4.OptionRequestedIPAddress, Value: []byte(iface.IP.To4())},
@@ -31,24 +32,24 @@ func GetDNSServer() ([]string, error) {
 	var conn net.PacketConn
 	if runtime.GOOS == "windows" {
 		if conn, err = reuseport.ListenPacket("udp4", iface.IP.String()+":68"); err != nil {
-			return nil, errors.Wrap(err, "listen dhcp")
+			return nil, fmt.Errorf("listen dhcp: %w", err)
 		}
 	} else {
 		if conn, err = reuseport.ListenPacket("udp4", "0.0.0.0:68"); err != nil {
-			return nil, errors.Wrap(err, "listen dhcp")
+			return nil, fmt.Errorf("listen dhcp: %w", err)
 		}
 	}
 	defer conn.Close()
 	conn.SetDeadline(time.Now().Add(3 * time.Second))
 
 	if _, err := conn.WriteTo([]byte(pack), broadcastAddr); err != nil {
-		return nil, errors.Wrap(err, "write broadcast")
+		return nil, fmt.Errorf("write broadcast: %w", err)
 	}
 
 	buf := make([]byte, 1500 /*MTU*/)
 	n, _, err := conn.ReadFrom(buf)
 	if err != nil {
-		return nil, errors.Wrap(err, "read dhcp offer")
+		return nil, fmt.Errorf("read dhcp offer: %w", err)
 	}
 
 	pack = dhcp4.Packet(buf[:n])

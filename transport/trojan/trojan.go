@@ -5,11 +5,12 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"net"
 	"strconv"
 
-	"github.com/pkg/errors"
+	"errors"
 )
 
 // +-----------------------+---------+----------------+---------+----------+
@@ -89,7 +90,7 @@ func (a *domain) Fulfill(r io.Reader) error {
 	addrLen := int(buf[0])
 	buf = make([]byte, addrLen+4)
 	if n, err := io.ReadFull(r, buf); err != nil || n != addrLen+4 {
-		return errors.Wrap(err, "read doamin failed")
+		return fmt.Errorf("read domain: %w", err)
 	}
 
 	a.ADDR = string(buf[:addrLen])
@@ -126,12 +127,12 @@ func New(password string) *Trojan {
 func (t *Trojan) Unwrap(conn net.Conn) (net.Addr, error) {
 	buf := make([]byte, headLen)
 	if n, err := io.ReadFull(conn, buf); err != nil || n != headLen {
-		return nil, errors.Errorf("n: %d, err: %s", n, err)
+		return nil, fmt.Errorf("n: %d, err: %v", n, err)
 	}
 
 	head := &staticHead{}
 	if err := binary.Read(bytes.NewBuffer(buf), binary.BigEndian, head); err != nil {
-		return nil, errors.Wrap(err, "read head")
+		return nil, fmt.Errorf("read head: %w", err)
 	}
 
 	if !bytes.Equal(head.Passwd[:], []byte(t.headPasswd)) {
@@ -141,14 +142,14 @@ func (t *Trojan) Unwrap(conn net.Conn) (net.Addr, error) {
 		return nil, errors.New("invalid CRLF")
 	}
 	if head.CMD != 0x01 {
-		return nil, errors.Errorf("invalid CMD: %d", head.CMD)
+		return nil, fmt.Errorf("invalid CMD: %d", head.CMD)
 	}
 	switch head.ATYP {
 	case 0x01: // ipv4
 		addr := &ipv4Addr{}
 		err := binary.Read(conn, binary.BigEndian, addr)
 		if err != nil {
-			return nil, errors.Wrap(err, "read addr")
+			return nil, fmt.Errorf("read addr: %w", err)
 		}
 		if !addr.IsValid() {
 			return nil, errors.New("invalid CRLF")
@@ -159,7 +160,7 @@ func (t *Trojan) Unwrap(conn net.Conn) (net.Addr, error) {
 		addr := &ipv6Addr{}
 		err := binary.Read(conn, binary.BigEndian, addr)
 		if err != nil {
-			return nil, errors.Wrap(err, "read addr")
+			return nil, fmt.Errorf("read addr: %w", err)
 		}
 		if !addr.IsValid() {
 			return nil, errors.New("invalid CRLF")
@@ -170,7 +171,7 @@ func (t *Trojan) Unwrap(conn net.Conn) (net.Addr, error) {
 		addr := &domain{}
 		err := addr.Fulfill(conn)
 		if err != nil {
-			return nil, errors.Wrap(err, "read addr")
+			return nil, fmt.Errorf("read addr: %w", err)
 		}
 		if !addr.IsValid() {
 			return nil, errors.New("invalid CRLF")
@@ -196,7 +197,7 @@ func (t *Trojan) Wrap(conn net.Conn, tgtHost string, tgtPort uint16) error {
 
 	default:
 		if len(tgtHost) > 255 {
-			return errors.Errorf("target host too long: %d", len(tgtHost))
+			return fmt.Errorf("target host too long: %d", len(tgtHost))
 		}
 		buf.Write(t.headDomain)
 		buf.WriteByte(byte(len(tgtHost)))
@@ -206,7 +207,7 @@ func (t *Trojan) Wrap(conn net.Conn, tgtHost string, tgtPort uint16) error {
 	buf.Write([]byte{byte(tgtPort >> 8), byte(tgtPort), 0x0D, 0x0A})
 
 	if n, err := conn.Write(buf.Bytes()); err != nil || n != len(buf.Bytes()) {
-		return errors.Errorf("n: %d, err: %s", n, err)
+		return fmt.Errorf("n: %d, err: %v", n, err)
 	}
 	return nil
 }

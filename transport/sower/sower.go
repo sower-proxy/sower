@@ -4,11 +4,12 @@ import (
 	"bytes"
 	"crypto/md5"
 	"encoding/binary"
+	"fmt"
 	"io"
 	"net"
 	"strconv"
 
-	"github.com/pkg/errors"
+	"errors"
 )
 
 // https://en.wikipedia.org/wiki/Domain_Name_System
@@ -48,7 +49,7 @@ func New(password string) *Sower {
 func (s *Sower) Unwrap(conn net.Conn) (net.Addr, error) {
 	buf := make([]byte, headSize)
 	if n, err := io.ReadFull(conn, buf); err != nil || n != headSize {
-		return nil, errors.Errorf("n: %d, err: %s", n, err)
+		return nil, fmt.Errorf("n: %d, err: %v", n, err)
 	}
 
 	h := &Head{}
@@ -56,7 +57,7 @@ func (s *Sower) Unwrap(conn net.Conn) (net.Addr, error) {
 	switch h.Cmd {
 	case 0x80:
 	default:
-		return nil, errors.Errorf("invalid command: %d", h.Cmd)
+		return nil, fmt.Errorf("invalid command: %d", h.Cmd)
 	}
 
 	if h.Checksum != sumChecksum(h.TgtAddr, s.password) {
@@ -68,7 +69,7 @@ func (s *Sower) Unwrap(conn net.Conn) (net.Addr, error) {
 
 func (s *Sower) Wrap(conn net.Conn, tgtHost string, tgtPort uint16) error {
 	if len(tgtHost) > maxDomainLength {
-		return errors.Errorf("target host too long: %d", len(tgtHost))
+		return fmt.Errorf("target host too long: %d", len(tgtHost))
 	}
 
 	tgtAddr := [maxDomainLength]byte{}

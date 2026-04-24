@@ -4,7 +4,6 @@ go 1.26.1
 
 require (
 	github.com/cristalhq/aconfig v0.19.0
-	github.com/cristalhq/aconfig/aconfighcl v0.17.1
 	github.com/cristalhq/aconfig/aconfigtoml v0.17.1
 	github.com/cristalhq/aconfig/aconfigyaml v0.17.1
 	github.com/krolaw/dhcp4 v0.0.0-20190909130307-a50d88189771
@@ -12,7 +11,6 @@ require (
 	github.com/lmittmann/tint v1.1.3
 	github.com/miekg/dns v1.1.72
 	github.com/oschwald/geoip2-golang v1.13.0
-	github.com/pkg/errors v0.9.1
 	github.com/refraction-networking/utls v1.8.2
 	github.com/sower-proxy/conns v0.1.1
 	github.com/sower-proxy/deferlog/v2 v2.1.4
@@ -23,7 +21,6 @@ require (
 require (
 	github.com/BurntSushi/toml v1.1.0 // indirect
 	github.com/andybalholm/brotli v1.0.6 // indirect
-	github.com/hashicorp/hcl v1.0.0 // indirect
 	github.com/klauspost/compress v1.17.4 // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/oschwald/maxminddb-golang v1.13.0 // indirect
