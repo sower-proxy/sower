@@ -54,9 +54,12 @@
 4. Resolve the effective upstream DNS server, falling back to the configured fallback DNS when needed.
 5. Build the upstream dialer for the configured remote transport, using standard TLS by default and optional uTLS fingerprints for `sower` and `trojan`.
 6. Build the router with suffix-tree rules and optional country CIDRs.
-7. Start enabled local listeners for `udp/53`, `tcp/80`, `tcp/443`, and `tcp/1080`.
+   Remote rule files are fetched through the configured upstream proxy dialer, never by direct outbound HTTP, so rule bootstrap uses the same stable egress path as proxied traffic.
+   Remote domain rule files are filtered through per-router `file_skip_rules` before their prefixed entries are appended.
+7. Start enabled local listeners for `udp/53`, `tcp/80`, `tcp/443`, and `tcp/1080` only after rule loading completes.
 8. For DNS requests, return local proxy IPs for proxy-routed domains and query upstream DNS for direct domains.
-9. For HTTP traffic, parse the target host from the request line. For HTTPS transparent traffic, peek the TLS ClientHello to extract SNI without terminating TLS locally. For SOCKS5 traffic, read the SOCKS5 target address. Apply routing rules and either dial directly or wrap traffic in the configured upstream transport.
+9. For HTTP traffic, parse the target host from the request line. For HTTPS transparent traffic, peek the TLS ClientHello to extract SNI. For SOCKS5 traffic, read the SOCKS5 target address. Apply routing rules and either dial directly or wrap traffic in the configured upstream transport.
+   HTTPS transparent proxying reads only the TLS ClientHello, then replays the untouched bytes to the selected upstream; it must not complete or terminate TLS locally.
 10. On shutdown signal, stop listeners and DNS servers through `context` propagation.
 
 ## sowerd Data Flow
@@ -86,11 +89,14 @@
 ## Design Decisions
 
 - Client and server both fail fast on invalid startup configuration instead of silently degrading.
+- The client loads TOML by default, with YAML kept as an alternate file format; HCL is not supported.
 - Sensitive configuration values must never be printed verbatim in logs.
 - Local listeners use explicit shutdown hooks instead of blocking forever with unmanaged goroutines.
 - Network operations use timeouts and `context` to limit hangs during dialing and remote rule downloads.
 - Upstream TLS behavior is configured only on the client side; `sowerd` remains a normal TLS server and does not need uTLS-specific logic.
-- Rule loading supports local files and remote gzip-compressed HTTP sources.
+- Rule loading supports local files and remote HTTP sources; remote downloads must use the configured upstream proxy and fail startup if the proxy path cannot fetch them.
+- Domain rule files support per-router skip rules for filtering third-party file entries without removing explicit local rules.
+- Country routing treats `router.country.mmdb` as optional; an empty value disables GeoIP lookup and keeps CIDR-based matching active without startup warnings.
 - Fake site directory mode is loopback-only on port `80` to avoid exposing local static assets directly to the public internet.
 - `sowerd` prefers the user cache directory for ACME state, but falls back to `/var/cache/sower` so systemd services can start without `HOME`/`XDG_CACHE_HOME` or a config file.
 
@@ -100,7 +106,7 @@
 - `sowerd` must bind privileged ports `80` and `443`.
 - `sowerd -i` also requires root because it writes system-level files for self-deployment.
 - ACME mode requires port `80` to be reachable from the public internet.
-- Remote rule download failures stop startup after bounded retries.
+- Remote rule download failures stop startup after bounded retries before local listeners are exposed.
 
 ## Related Documents
 

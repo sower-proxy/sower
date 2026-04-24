@@ -48,18 +48,26 @@ There are two ways to run the sowerd service:
 
 ## Sower
 
-A config file is required on the sower client side. [Here](https://github.com/sower-proxy/sower/wiki/sower.hcl) is a usable example in China.
+A config file is required on the sower client side. `sower.toml` is the default packaged example.
 
 `Sower` will bind 4 ports by default with root permission. They are: `udp(53)` / `tcp(80)` / `tcp(443)` / `tcp(1080)`.
 
+When DNS-based HTTPS proxying is enabled, `sower` listens on local `443/tcp`, reads the TLS ClientHello only to extract SNI, and forwards the original TLS stream to the selected upstream without terminating TLS.
+
 For `sower` and `trojan` upstreams, `remote.addr` now accepts either `host` or `host:port`. Optional `remote.tls` settings let the client override SNI, skip certificate verification, or use a uTLS client fingerprint such as `chrome` or `firefox`.
+
+Remote domain rule files can be filtered with per-router skip rules. For example, use `file_skip_rules = ["t.co"]` in the TOML `[router.block]` section to ignore a third-party blocklist entry while keeping explicit local `rules` intact.
+
+Remote rule files are downloaded through the configured upstream proxy, not through direct outbound HTTP. `sower` loads these rules before exposing local listeners, so an unreachable upstream proxy or rule URL fails startup instead of starting with incomplete routing state.
+
+`router.country.mmdb` is optional. Leave it empty to disable GeoIP lookup and use only configured CIDR rules for country-based direct routing.
 
 After doing the next three steps, you can enjoy the intelligent transparent proxy solution:
 
 1. Run the command with root permission:
 
     ```shell
-    # sower -f sower.hcl
+    # sower -c sower.toml
     ```
 
 2. Change your DNS server to `127.0.0.1`.
