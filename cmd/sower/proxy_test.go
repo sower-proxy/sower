@@ -214,6 +214,68 @@ func TestHandleHTTPSConnRelaysClientHelloToUpstream(t *testing.T) {
 	wg.Wait()
 }
 
+func TestHandleHTTPSConnRelaysClientHelloAfterReadingSNI(t *testing.T) {
+	server, client := net.Pipe()
+	upstreamClient, upstreamServer := net.Pipe()
+	defer server.Close()
+	defer client.Close()
+	defer upstreamClient.Close()
+	defer upstreamServer.Close()
+
+	hostCh := make(chan string, 1)
+	r := &router.Router{
+		ProxyDial: func(network, host string, port uint16) (net.Conn, error) {
+			if network != "tcp" {
+				t.Errorf("unexpected network: %s", network)
+			}
+			if port != 443 {
+				t.Errorf("unexpected port: %d", port)
+			}
+			hostCh <- host
+			return upstreamClient, nil
+		},
+	}
+
+	go handleHTTPSConn(server, r)
+
+	tlsClient := tls.Client(client, &tls.Config{
+		ServerName:         "example.com",
+		InsecureSkipVerify: true,
+	})
+	_ = client.SetDeadline(time.Now().Add(2 * time.Second))
+	_ = upstreamServer.SetDeadline(time.Now().Add(2 * time.Second))
+
+	handshakeDone := make(chan error, 1)
+	go func() {
+		handshakeDone <- tlsClient.Handshake()
+	}()
+
+	select {
+	case host := <-hostCh:
+		if host != "example.com" {
+			t.Fatalf("unexpected SNI host: %q", host)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("proxy dial was not called")
+	}
+
+	recordHeader := make([]byte, 5)
+	if _, err := io.ReadFull(upstreamServer, recordHeader); err != nil {
+		t.Fatalf("read relayed TLS record header: %v", err)
+	}
+	if recordHeader[0] != 0x16 {
+		t.Fatalf("expected relayed TLS handshake record, got %#x", recordHeader[0])
+	}
+
+	_ = client.Close()
+	_ = upstreamServer.Close()
+	select {
+	case <-handshakeDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("tls client handshake did not return after connections closed")
+	}
+}
+
 func generateTLSClientHelloRecord(t *testing.T, serverName string) []byte {
 	t.Helper()
 
