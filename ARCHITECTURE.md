@@ -100,6 +100,7 @@
 - Upstream TLS behavior is configured only on the client side; `sowerd` remains a normal TLS server and does not need uTLS-specific logic.
 - Rule loading supports local files and remote HTTP sources; remote downloads must use the configured upstream proxy and fail startup if the proxy path cannot fetch them.
 - Domain rule files support per-router skip rules for filtering third-party file entries without removing explicit local rules.
+- HTTP/HTTPS access probes are cached with an hour-long write TTL through `github.com/maypok86/otter/v2`, keeping repeated transparent-proxy routing checks bounded without hiding later reachability changes indefinitely.
 - Country routing treats `router.country.mmdb` as optional; an empty value disables GeoIP lookup and keeps CIDR-based matching active without startup warnings.
 - Fake site directory mode is loopback-only on port `80` to avoid exposing local static assets directly to the public internet.
 - `sowerd` prefers the user cache directory for ACME state, but falls back to `/var/cache/sower` so systemd services can start without `HOME`/`XDG_CACHE_HOME` or a config file.
