@@ -1,15 +1,42 @@
 package router
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
 
-	"github.com/sower-proxy/mem"
+	"github.com/maypok86/otter/v2"
 )
 
-var accessCache = mem.NewRotateCache(time.Hour, httpPing)
+const (
+	accessCacheTTL        = time.Hour
+	accessCacheMaxEntries = 1000
+)
+
+type accessProbeCache struct {
+	cache *otter.Cache[string, bool]
+}
+
+var accessCache = newAccessCache(accessCacheTTL)
+
+func newAccessCache(ttl time.Duration) *accessProbeCache {
+	return &accessProbeCache{
+		cache: otter.Must(&otter.Options[string, bool]{
+			MaximumSize:      accessCacheMaxEntries,
+			ExpiryCalculator: otter.ExpiryWriting[string, bool](ttl),
+		}),
+	}
+}
+
+func (c *accessProbeCache) Get(key string) (bool, error) {
+	return c.cache.Get(context.Background(), key, otter.LoaderFunc[string, bool](
+		func(_ context.Context, key string) (bool, error) {
+			return httpPing(key)
+		},
+	))
+}
 
 func (r *Router) isAccess(domain string, port uint16) bool {
 	switch port {

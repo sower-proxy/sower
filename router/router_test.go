@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/miekg/dns"
-	"github.com/sower-proxy/mem"
 	"github.com/sower-proxy/sower/pkg/suffixtree"
 )
 
@@ -361,7 +360,7 @@ func TestIsAccessChecksRequestedPortOnly(t *testing.T) {
 			Header:     make(http.Header),
 		}, nil
 	})
-	accessCache = mem.NewRotateCache(time.Hour, httpPing)
+	accessCache = newAccessCache(accessCacheTTL)
 
 	r := NewRouter(nil, "", "223.5.5.5", "", nil)
 	if !r.isAccess("example.com", 443) {
