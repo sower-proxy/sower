@@ -58,14 +58,17 @@ For non-transport fallback traffic, it can route by TLS SNI to per-domain upstre
    Remote rule files are fetched through the configured upstream proxy dialer, never by direct outbound HTTP, so rule bootstrap uses the same stable egress path as proxied traffic.
    Remote domain rule files are filtered through per-router `file_skip_rules` before their prefixed entries are appended.
 7. Start enabled local listeners for `udp/53`, `tcp/80`, `tcp/443`, and `tcp/1080` only after rule loading completes.
-8. For DNS requests, return local proxy IPs for proxy-routed domains and query upstream DNS for direct domains.
+8. For DNS requests, return local proxy IPs only for explicitly proxy-routed domains and query upstream DNS for direct or unknown domains.
+   DNS routing intentionally does not mirror smart TCP routing: DNS must support arbitrary protocols and ports, so unknown names stay conservative and are not mapped to local HTTP/HTTPS proxy listeners by default.
    Empty `dns.upstream` keeps router-side DHCP DNS discovery enabled; `dns.fallback` is appended as a backup upstream and is also used while initial discovery is in flight.
    Proxy-routed domains return local A/AAAA records, suppress HTTPS/SVCB and other non-address metadata locally, and never leak proxy-matched names to direct upstream DNS.
    Direct upstream DNS failures fall back only for retryable upstream service errors; when no fallback succeeds, the last upstream DNS response code is returned as-is.
    Service discovery names are matched against both the full query name and the base domain only for service record types.
-9. For HTTP traffic, parse the target host from the request line. For HTTPS transparent traffic, peek the TLS ClientHello to extract SNI. For SOCKS5 traffic, read the SOCKS5 target address. Apply routing rules and either dial directly or wrap traffic in the configured upstream transport.
+9. For DNS-mode transparent HTTP traffic, parse the target host from the request line and always forward through the upstream proxy. For DNS-mode transparent HTTPS traffic, peek the TLS ClientHello to extract SNI and always forward through the upstream proxy.
+   These transparent `80/443` listeners are second-stage proxy-only handlers for domains already mapped to local proxy IPs by DNS; they do not run smart routing again.
    HTTPS transparent proxying reads only the TLS ClientHello, then replays the untouched bytes to the selected upstream; it must not complete or terminate TLS locally.
-10. On shutdown signal, stop listeners and DNS servers through `context` propagation.
+10. For SOCKS5 traffic and explicit HTTP proxy traffic, read the client-supplied target host and port, apply smart routing rules, and either dial directly or wrap traffic in the configured upstream transport.
+11. On shutdown signal, stop listeners and DNS servers through `context` propagation.
 
 ## sowerd Data Flow
 
@@ -103,8 +106,9 @@ For non-transport fallback traffic, it can route by TLS SNI to per-domain upstre
 - Upstream TLS behavior is configured only on the client side; `sowerd` remains a normal TLS server and does not need uTLS-specific logic.
 - Rule loading supports local files and remote HTTP sources; remote downloads must use the configured upstream proxy and fail startup if the proxy path cannot fetch them.
 - Domain rule files support per-router skip rules for filtering third-party file entries without removing explicit local rules.
-- HTTP/HTTPS access probes are cached with an hour-long write TTL through `github.com/maypok86/otter/v2`, keeping repeated transparent-proxy routing checks bounded without hiding later reachability changes indefinitely.
-- Country routing treats `router.country.mmdb` as optional; an empty value disables GeoIP lookup and keeps CIDR-based matching active without startup warnings.
+- HTTP/HTTPS access probes are cached with an hour-long write TTL through `github.com/maypok86/otter/v2`, keeping repeated smart-routing checks bounded without hiding later reachability changes indefinitely.
+- Country routing treats `router.country.mmdb` as optional; an empty value disables GeoIP lookup and keeps CIDR-based matching active without startup warnings. A non-empty invalid MMDB path is a startup error.
+- DNS routing, transparent HTTP/HTTPS forwarding, and smart TCP routing are separate policies. DNS uses conservative explicit proxy rules only; transparent HTTP/HTTPS is proxy-only; SOCKS5 and explicit HTTP proxy traffic use smart routing.
 - Fake site directory mode is loopback-only on port `80` to avoid exposing local static assets directly to the public internet.
 - `sowerd` prefers the user cache directory for ACME state, but falls back to `/var/cache/sower` so systemd services can start without `HOME`/`XDG_CACHE_HOME` or a config file.
 - `sowerd` fallback site routing is based only on exact TLS SNI matches; wildcard domains are not supported.
