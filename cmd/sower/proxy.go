@@ -182,7 +182,7 @@ func handleHTTPConn(conn net.Conn, r *router.Router) {
 	}
 	_ = rereadConn.SetDeadline(time.Time{})
 
-	rc, err := r.ProxyDial("tcp", req.Host, 80)
+	rc, err := r.DialProxyOnly("tcp", req.Host, 80)
 	if err != nil {
 		slog.Error("dial proxy", "error", err, "host", req.Host, "req", req.URL)
 		return
@@ -213,7 +213,7 @@ func handleHTTPSConn(conn net.Conn, r *router.Router) {
 	}
 	_ = rereadConn.SetDeadline(time.Time{})
 
-	rc, err := r.ProxyDial("tcp", domain, 443)
+	rc, err := r.DialProxyOnly("tcp", domain, 443)
 	if err != nil {
 		slog.Error("dial proxy", "error", err, "host", domain)
 		return
@@ -306,7 +306,7 @@ func handleSocks5Conn(conn net.Conn, r *router.Router) {
 		}
 
 		host, port := addr.(*socks5.AddrHead).Addr()
-		rc, err := r.Dial("tcp", host, port)
+		rc, err := r.DialSmart("tcp", host, port)
 		if err != nil {
 			if replyErr := server.WriteReply(rereadConn, routeSocks5ReplyCode(err)); replyErr != nil {
 				slog.Debug("write socks5 failure reply", "error", replyErr, "host", host, "port", port)
@@ -335,7 +335,7 @@ func handleSocks5Conn(conn net.Conn, r *router.Router) {
 		return
 	}
 
-	rc, err := r.Dial("tcp", host, port)
+	rc, err := r.DialSmart("tcp", host, port)
 	if err != nil {
 		writeHTTPProxyError(rereadConn.Stop(), err)
 		return

@@ -102,7 +102,15 @@ func run(ctx context.Context, stop context.CancelFunc, cfg config.SowerConfig) e
 	if err != nil {
 		return fmt.Errorf("build proxy dialer: %w", err)
 	}
-	r := newRouter(cfg, proxyDial)
+	r, err := newRouter(cfg, proxyDial)
+	if err != nil {
+		return fmt.Errorf("build router: %w", err)
+	}
+	defer func() {
+		if err := r.Close(); err != nil {
+			slog.Warn("close router", "error", err)
+		}
+	}()
 
 	start := time.Now()
 	if err := loadRouterRules(ctx, r, proxyDial, cfg); err != nil {
@@ -138,13 +146,19 @@ func effectiveUpstreamDNS(cfg config.SowerConfig) string {
 	return cfg.DNS.Fallback
 }
 
-func newRouter(cfg config.SowerConfig, proxyDial router.ProxyDialFn) *router.Router {
-	r := router.NewRouter([]string{cfg.DNS.Serve, cfg.DNS.Serve6}, cfg.DNS.Upstream, cfg.DNS.Fallback, cfg.Router.Country.MMDB, proxyDial)
+func newRouter(cfg config.SowerConfig, proxyDial router.ProxyDialFn) (*router.Router, error) {
+	r, err := router.NewRouter([]string{cfg.DNS.Serve, cfg.DNS.Serve6}, cfg.DNS.Upstream, cfg.DNS.Fallback, cfg.Router.Country.MMDB, proxyDial)
+	if err != nil {
+		return nil, err
+	}
 	r.BlockRule = suffixtree.NewNodeFromRules(cfg.Router.Block.Rules...)
 	r.DirectRule = suffixtree.NewNodeFromRules(cfg.Router.Direct.Rules...)
 	r.ProxyRule = suffixtree.NewNodeFromRules(cfg.Router.Proxy.Rules...)
-	r.AddCountryCIDRs(cfg.Router.Country.Rules...)
-	return r
+	if err := r.AddCountryCIDRs(cfg.Router.Country.Rules...); err != nil {
+		_ = r.Close()
+		return nil, err
+	}
+	return r, nil
 }
 
 func loadRouterRules(ctx context.Context, r *router.Router, proxyDial router.ProxyDialFn, cfg config.SowerConfig) error {
@@ -161,8 +175,8 @@ func loadRouterRules(ctx context.Context, r *router.Router, proxyDial router.Pro
 	if err != nil {
 		return fmt.Errorf("load country rules: %w", err)
 	}
-	for _, line := range countryLines {
-		r.AddCountryCIDRs(line)
+	if err := r.AddCountryCIDRs(countryLines...); err != nil {
+		return fmt.Errorf("load country rules: %w", err)
 	}
 	return nil
 }
