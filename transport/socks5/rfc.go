@@ -17,7 +17,7 @@ type authReq struct {
 
 func (req *authReq) Fulfill(r io.Reader) error {
 	buf := make([]byte, 2)
-	if n, err := io.ReadFull(r, buf); err != nil || n != 2 {
+	if _, err := io.ReadFull(r, buf); err != nil {
 		return err
 	}
 
@@ -25,7 +25,7 @@ func (req *authReq) Fulfill(r io.Reader) error {
 	req.NMETHODS = buf[1]
 
 	req.METHODS = make([]byte, int(req.NMETHODS))
-	if n, err := io.ReadFull(r, req.METHODS); err != nil || n != len(req.METHODS) {
+	if _, err := io.ReadFull(r, req.METHODS); err != nil {
 		return err
 	}
 
@@ -72,6 +72,14 @@ type respHead struct {
 	BND_PORT uint16
 }
 
+// replyHead is the fixed 4-byte prefix of a SOCKS5 reply (without bound address).
+type replyHead struct {
+	VER  byte
+	REP  byte
+	RSV  byte
+	ATYP byte
+}
+
 type addrType interface {
 	Fulfill(r io.Reader) error
 	Addr() (domain string, port uint16)
@@ -102,13 +110,13 @@ type addrTypeDomain struct {
 }
 
 func (a *addrTypeDomain) Fulfill(r io.Reader) error {
-	buf := make([]byte, 1)
-	if _, err := io.ReadFull(r, buf); err != nil {
+	var lenBuf [1]byte
+	if _, err := io.ReadFull(r, lenBuf[:]); err != nil {
 		return err
 	}
 
-	a.DST_ADDR_LEN = uint8(buf[0])
-	buf = make([]byte, a.DST_ADDR_LEN+2)
+	a.DST_ADDR_LEN = uint8(lenBuf[0])
+	buf := make([]byte, int(a.DST_ADDR_LEN)+2)
 	if _, err := io.ReadFull(r, buf); err != nil {
 		return err
 	}

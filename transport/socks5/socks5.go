@@ -53,8 +53,11 @@ func (s *Socks5) Unwrap(conn net.Conn) (net.Addr, error) {
 func (s *Socks5) ReadRequest(conn net.Conn) (net.Addr, error) {
 	{ // auth
 		auth := new(authReq)
-		if err := auth.Fulfill(conn); err != nil || !auth.IsValid() {
-			return nil, fmt.Errorf("read auth head: %v, err: %v", auth, err)
+		if err := auth.Fulfill(conn); err != nil {
+			return nil, fmt.Errorf("read auth request: %w", err)
+		}
+		if !auth.IsValid() {
+			return nil, errors.New("no acceptable auth method")
 		}
 
 		if err := binary.Write(conn, binary.BigEndian, noAuthResp); err != nil {
@@ -65,8 +68,11 @@ func (s *Socks5) ReadRequest(conn net.Conn) (net.Addr, error) {
 	var addr addrType
 	{ // head
 		head := new(reqHead)
-		if err := binary.Read(conn, binary.BigEndian, head); err != nil || !head.IsValid() {
-			return nil, fmt.Errorf("read head: %v, err: %v", head, err)
+		if err := binary.Read(conn, binary.BigEndian, head); err != nil {
+			return nil, fmt.Errorf("read request head: %w", err)
+		}
+		if !head.IsValid() {
+			return nil, fmt.Errorf("invalid request head: VER=%d CMD=%d RSV=%d", head.VER, head.CMD, head.RSV)
 		}
 		switch head.ATYP {
 		case 0x01: // IPv4
@@ -126,19 +132,19 @@ func (s *Socks5) Wrap(conn net.Conn, tgtHost string, tgtPort uint16) error {
 		buf.WriteString(tgtHost)
 		buf.Write([]byte{byte(tgtPort >> 8), byte(tgtPort)})
 
-		if n, err := conn.Write(buf.Bytes()); err != nil || n != len(buf.Bytes()) {
-			return fmt.Errorf("n: %d, err: %v", n, err)
+		if _, err := conn.Write(buf.Bytes()); err != nil {
+			return fmt.Errorf("write request: %w", err)
 		}
 
-		head := reqHead{}
+		head := replyHead{}
 		if err := binary.Read(conn, binary.BigEndian, &head); err != nil {
-			return err
+			return fmt.Errorf("read reply head: %w", err)
 		}
 		if head.VER != 5 || head.RSV != 0 {
-			return fmt.Errorf("unexpected response head: %+v", head)
+			return fmt.Errorf("unexpected reply: VER=%d RSV=%d", head.VER, head.RSV)
 		}
-		if head.CMD != 0 {
-			return fmt.Errorf("connect rejected, rep=%d", head.CMD)
+		if head.REP != 0 {
+			return fmt.Errorf("connect rejected, rep=%d", head.REP)
 		}
 
 		var addr addrType
@@ -152,6 +158,8 @@ func (s *Socks5) Wrap(conn net.Conn, tgtHost string, tgtPort uint16) error {
 		default:
 			return fmt.Errorf("invalid response ATYP: %d", head.ATYP)
 		}
+		// The SOCKS5 reply includes a bound address after the reply head.
+		// We read and discard it here because the client does not need it.
 		if err := addr.Fulfill(conn); err != nil {
 			return fmt.Errorf("read response address: %w", err)
 		}

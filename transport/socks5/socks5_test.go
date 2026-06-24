@@ -6,34 +6,12 @@ import (
 	"io"
 	"net"
 	"testing"
-	"time"
+
+	"github.com/sower-proxy/sower/transport/internal/conntest"
 )
 
-type mockConn struct {
-	reader io.Reader
-	writes bytes.Buffer
-}
-
-func newMockConn(data []byte) *mockConn {
-	return &mockConn{reader: bytes.NewReader(data)}
-}
-
-func (c *mockConn) Read(p []byte) (int, error)       { return c.reader.Read(p) }
-func (c *mockConn) Write(p []byte) (int, error)      { return c.writes.Write(p) }
-func (c *mockConn) Close() error                     { return nil }
-func (c *mockConn) LocalAddr() net.Addr              { return dummyAddr("local") }
-func (c *mockConn) RemoteAddr() net.Addr             { return dummyAddr("remote") }
-func (c *mockConn) SetDeadline(time.Time) error      { return nil }
-func (c *mockConn) SetReadDeadline(time.Time) error  { return nil }
-func (c *mockConn) SetWriteDeadline(time.Time) error { return nil }
-
-type dummyAddr string
-
-func (a dummyAddr) Network() string { return "tcp" }
-func (a dummyAddr) String() string  { return string(a) }
-
 func TestUnwrapRejectsZeroMethodsWithoutPanic(t *testing.T) {
-	conn := newMockConn([]byte{0x05, 0x00})
+	conn := conntest.NewMockConn([]byte{0x05, 0x00})
 	if _, err := New().Unwrap(conn); err == nil {
 		t.Fatal("expected error for zero auth methods")
 	}
@@ -48,7 +26,7 @@ func TestUnwrapAcceptsNoAuthWhenNotFirstMethod(t *testing.T) {
 	req = append(req, []byte("example.com")...)
 	req = append(req, 0x01, 0xbb)
 
-	addr, err := New().Unwrap(newMockConn(req))
+	addr, err := New().Unwrap(conntest.NewMockConn(req))
 	if err != nil {
 		t.Fatalf("unwrap failed: %v", err)
 	}
@@ -107,7 +85,7 @@ func TestWrapRejectsConnectFailure(t *testing.T) {
 		}
 
 		resp := bytes.NewBuffer(nil)
-		_ = binary.Write(resp, binary.BigEndian, reqHead{VER: 5, CMD: 5, RSV: 0, ATYP: 1})
+		_ = binary.Write(resp, binary.BigEndian, replyHead{VER: 5, REP: 5, RSV: 0, ATYP: 1})
 		_, _ = server.Write(resp.Bytes())
 	}()
 
@@ -118,7 +96,7 @@ func TestWrapRejectsConnectFailure(t *testing.T) {
 }
 
 func TestWrapRejectsTooLongHost(t *testing.T) {
-	if err := New().Wrap(newMockConn(nil), string(bytes.Repeat([]byte{'a'}, 256)), 443); err == nil {
+	if err := New().Wrap(conntest.NewMockConn(nil), string(bytes.Repeat([]byte{'a'}, 256)), 443); err == nil {
 		t.Fatal("expected error for too long host")
 	}
 }
