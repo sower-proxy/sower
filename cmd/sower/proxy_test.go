@@ -136,6 +136,60 @@ func TestPeekTLSClientHelloServerName(t *testing.T) {
 	}
 }
 
+func TestHandleHTTPConnUsesProxyOnlyEvenWhenBlocked(t *testing.T) {
+	t.Parallel()
+
+	downstreamServer, downstreamClient := net.Pipe()
+	defer downstreamClient.Close()
+
+	upstreamClient, upstreamServer := net.Pipe()
+	defer upstreamServer.Close()
+
+	request := []byte("GET / HTTP/1.1\r\nHost: example.com\r\n\r\n")
+	var (
+		gotHost string
+		gotPort uint16
+	)
+	r := &router.Router{
+		BlockRule:  suffixtree.NewNodeFromRules("example.com"),
+		DirectRule: suffixtree.NewNodeFromRules(),
+		ProxyRule:  suffixtree.NewNodeFromRules(),
+		ProxyDial: func(network, host string, port uint16) (net.Conn, error) {
+			gotHost = host
+			gotPort = port
+			return upstreamClient, nil
+		},
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		handleHTTPConn(downstreamServer, r)
+	}()
+
+	downstreamClient.SetWriteDeadline(time.Now().Add(2 * time.Second))
+	if _, err := downstreamClient.Write(request); err != nil {
+		t.Fatalf("write downstream request: %v", err)
+	}
+
+	gotRequest := make([]byte, len(request))
+	upstreamServer.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if _, err := io.ReadFull(upstreamServer, gotRequest); err != nil {
+		t.Fatalf("read upstream request: %v", err)
+	}
+	if string(gotRequest) != string(request) {
+		t.Fatalf("request was not relayed intact: %q", gotRequest)
+	}
+	if gotHost != "example.com" || gotPort != 80 {
+		t.Fatalf("unexpected proxy target: %s:%d", gotHost, gotPort)
+	}
+
+	_ = downstreamClient.Close()
+	_ = upstreamServer.Close()
+	waitForHandler(t, &wg)
+}
+
 func TestHandleHTTPSConnRelaysClientHelloToUpstream(t *testing.T) {
 	t.Parallel()
 
@@ -153,7 +207,7 @@ func TestHandleHTTPSConnRelaysClientHelloToUpstream(t *testing.T) {
 		gotPort uint16
 	)
 	r := &router.Router{
-		BlockRule:  suffixtree.NewNodeFromRules(),
+		BlockRule:  suffixtree.NewNodeFromRules("github.com"),
 		DirectRule: suffixtree.NewNodeFromRules(),
 		ProxyRule:  suffixtree.NewNodeFromRules(),
 		ProxyDial: func(network, host string, port uint16) (net.Conn, error) {
@@ -184,8 +238,13 @@ func TestHandleHTTPSConnRelaysClientHelloToUpstream(t *testing.T) {
 	if string(gotHello) != string(hello) {
 		t.Fatal("client hello was not relayed intact")
 	}
-	if err := <-writeErrCh; err != nil {
-		t.Fatalf("write downstream client hello: %v", err)
+	select {
+	case err := <-writeErrCh:
+		if err != nil {
+			t.Fatalf("write downstream client hello: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("write downstream client hello timed out")
 	}
 
 	readErrCh := make(chan error, 1)
@@ -199,8 +258,13 @@ func TestHandleHTTPSConnRelaysClientHelloToUpstream(t *testing.T) {
 	if _, err := upstreamServer.Write(response); err != nil {
 		t.Fatalf("write upstream response: %v", err)
 	}
-	if err := <-readErrCh; err != nil {
-		t.Fatalf("read downstream response: %v", err)
+	select {
+	case err := <-readErrCh:
+		if err != nil {
+			t.Fatalf("read downstream response: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("read downstream response timed out")
 	}
 	if string(gotResp) != string(response) {
 		t.Fatalf("unexpected downstream response: %q", gotResp)
@@ -211,7 +275,7 @@ func TestHandleHTTPSConnRelaysClientHelloToUpstream(t *testing.T) {
 
 	_ = downstreamClient.Close()
 	_ = upstreamServer.Close()
-	wg.Wait()
+	waitForHandler(t, &wg)
 }
 
 func TestHandleHTTPSConnRelaysClientHelloAfterReadingSNI(t *testing.T) {
@@ -273,6 +337,22 @@ func TestHandleHTTPSConnRelaysClientHelloAfterReadingSNI(t *testing.T) {
 	case <-handshakeDone:
 	case <-time.After(2 * time.Second):
 		t.Fatal("tls client handshake did not return after connections closed")
+	}
+}
+
+func waitForHandler(t *testing.T, wg *sync.WaitGroup) {
+	t.Helper()
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler did not exit")
 	}
 }
 

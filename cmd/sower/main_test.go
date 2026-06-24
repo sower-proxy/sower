@@ -40,7 +40,10 @@ func TestNewRouterPreservesEmptyUpstreamForDiscovery(t *testing.T) {
 	cfg.DNS.Upstream = ""
 	cfg.DNS.Fallback = "223.5.5.5"
 
-	r := newRouter(cfg, nil)
+	r, err := newRouter(cfg, nil)
+	if err != nil {
+		t.Fatalf("new router: %v", err)
+	}
 	dnsState := reflect.ValueOf(r).Elem().FieldByName("dns")
 	upstreamDNS := dnsState.FieldByName("upstreamDNS").String()
 	fallbackDNS := dnsState.FieldByName("fallbackDNS").String()
@@ -50,6 +53,19 @@ func TestNewRouterPreservesEmptyUpstreamForDiscovery(t *testing.T) {
 	}
 	if fallbackDNS != "223.5.5.5" {
 		t.Fatalf("unexpected fallback DNS: %q", fallbackDNS)
+	}
+}
+
+func TestNewRouterRejectsInvalidCountryRule(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.SowerConfig{}
+	cfg.DNS.Serve = "127.0.0.1"
+	cfg.DNS.Fallback = "223.5.5.5"
+	cfg.Router.Country.Rules = []string{"invalid-cidr"}
+
+	if _, err := newRouter(cfg, nil); err == nil {
+		t.Fatal("expected invalid country rule to fail")
 	}
 }
 

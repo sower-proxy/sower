@@ -1,12 +1,9 @@
 package router
 
 import (
-	"bytes"
+	"context"
 	"errors"
-	"io"
-	"log/slog"
 	"net"
-	"net/http"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -17,16 +14,19 @@ import (
 	"github.com/sower-proxy/sower/pkg/suffixtree"
 )
 
-type roundTripFunc func(*http.Request) (*http.Response, error)
-
-func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
-	return fn(req)
+func newTestRouter(t *testing.T, serveIPs []string, upstreamDNS, fallbackDNS, mmdbFile string, proxyDial ProxyDialFn) *Router {
+	t.Helper()
+	r, err := NewRouter(serveIPs, upstreamDNS, fallbackDNS, mmdbFile, proxyDial)
+	if err != nil {
+		t.Fatalf("new router: %v", err)
+	}
+	return r
 }
 
 func TestNewRouterInitializesRules(t *testing.T) {
 	t.Parallel()
 
-	r := NewRouter(nil, "", "223.5.5.5", "", nil)
+	r := newTestRouter(t, nil, "", "223.5.5.5", "", nil)
 	if r.BlockRule == nil || r.DirectRule == nil || r.ProxyRule == nil {
 		t.Fatal("expected router rules to be initialized")
 	}
@@ -35,7 +35,7 @@ func TestNewRouterInitializesRules(t *testing.T) {
 func TestDNSProxyReplyMatchesQuestionType(t *testing.T) {
 	t.Parallel()
 
-	r := NewRouter([]string{"127.0.0.1", "::1"}, "", "223.5.5.5", "", nil)
+	r := newTestRouter(t, []string{"127.0.0.1", "::1"}, "", "223.5.5.5", "", nil)
 
 	reqA := new(dns.Msg)
 	reqA.SetQuestion("example.com.", dns.TypeA)
@@ -67,7 +67,7 @@ func TestDNSProxyReplyMatchesQuestionType(t *testing.T) {
 func TestDNSProxyReplyPrefersRequestLocalAddr(t *testing.T) {
 	t.Parallel()
 
-	r := NewRouter([]string{"127.0.0.1", "127.0.0.2"}, "", "223.5.5.5", "", nil)
+	r := newTestRouter(t, []string{"127.0.0.1", "127.0.0.2"}, "", "223.5.5.5", "", nil)
 	req := new(dns.Msg)
 	req.SetQuestion("example.com.", dns.TypeA)
 
@@ -88,7 +88,7 @@ func TestDNSProxyReplyPrefersRequestLocalAddr(t *testing.T) {
 func TestDNSProxyReplyIgnoresUnspecifiedLocalAddr(t *testing.T) {
 	t.Parallel()
 
-	r := NewRouter([]string{"127.0.0.2", "0.0.0.0"}, "", "223.5.5.5", "", nil)
+	r := newTestRouter(t, []string{"127.0.0.2", "0.0.0.0"}, "", "223.5.5.5", "", nil)
 	req := new(dns.Msg)
 	req.SetQuestion("example.com.", dns.TypeA)
 
@@ -109,7 +109,7 @@ func TestDNSProxyReplyIgnoresUnspecifiedLocalAddr(t *testing.T) {
 func TestDNSProxyReplyFallsBackWhenLocalAddrMissing(t *testing.T) {
 	t.Parallel()
 
-	r := NewRouter([]string{"127.0.0.2"}, "", "223.5.5.5", "", nil)
+	r := newTestRouter(t, []string{"127.0.0.2"}, "", "223.5.5.5", "", nil)
 	req := new(dns.Msg)
 	req.SetQuestion("example.com.", dns.TypeA)
 
@@ -127,10 +127,75 @@ func TestDNSProxyReplyFallsBackWhenLocalAddrMissing(t *testing.T) {
 	}
 }
 
+func TestServeDNSForUnknownDomainForwardsUpstream(t *testing.T) {
+	t.Parallel()
+
+	var upstreamQueries atomic.Int32
+	upstreamAddr := startUDPTestDNSServer(t, dns.HandlerFunc(func(w dns.ResponseWriter, req *dns.Msg) {
+		upstreamQueries.Add(1)
+		resp := new(dns.Msg)
+		resp.SetReply(req)
+		resp.Answer = []dns.RR{&dns.A{
+			Hdr: dns.RR_Header{Name: req.Question[0].Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 20},
+			A:   net.ParseIP("198.51.100.10"),
+		}}
+		_ = w.WriteMsg(resp)
+	}))
+
+	r := newTestRouter(t, []string{"127.0.0.2"}, "", "", "", nil)
+	r.dns.upstreamAddrs = []string{upstreamAddr}
+	r.dns.upstreamIndex = 0
+
+	req := new(dns.Msg)
+	req.SetQuestion("unknown.example.", dns.TypeA)
+	writer := &mockDNSWriter{localAddr: &net.UDPAddr{IP: net.ParseIP("127.0.0.2"), Port: 53}}
+
+	r.ServeDNS(writer, req)
+
+	if writer.msg == nil {
+		t.Fatal("expected response message")
+	}
+	if upstreamQueries.Load() != 1 {
+		t.Fatalf("expected unknown DNS name to be forwarded once, got %d", upstreamQueries.Load())
+	}
+	if len(writer.msg.Answer) != 1 {
+		t.Fatalf("expected one upstream answer, got rcode=%d answers=%d", writer.msg.Rcode, len(writer.msg.Answer))
+	}
+	answer, ok := writer.msg.Answer[0].(*dns.A)
+	if !ok {
+		t.Fatalf("expected upstream A answer, got %T", writer.msg.Answer[0])
+	}
+	if !answer.A.Equal(net.ParseIP("198.51.100.10")) {
+		t.Fatalf("unexpected upstream answer: %s", answer.A)
+	}
+}
+
+func TestDialSmartFallsBackToProxyForUnknownTCP(t *testing.T) {
+	t.Parallel()
+
+	var gotNetwork, gotHost string
+	var gotPort uint16
+	proxyErr := errors.New("proxy called")
+	r := newTestRouter(t, nil, "", "223.5.5.5", "", func(network, host string, port uint16) (net.Conn, error) {
+		gotNetwork = network
+		gotHost = host
+		gotPort = port
+		return nil, proxyErr
+	})
+
+	_, err := r.DialSmart("tcp", "203.0.113.10", 12345)
+	if !errors.Is(err, proxyErr) {
+		t.Fatalf("expected proxy fallback error, got %v", err)
+	}
+	if gotNetwork != "tcp" || gotHost != "203.0.113.10" || gotPort != 12345 {
+		t.Fatalf("unexpected proxy target: %s %s:%d", gotNetwork, gotHost, gotPort)
+	}
+}
+
 func TestExchangeSkipsServeIPInUpstreamList(t *testing.T) {
 	t.Parallel()
 
-	r := NewRouter([]string{"127.0.0.1"}, "127.0.0.1", "127.0.0.2", "", nil)
+	r := newTestRouter(t, []string{"127.0.0.1"}, "127.0.0.1", "127.0.0.2", "", nil)
 	addrs, err := r.buildUpstreamAddrs()
 	if err != nil {
 		t.Fatalf("buildUpstreamAddrs failed: %v", err)
@@ -147,7 +212,7 @@ func TestExchangeSkipsServeIPInUpstreamList(t *testing.T) {
 func TestBuildUpstreamAddrsPrefersConfiguredDNSBeforeFallback(t *testing.T) {
 	t.Parallel()
 
-	r := NewRouter([]string{"127.0.0.1"}, "1.1.1.1", "9.9.9.9", "", nil)
+	r := newTestRouter(t, []string{"127.0.0.1"}, "1.1.1.1", "9.9.9.9", "", nil)
 	addrs, err := r.buildUpstreamAddrs()
 	if err != nil {
 		t.Fatalf("buildUpstreamAddrs failed: %v", err)
@@ -177,7 +242,7 @@ func TestExchangeFallsBackOnRetryableDNSResponse(t *testing.T) {
 		_ = w.WriteMsg(resp)
 	}))
 
-	r := NewRouter(nil, "", "", "", nil)
+	r := newTestRouter(t, nil, "", "", "", nil)
 	r.dns.upstreamAddrs = []string{primaryAddr, fallbackAddr}
 	r.dns.upstreamIndex = 0
 
@@ -215,7 +280,7 @@ func TestExchangeDoesNotFallbackOnTerminalDNSResponse(t *testing.T) {
 		_ = w.WriteMsg(resp)
 	}))
 
-	r := NewRouter(nil, "", "", "", nil)
+	r := newTestRouter(t, nil, "", "", "", nil)
 	r.dns.upstreamAddrs = []string{primaryAddr, fallbackAddr}
 	r.dns.upstreamIndex = 0
 
@@ -245,7 +310,7 @@ func TestServeDNSReturnsRetryableResponseWhenUpstreamsExhausted(t *testing.T) {
 		_ = w.WriteMsg(resp)
 	}))
 
-	r := NewRouter(nil, "", "", "", nil)
+	r := newTestRouter(t, nil, "", "", "", nil)
 	r.dns.upstreamAddrs = []string{upstreamAddr}
 	r.dns.upstreamIndex = 0
 
@@ -285,7 +350,7 @@ func TestExchangeDoesNotPromoteRetryableProbeResponse(t *testing.T) {
 		_ = w.WriteMsg(resp)
 	}))
 
-	r := NewRouter(nil, "", "", "", nil)
+	r := newTestRouter(t, nil, "", "", "", nil)
 	r.dns.upstreamAddrs = []string{primaryAddr, fallbackAddr}
 	r.dns.upstreamIndex = 1
 	r.dns.retryAt = time.Now().Add(-time.Second)
@@ -306,63 +371,52 @@ func TestExchangeDoesNotPromoteRetryableProbeResponse(t *testing.T) {
 	}
 }
 
-func TestAddCountryCIDRsSkipsInvalidEntries(t *testing.T) {
+func TestAddCountryCIDRsRejectsInvalidEntries(t *testing.T) {
 	t.Parallel()
 
-	r := NewRouter(nil, "", "223.5.5.5", "", nil)
-	r.AddCountryCIDRs("invalid-cidr")
+	r := newTestRouter(t, nil, "", "223.5.5.5", "", nil)
+	if err := r.AddCountryCIDRs("invalid-cidr"); err == nil {
+		t.Fatal("expected invalid CIDR to fail")
+	}
 
 	if len(r.country.cidrs) != 0 {
-		t.Fatalf("expected invalid CIDR to be skipped, got %d entries", len(r.country.cidrs))
+		t.Fatalf("expected invalid CIDR to be rejected, got %d entries", len(r.country.cidrs))
 	}
-	if r.localSite("127.0.0.1") {
+	if r.localSite(context.Background(), "127.0.0.1") {
 		t.Fatal("unexpected localSite match without valid CIDRs or MMDB")
 	}
 }
 
 func TestNewRouterSkipsEmptyCountryMMDB(t *testing.T) {
-	var logs bytes.Buffer
-	previous := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
-	t.Cleanup(func() {
-		slog.SetDefault(previous)
-	})
+	t.Parallel()
 
 	for _, mmdbFile := range []string{"", "   "} {
-		r := NewRouter(nil, "", "223.5.5.5", mmdbFile, nil)
+		r := newTestRouter(t, nil, "", "223.5.5.5", mmdbFile, nil)
 		if r.country.Reader != nil {
 			t.Fatalf("expected empty MMDB %q to disable GeoIP lookup", mmdbFile)
 		}
 	}
+}
 
-	if strings.Contains(logs.String(), "open geoip2 db") {
-		t.Fatalf("empty MMDB should not emit open warning, logs: %s", logs.String())
+func TestNewRouterRejectsInvalidCountryMMDB(t *testing.T) {
+	t.Parallel()
+
+	if _, err := NewRouter(nil, "", "223.5.5.5", "/path/to/missing.mmdb", nil); err == nil {
+		t.Fatal("expected missing MMDB to fail")
 	}
 }
 
 func TestIsAccessChecksRequestedPortOnly(t *testing.T) {
 	t.Parallel()
 
-	origTransport := pingClient.Transport
-	origCache := accessCache
-	t.Cleanup(func() {
-		pingClient.Transport = origTransport
-		accessCache = origCache
-	})
-
-	pingClient.Transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		if req.URL.Scheme != "https" {
-			return nil, errors.New("scheme unavailable")
+	r := newTestRouter(t, nil, "", "223.5.5.5", "", nil)
+	r.accessCache = newAccessCache(accessCacheTTL, func(key string) (bool, error) {
+		scheme, _, err := accessProbeTarget(key)
+		if err != nil {
+			return false, err
 		}
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Body:       io.NopCloser(strings.NewReader("")),
-			Header:     make(http.Header),
-		}, nil
+		return scheme == "https", nil
 	})
-	accessCache = newAccessCache(accessCacheTTL)
-
-	r := NewRouter(nil, "", "223.5.5.5", "", nil)
 	if !r.isAccess("example.com", 443) {
 		t.Fatal("expected HTTPS probe to succeed")
 	}
@@ -398,7 +452,7 @@ func TestServeDNSForProxyRuleSuppressesNonAddressQuestion(t *testing.T) {
 		_ = server.Shutdown()
 	})
 
-	r := NewRouter([]string{"127.0.0.2"}, "", "223.5.5.5", "", nil)
+	r := newTestRouter(t, []string{"127.0.0.2"}, "", "223.5.5.5", "", nil)
 	r.BlockRule = suffixtree.NewNodeFromRules()
 	r.DirectRule = suffixtree.NewNodeFromRules()
 	r.ProxyRule = suffixtree.NewNodeFromRules("example.com.")
@@ -448,7 +502,7 @@ func TestServeDNSForProxyRuleSuppressesHTTPSQuestion(t *testing.T) {
 		_ = server.Shutdown()
 	})
 
-	r := NewRouter([]string{"127.0.0.2"}, "", "223.5.5.5", "", nil)
+	r := newTestRouter(t, []string{"127.0.0.2"}, "", "223.5.5.5", "", nil)
 	r.BlockRule = suffixtree.NewNodeFromRules()
 	r.DirectRule = suffixtree.NewNodeFromRules()
 	r.ProxyRule = suffixtree.NewNodeFromRules("example.com.")
@@ -505,7 +559,7 @@ func TestServeDNSForProxyRuleSuppressesSRVQuestion(t *testing.T) {
 		_ = server.Shutdown()
 	})
 
-	r := NewRouter([]string{"127.0.0.2"}, "", "223.5.5.5", "", nil)
+	r := newTestRouter(t, []string{"127.0.0.2"}, "", "223.5.5.5", "", nil)
 	r.BlockRule = suffixtree.NewNodeFromRules()
 	r.DirectRule = suffixtree.NewNodeFromRules()
 	r.ProxyRule = suffixtree.NewNodeFromRules("example.com.")
@@ -559,7 +613,7 @@ func TestServeDNSDoesNotStripServicePrefixForNonServiceQuestion(t *testing.T) {
 		_ = server.Shutdown()
 	})
 
-	r := NewRouter([]string{"127.0.0.2"}, "", "223.5.5.5", "", nil)
+	r := newTestRouter(t, []string{"127.0.0.2"}, "", "223.5.5.5", "", nil)
 	r.BlockRule = suffixtree.NewNodeFromRules()
 	r.DirectRule = suffixtree.NewNodeFromRules()
 	r.ProxyRule = suffixtree.NewNodeFromRules("example.com.")
@@ -589,7 +643,7 @@ func TestServeDNSDoesNotStripServicePrefixForNonServiceQuestion(t *testing.T) {
 func TestServeDNSForProxyRuleReturnsNoDataWhenAddressFamilyUnavailable(t *testing.T) {
 	t.Parallel()
 
-	r := NewRouter([]string{"127.0.0.1"}, "", "223.5.5.5", "", nil)
+	r := newTestRouter(t, []string{"127.0.0.1"}, "", "223.5.5.5", "", nil)
 	r.BlockRule = suffixtree.NewNodeFromRules()
 	r.DirectRule = suffixtree.NewNodeFromRules()
 	r.ProxyRule = suffixtree.NewNodeFromRules("example.com.")
@@ -614,8 +668,8 @@ func TestServeDNSForProxyRuleReturnsNoDataWhenAddressFamilyUnavailable(t *testin
 func TestBuildUpstreamAddrsIsPerRouter(t *testing.T) {
 	t.Parallel()
 
-	r1 := NewRouter([]string{"127.0.0.1"}, "1.1.1.1", "9.9.9.9", "", nil)
-	r2 := NewRouter([]string{"127.0.0.2"}, "8.8.8.8", "4.4.4.4", "", nil)
+	r1 := newTestRouter(t, []string{"127.0.0.1"}, "1.1.1.1", "9.9.9.9", "", nil)
+	r2 := newTestRouter(t, []string{"127.0.0.2"}, "8.8.8.8", "4.4.4.4", "", nil)
 
 	addrs1, err := r1.buildUpstreamAddrs()
 	if err != nil {
@@ -634,7 +688,7 @@ func TestBuildUpstreamAddrsIsPerRouter(t *testing.T) {
 func TestCurrentUpstreamStateSchedulesPreferredProbeAfterRetryInterval(t *testing.T) {
 	t.Parallel()
 
-	r := NewRouter([]string{"127.0.0.1"}, "1.1.1.1", "9.9.9.9", "", nil)
+	r := newTestRouter(t, []string{"127.0.0.1"}, "1.1.1.1", "9.9.9.9", "", nil)
 	r.dns.upstreamAddrs = []string{"1.1.1.1:53", "9.9.9.9:53"}
 	r.dns.upstreamIndex = 1
 	r.dns.retryAt = time.Now().Add(-time.Second)
@@ -655,7 +709,7 @@ func TestCurrentUpstreamStateAllowsOnlyOnePreferredProbe(t *testing.T) {
 	t.Parallel()
 
 	now := time.Now()
-	r := NewRouter([]string{"127.0.0.1"}, "1.1.1.1", "9.9.9.9", "", nil)
+	r := newTestRouter(t, []string{"127.0.0.1"}, "1.1.1.1", "9.9.9.9", "", nil)
 	r.dns.upstreamAddrs = []string{"1.1.1.1:53", "9.9.9.9:53"}
 	r.dns.upstreamIndex = 1
 	r.dns.retryAt = now.Add(-time.Second)
@@ -680,7 +734,7 @@ func TestCurrentUpstreamStateAllowsOnlyOnePreferredProbe(t *testing.T) {
 func TestDegradeUpstreamMovesTowardFallback(t *testing.T) {
 	t.Parallel()
 
-	r := NewRouter([]string{"127.0.0.1"}, "1.1.1.1", "9.9.9.9", "", nil)
+	r := newTestRouter(t, []string{"127.0.0.1"}, "1.1.1.1", "9.9.9.9", "", nil)
 	r.dns.upstreamAddrs = []string{"1.1.1.1:53", "9.9.9.9:53"}
 	r.dns.upstreamIndex = 0
 
@@ -699,7 +753,7 @@ func TestDegradeUpstreamMovesTowardFallback(t *testing.T) {
 func TestPromoteUpstreamRestoresPreferredAndClearsRetry(t *testing.T) {
 	t.Parallel()
 
-	r := NewRouter([]string{"127.0.0.1"}, "1.1.1.1", "9.9.9.9", "", nil)
+	r := newTestRouter(t, []string{"127.0.0.1"}, "1.1.1.1", "9.9.9.9", "", nil)
 	r.dns.upstreamAddrs = []string{"1.1.1.1:53", "9.9.9.9:53"}
 	r.dns.upstreamIndex = 1
 	r.dns.retryAt = time.Now().Add(time.Minute)
@@ -718,7 +772,7 @@ func TestCurrentUpstreamStateRefreshesDHCPUpstreams(t *testing.T) {
 	t.Parallel()
 
 	var calls atomic.Int32
-	r := NewRouter([]string{"127.0.0.1"}, "", "9.9.9.9", "", nil)
+	r := newTestRouter(t, []string{"127.0.0.1"}, "", "9.9.9.9", "", nil)
 	r.dns.getDNSServer = func() ([]string, error) {
 		if calls.Add(1) == 1 {
 			return []string{"1.1.1.1"}, nil
@@ -754,7 +808,7 @@ func TestCurrentUpstreamStateBacksOffInitialDHCPFailure(t *testing.T) {
 	t.Parallel()
 
 	var calls atomic.Int32
-	r := NewRouter([]string{"127.0.0.1"}, "", "", "", nil)
+	r := newTestRouter(t, []string{"127.0.0.1"}, "", "", "", nil)
 	r.dns.getDNSServer = func() ([]string, error) {
 		calls.Add(1)
 		return nil, errors.New("dhcp unavailable")
@@ -783,7 +837,7 @@ func TestCurrentUpstreamStateRefreshDoesNotBlockConcurrentReaders(t *testing.T) 
 	releaseRefresh := make(chan struct{})
 	var calls atomic.Int32
 
-	r := NewRouter([]string{"127.0.0.1"}, "", "9.9.9.9", "", nil)
+	r := newTestRouter(t, []string{"127.0.0.1"}, "", "9.9.9.9", "", nil)
 	r.dns.upstreamAddrs = []string{"1.1.1.1:53", "9.9.9.9:53"}
 	r.dns.upstreamIndex = 0
 	r.dns.refreshAt = time.Now().Add(-time.Second)
@@ -837,7 +891,7 @@ func TestCurrentUpstreamStateUsesFallbackWhileInitialRefreshInFlight(t *testing.
 	startRefresh := make(chan struct{})
 	releaseRefresh := make(chan struct{})
 
-	r := NewRouter([]string{"127.0.0.1"}, "", "9.9.9.9", "", nil)
+	r := newTestRouter(t, []string{"127.0.0.1"}, "", "9.9.9.9", "", nil)
 	r.dns.getDNSServer = func() ([]string, error) {
 		close(startRefresh)
 		<-releaseRefresh
@@ -884,7 +938,7 @@ func TestCurrentUpstreamStatePreservesProbeWhenRefreshIsDue(t *testing.T) {
 	t.Parallel()
 
 	now := time.Now()
-	r := NewRouter([]string{"127.0.0.1"}, "", "9.9.9.9", "", nil)
+	r := newTestRouter(t, []string{"127.0.0.1"}, "", "9.9.9.9", "", nil)
 	r.dns.upstreamAddrs = []string{"1.1.1.1:53", "9.9.9.9:53"}
 	r.dns.upstreamIndex = 1
 	r.dns.retryAt = now.Add(-time.Second)
@@ -917,7 +971,7 @@ func TestCurrentUpstreamStatePreservesProbeWhenRefreshIsDue(t *testing.T) {
 func TestServeDNSReturnsNXDomainForBlockedDomain(t *testing.T) {
 	t.Parallel()
 
-	r := NewRouter([]string{"127.0.0.1"}, "", "223.5.5.5", "", nil)
+	r := newTestRouter(t, []string{"127.0.0.1"}, "", "223.5.5.5", "", nil)
 	r.BlockRule = suffixtree.NewNodeFromRules("example.com.")
 	r.DirectRule = suffixtree.NewNodeFromRules()
 	r.ProxyRule = suffixtree.NewNodeFromRules()
@@ -939,7 +993,7 @@ func TestServeDNSReturnsNXDomainForBlockedDomain(t *testing.T) {
 func TestServeDNSRejectsUnsupportedQuestionClass(t *testing.T) {
 	t.Parallel()
 
-	r := NewRouter([]string{"127.0.0.1"}, "", "223.5.5.5", "", nil)
+	r := newTestRouter(t, []string{"127.0.0.1"}, "", "223.5.5.5", "", nil)
 	req := new(dns.Msg)
 	req.SetQuestion("example.com.", dns.TypeA)
 	req.Question[0].Qclass = dns.ClassCHAOS
@@ -958,7 +1012,7 @@ func TestServeDNSRejectsUnsupportedQuestionClass(t *testing.T) {
 func TestServeDNSRejectsMultipleQuestions(t *testing.T) {
 	t.Parallel()
 
-	r := NewRouter([]string{"127.0.0.1"}, "", "223.5.5.5", "", nil)
+	r := newTestRouter(t, []string{"127.0.0.1"}, "", "223.5.5.5", "", nil)
 	req := new(dns.Msg)
 	req.SetQuestion("example.com.", dns.TypeA)
 	req.Question = append(req.Question, dns.Question{Name: "example.org.", Qtype: dns.TypeA, Qclass: dns.ClassINET})
@@ -1014,7 +1068,7 @@ func TestExchangeWithRetryFallsBackToTCPOnTruncatedUDP(t *testing.T) {
 		_ = tcpServer.Shutdown()
 	})
 
-	r := NewRouter(nil, "", "223.5.5.5", "", nil)
+	r := newTestRouter(t, nil, "", "223.5.5.5", "", nil)
 	req := new(dns.Msg)
 	req.SetQuestion("example.com.", dns.TypeA)
 
