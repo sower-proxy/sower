@@ -1,9 +1,9 @@
 package router
 
 import (
+	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net"
 	"strconv"
 	"strings"
@@ -25,6 +25,8 @@ type (
 		ProxyRule  *suffixtree.Node
 		ProxyDial  ProxyDialFn
 
+		accessCache *accessProbeCache
+
 		dns struct {
 			upstreamDNS  string
 			fallbackDNS  string
@@ -42,6 +44,7 @@ type (
 		}
 
 		country struct {
+			sync.RWMutex
 			*geoip2.Reader
 			cidrs []*net.IPNet
 		}
@@ -50,12 +53,13 @@ type (
 
 var ErrBlocked = errors.New("route blocked")
 
-func NewRouter(serveIPs []string, upstreamDNS, fallbackDNS, mmdbFile string, proxyDial ProxyDialFn) *Router {
+func NewRouter(serveIPs []string, upstreamDNS, fallbackDNS, mmdbFile string, proxyDial ProxyDialFn) (*Router, error) {
 	r := Router{
-		BlockRule:  suffixtree.NewNodeFromRules(),
-		DirectRule: suffixtree.NewNodeFromRules(),
-		ProxyRule:  suffixtree.NewNodeFromRules(),
-		ProxyDial:  proxyDial,
+		BlockRule:   suffixtree.NewNodeFromRules(),
+		DirectRule:  suffixtree.NewNodeFromRules(),
+		ProxyRule:   suffixtree.NewNodeFromRules(),
+		ProxyDial:   proxyDial,
+		accessCache: newAccessCache(accessCacheTTL, httpPing),
 	}
 
 	r.dns.upstreamDNS = upstreamDNS
@@ -72,23 +76,41 @@ func NewRouter(serveIPs []string, upstreamDNS, fallbackDNS, mmdbFile string, pro
 		var err error
 		r.country.Reader, err = geoip2.Open(mmdbFile)
 		if err != nil {
-			slog.Warn("open geoip2 db", "error", err, "file", mmdbFile)
+			return nil, fmt.Errorf("open geoip2 db %q: %w", mmdbFile, err)
 		}
 	}
 
-	return &r
+	return &r, nil
 }
 
-func (r *Router) AddCountryCIDRs(cidrs ...string) {
+func (r *Router) Close() error {
+	r.country.Lock()
+	defer r.country.Unlock()
+
+	if r.country.Reader == nil {
+		return nil
+	}
+	err := r.country.Reader.Close()
+	r.country.Reader = nil
+	return err
+}
+
+func (r *Router) AddCountryCIDRs(cidrs ...string) error {
+	parsed := make([]*net.IPNet, 0, len(cidrs))
 	for _, cidr := range cidrs {
-		_, ipnet, err := net.ParseCIDR(cidr)
-		if err != nil {
-			slog.Error("failed to parse CIDR", "error", err, "cidr", cidr)
+		cidr = strings.TrimSpace(cidr)
+		if cidr == "" {
 			continue
 		}
-		r.country.cidrs = append(r.country.cidrs, ipnet)
+		_, ipnet, err := net.ParseCIDR(cidr)
+		if err != nil {
+			return fmt.Errorf("parse country CIDR %q: %w", cidr, err)
+		}
+		parsed = append(parsed, ipnet)
 	}
+	r.country.cidrs = append(r.country.cidrs, parsed...)
 	r.country.cidrs = suffixtree.GCSlice(r.country.cidrs)
+	return nil
 }
 
 func (r *Router) RouteHandle(conn net.Conn, domain string, port uint16) (err error) {
@@ -97,7 +119,7 @@ func (r *Router) RouteHandle(conn net.Conn, domain string, port uint16) (err err
 		deferlog.DebugWarn(err, "route handle", "domain", domain, "port", port, "took", time.Since(start))
 	}()
 
-	rc, err := r.Dial("tcp", domain, port)
+	rc, err := r.DialSmart("tcp", domain, port)
 	if err != nil {
 		return err
 	}
@@ -110,6 +132,11 @@ func (r *Router) RouteHandle(conn net.Conn, domain string, port uint16) (err err
 }
 
 func (r *Router) Dial(network, domain string, port uint16) (net.Conn, error) {
+	return r.DialSmart(network, domain, port)
+}
+
+func (r *Router) DialSmart(network, domain string, port uint16) (net.Conn, error) {
+	ctx := context.Background()
 	addr := net.JoinHostPort(domain, strconv.FormatUint(uint64(port), 10))
 
 	// 1. rule_based( block > direct > proxy )
@@ -119,17 +146,20 @@ func (r *Router) Dial(network, domain string, port uint16) (net.Conn, error) {
 	case r.BlockRule.Match(domain):
 		return nil, ErrBlocked
 	case r.DirectRule.Match(domain):
-		return r.directDial(network, addr)
+		return r.directDial(ctx, network, addr)
 	case r.ProxyRule.Match(domain):
-		return r.proxyDial(network, domain, port)
-	case r.localSite(domain), r.isAccess(domain, port):
-		return r.directDial(network, addr)
+		return r.DialProxyOnly(network, domain, port)
+	case r.localSite(ctx, domain), r.isAccess(domain, port):
+		return r.directDial(ctx, network, addr)
 	default:
-		return r.proxyDial(network, domain, port)
+		return r.DialProxyOnly(network, domain, port)
 	}
 }
 
-func (r *Router) proxyDial(network, domain string, port uint16) (net.Conn, error) {
+func (r *Router) DialProxyOnly(network, domain string, port uint16) (net.Conn, error) {
+	if r.ProxyDial == nil {
+		return nil, fmt.Errorf("proxy dialer unavailable")
+	}
 	start := time.Now()
 	rc, err := r.ProxyDial(network, domain, port)
 	if err != nil {
@@ -138,9 +168,10 @@ func (r *Router) proxyDial(network, domain string, port uint16) (net.Conn, error
 	return rc, nil
 }
 
-func (r *Router) directDial(network, addr string) (net.Conn, error) {
+func (r *Router) directDial(ctx context.Context, network, addr string) (net.Conn, error) {
 	start := time.Now()
-	conn, err := net.DialTimeout(network, addr, 5*time.Second)
+	dialer := net.Dialer{Timeout: 5 * time.Second}
+	conn, err := dialer.DialContext(ctx, network, addr)
 	if err != nil {
 		return nil, fmt.Errorf("direct dial %s, spend (%s): %w", addr, time.Since(start), err)
 	}

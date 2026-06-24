@@ -15,25 +15,30 @@ const (
 	accessCacheMaxEntries = 1000
 )
 
+type accessProbeFunc func(key string) (bool, error)
+
 type accessProbeCache struct {
 	cache *otter.Cache[string, bool]
+	probe accessProbeFunc
 }
 
-var accessCache = newAccessCache(accessCacheTTL)
-
-func newAccessCache(ttl time.Duration) *accessProbeCache {
+func newAccessCache(ttl time.Duration, probe accessProbeFunc) *accessProbeCache {
 	return &accessProbeCache{
 		cache: otter.Must(&otter.Options[string, bool]{
 			MaximumSize:      accessCacheMaxEntries,
 			ExpiryCalculator: otter.ExpiryWriting[string, bool](ttl),
 		}),
+		probe: probe,
 	}
 }
 
 func (c *accessProbeCache) Get(key string) (bool, error) {
+	if c == nil || c.probe == nil {
+		return false, nil
+	}
 	return c.cache.Get(context.Background(), key, otter.LoaderFunc[string, bool](
 		func(_ context.Context, key string) (bool, error) {
-			return httpPing(key)
+			return c.probe(key)
 		},
 	))
 }
@@ -46,12 +51,15 @@ func (r *Router) isAccess(domain string, port uint16) bool {
 		return false
 	}
 
-	ok, _ := accessCache.Get(accessCacheKey(domain, port))
+	ok, _ := r.accessCache.Get(accessCacheKey(domain, port))
 	return ok
 }
 
 var pingClient = http.Client{
 	Timeout: 2 * time.Second,
+	CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	},
 }
 
 func httpPing(key string) (bool, error) {
