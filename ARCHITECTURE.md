@@ -5,6 +5,7 @@
 `sower` is the client-side transparent proxy entrypoint. It exposes local DNS, HTTP, HTTPS, and SOCKS5 listeners, applies rule-based routing, and forwards proxied traffic to an upstream transport.
 
 `sowerd` is the server-side TLS ingress. It exposes `80/tcp` and `443/tcp`, terminates TLS, detects the upstream transport protocol, and relays traffic to the requested target or configured fake site.
+For non-transport fallback traffic, it can route by TLS SNI to per-domain upstream site URLs, then falls back to the configured `fake_site`; directory-backed `fake_site` is served by the loopback local fileserver.
 
 ## Layer Responsibilities
 
@@ -75,11 +76,13 @@
 5. Handle ACME HTTP-01 challenge on `:80`.
 6. Redirect normal HTTP traffic to HTTPS.
 7. If `fakeSite` is a local directory, serve it only for loopback fallback traffic through `127.0.0.1:80`.
-8. Start `:443` TLS listener.
+8. Start `:443` TLS listener with HTTP/1.1 ALPN only.
 9. For each accepted connection, apply a short read deadline for protocol probing.
 10. Try `sower` transport first, then `trojan`.
-11. Relay matched traffic to the decoded target.
-12. If no transport matches, relay to `fakeSite`.
+11. Relay matched transport traffic to the decoded target.
+12. If no transport matches, read the TLS SNI from the terminated TLS connection.
+13. If the SNI exactly matches a configured `site_routes` domain, reverse-proxy the decrypted HTTP/1.1 request to that route's `http://` or `https://` upstream URL.
+14. If the SNI has no route, relay to `fakeSite`.
 
 ## sowerd Install Flow
 
@@ -104,6 +107,12 @@
 - Country routing treats `router.country.mmdb` as optional; an empty value disables GeoIP lookup and keeps CIDR-based matching active without startup warnings.
 - Fake site directory mode is loopback-only on port `80` to avoid exposing local static assets directly to the public internet.
 - `sowerd` prefers the user cache directory for ACME state, but falls back to `/var/cache/sower` so systemd services can start without `HOME`/`XDG_CACHE_HOME` or a config file.
+- `sowerd` fallback site routing is based only on exact TLS SNI matches; wildcard domains are not supported.
+- `sowerd` site routes use HTTP reverse proxying to support full `http://` and `https://` upstream URLs. The reverse proxy rewrites the outbound Host to the upstream host.
+- `sowerd` site routing rejects HTTP upgrade requests instead of hijacking the fallback connection; fallback sites are intended for normal HTTP/1.1 decoy traffic.
+- `sowerd` site routing applies bounded client header, upstream dial, TLS handshake, and upstream response-header timeouts.
+- `sowerd` advertises only HTTP/1.1 over TLS because fallback site routing and fake-site serving are HTTP/1.1 paths.
+- In autocert mode, `sowerd` can obtain certificates for multiple SNI names on demand. In custom certificate mode, the configured certificate must cover every routed domain through SANs.
 
 ## Operational Notes
 
@@ -112,13 +121,9 @@
 - `sowerd -i` also requires root because it writes system-level files for self-deployment.
 - ACME mode requires port `80` to be reachable from the public internet.
 - Remote rule download failures stop startup after bounded retries before local listeners are exposed.
+- `sowerd` custom certificate mode must use a certificate whose SANs cover all configured `site_routes` domains.
 
 ## Related Documents
 
-- [README.md](/home/wweir/Mine/sower/README.md)
-- [cmd/sower/main.go](/home/wweir/Mine/sower/cmd/sower/main.go)
-- [cmd/sower/proxy.go](/home/wweir/Mine/sower/cmd/sower/proxy.go)
-- [cmd/sowerd/main.go](/home/wweir/Mine/sower/cmd/sowerd/main.go)
-- [config/sower.go](/home/wweir/Mine/sower/config/sower.go)
-- [config/sowerd.go](/home/wweir/Mine/sower/config/sowerd.go)
-- [internal/install/service.go](/home/wweir/Mine/sower/internal/install/service.go)
+- [README.md](README.md)
+- [docs/README.md](docs/README.md) — documentation index

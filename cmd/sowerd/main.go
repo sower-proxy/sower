@@ -9,10 +9,13 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -31,9 +34,13 @@ import (
 )
 
 const (
-	httpShutdownTimeout = 5 * time.Second
-	probeTimeout        = 10 * time.Second
-	systemCacheDir      = "/var/cache/sower"
+	httpShutdownTimeout           = 5 * time.Second
+	probeTimeout                  = 10 * time.Second
+	reverseProxyReadHeaderTimeout = 10 * time.Second
+	reverseProxyIdleTimeout       = 30 * time.Second
+	upstreamDialTimeout           = 10 * time.Second
+	upstreamResponseTimeout       = 30 * time.Second
+	systemCacheDir                = "/var/cache/sower"
 )
 
 var (
@@ -121,6 +128,8 @@ func run(ctx context.Context, conf config.SowerdConfig) error {
 		return err
 	}
 
+	siteRouter := newSiteRouter(conf.SiteRoutes)
+
 	httpAddr := net.JoinHostPort(conf.ServeIP, "80")
 	httpServer := &http.Server{
 		Addr:    httpAddr,
@@ -146,7 +155,7 @@ func run(ctx context.Context, conf config.SowerdConfig) error {
 
 	httpsErrCh := make(chan error, 1)
 	go func() {
-		httpsErrCh <- serve443(ctx, ln, fakeSite, transportSower.New(conf.Password), trojan.New(conf.Password))
+		httpsErrCh <- serve443(ctx, ln, fakeSite, siteRouter, transportSower.New(conf.Password), trojan.New(conf.Password))
 		close(httpsErrCh)
 	}()
 
@@ -205,7 +214,7 @@ func buildTLSConfig(cacheDir string, cfg config.SowerdConfig) (*autocert.Manager
 	tlsConf := &tls.Config{
 		GetCertificate: certManager.GetCertificate,
 		MinVersion:     tls.VersionTLS12,
-		NextProtos:     []string{"http/1.1", "h2"},
+		NextProtos:     []string{"http/1.1"},
 	}
 
 	if cfg.Cert.Cert == "" {
@@ -246,7 +255,7 @@ func fakeSiteHandler(dirServer http.Handler) http.Handler {
 	})
 }
 
-func serve443(ctx context.Context, ln net.Listener, fakeSite string, sower *transportSower.Sower, trojan *trojan.Trojan) error {
+func serve443(ctx context.Context, ln net.Listener, fakeSite string, router siteRouter, sower *transportSower.Sower, trojan *trojan.Trojan) error {
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
@@ -263,11 +272,11 @@ func serve443(ctx context.Context, ln net.Listener, fakeSite string, sower *tran
 			return fmt.Errorf("accept tls connection: %w", err)
 		}
 
-		go handleConn(conn, fakeSite, sower, trojan)
+		go handleConn(conn, fakeSite, router, sower, trojan)
 	}
 }
 
-func handleConn(conn net.Conn, fakeSite string, sower *transportSower.Sower, trojan *trojan.Trojan) {
+func handleConn(conn net.Conn, fakeSite string, router siteRouter, sower *transportSower.Sower, trojan *trojan.Trojan) {
 	rereadConn := reread.New(conn)
 	defer rereadConn.Close()
 
@@ -300,14 +309,22 @@ func handleConn(conn net.Conn, fakeSite string, sower *transportSower.Sower, tro
 
 	rereadConn.Stop().Reread()
 	_ = rereadConn.SetReadDeadline(time.Time{})
+
+	// Fallback: route by SNI if configured, otherwise relay to fakeSite.
+	if upstream := router.lookup(sniFromConn(conn)); upstream != nil {
+		err = reverseProxyConn(rereadConn, upstream)
+		return
+	}
+
 	dur, err = relay.RelayTo(rereadConn, fakeSite)
 }
 
 func sanitizeConfig(cfg config.SowerdConfig) map[string]any {
 	return map[string]any{
-		"log_level": cfg.LogLevel.String(),
-		"serve_ip":  cfg.ServeIP,
-		"fake_site": cfg.FakeSite,
+		"log_level":   cfg.LogLevel.String(),
+		"serve_ip":    cfg.ServeIP,
+		"fake_site":   cfg.FakeSite,
+		"site_routes": len(cfg.SiteRoutes),
 		"cert": map[string]any{
 			"email":       cfg.Cert.Email,
 			"cert_config": cfg.Cert.Cert != "",
@@ -363,3 +380,133 @@ func shutdownHTTP(ctx context.Context, server *http.Server) error {
 	}
 	return nil
 }
+
+// siteRouter maps TLS SNI to an upstream URL for fallback traffic.
+type siteRouter struct {
+	routes map[string]*url.URL
+}
+
+func newSiteRouter(routes []config.SiteRoute) siteRouter {
+	m := make(map[string]*url.URL)
+	for _, r := range routes {
+		u, _ := url.Parse(r.Upstream) // validated in config.Validate
+		for _, d := range r.Domains {
+			m[strings.ToLower(d)] = u
+		}
+	}
+	return siteRouter{routes: m}
+}
+
+// lookup returns the upstream URL for the given SNI, or nil if no route matches.
+func (r siteRouter) lookup(sni string) *url.URL {
+	return r.routes[strings.ToLower(sni)]
+}
+
+// sniFromConn extracts the TLS SNI from a *tls.Conn.
+func sniFromConn(conn net.Conn) string {
+	tlsConn, ok := conn.(*tls.Conn)
+	if !ok {
+		return ""
+	}
+	return tlsConn.ConnectionState().ServerName
+}
+
+// reverseProxyConn serves the decrypted HTTP connection through a reverse proxy
+// to the given upstream URL.
+func reverseProxyConn(conn net.Conn, upstream *url.URL) error {
+	proxy := httputil.NewSingleHostReverseProxy(upstream)
+	baseDirector := proxy.Director
+	proxy.Director = func(req *http.Request) {
+		baseDirector(req)
+		req.Host = upstream.Host
+	}
+	transport := &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   upstreamDialTimeout,
+			KeepAlive: upstreamResponseTimeout,
+		}).DialContext,
+		TLSHandshakeTimeout:   upstreamDialTimeout,
+		ResponseHeaderTimeout: upstreamResponseTimeout,
+		IdleConnTimeout:       reverseProxyIdleTimeout,
+		ExpectContinueTimeout: time.Second,
+	}
+	defer transport.CloseIdleConnections()
+	proxy.Transport = transport
+	proxy.ErrorLog = slog.NewLogLogger(slog.Default().Handler(), slog.LevelWarn)
+
+	ln := newSingleConnListener(conn)
+	srv := &http.Server{
+		Handler:           rejectUpgrade(proxy),
+		ReadHeaderTimeout: reverseProxyReadHeaderTimeout,
+		IdleTimeout:       reverseProxyIdleTimeout,
+		ConnState: func(_ net.Conn, state http.ConnState) {
+			if state == http.StateClosed || state == http.StateHijacked {
+				_ = ln.Close()
+			}
+		},
+	}
+
+	if err := srv.Serve(ln); err != nil && !errors.Is(err, net.ErrClosed) && !errors.Is(err, http.ErrServerClosed) {
+		return fmt.Errorf("serve reverse proxy connection: %w", err)
+	}
+	return nil
+}
+
+func rejectUpgrade(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if isUpgradeRequest(r) {
+			http.Error(w, "upgrade requests are not supported by sowerd site routing", http.StatusBadRequest)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func isUpgradeRequest(r *http.Request) bool {
+	if r.Header.Get("Upgrade") != "" {
+		return true
+	}
+	for _, value := range r.Header.Values("Connection") {
+		for _, part := range strings.Split(value, ",") {
+			if strings.EqualFold(strings.TrimSpace(part), "upgrade") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// singleConnListener wraps a single net.Conn as a net.Listener.
+// Accept returns the conn once, then blocks until Close is called.
+type singleConnListener struct {
+	conn      net.Conn
+	once      bool
+	closed    chan struct{}
+	closeOnce sync.Once
+}
+
+func newSingleConnListener(conn net.Conn) *singleConnListener {
+	return &singleConnListener{
+		conn:   conn,
+		closed: make(chan struct{}),
+	}
+}
+
+func (l *singleConnListener) Accept() (net.Conn, error) {
+	if !l.once {
+		l.once = true
+		return l.conn, nil
+	}
+	<-l.closed
+	return nil, net.ErrClosed
+}
+
+func (l *singleConnListener) Close() error {
+	l.closeOnce.Do(func() {
+		close(l.closed)
+	})
+	return nil
+}
+
+func (l *singleConnListener) Addr() net.Addr { return l.conn.LocalAddr() }

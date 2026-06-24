@@ -57,27 +57,73 @@ func TestLoadExampleSowerdConfigFiles(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name    string
-		content string
-		ext     string
+		name       string
+		content    string
+		ext        string
+		wantRoutes int
 	}{
 		{
-			name: "toml",
+			name: "embedded toml",
 			content: strings.ReplaceAll(
 				ExampleSowerdConfigTOML,
-				`fake_site = "/var/www"            # Fake site directory or address (default: /var/www)`,
-				`fake_site = "127.0.0.1:80"       # Fake site address for tests`,
+				`fake_site = "/var/www"`,
+				`fake_site = "127.0.0.1:80"`,
 			),
 			ext: ".toml",
 		},
 		{
-			name: "yaml",
+			name: "file toml",
+			content: strings.ReplaceAll(
+				mustReadFileForTest(t, "sowerd.toml"),
+				`fake_site = "/var/www"`,
+				`fake_site = "127.0.0.1:80"`,
+			),
+			ext: ".toml",
+		},
+		{
+			name: "file yaml",
 			content: strings.ReplaceAll(
 				mustReadFileForTest(t, "sowerd.yaml"),
-				`fake_site: "/var/www" # Fake site directory or address (default: /var/www)`,
-				`fake_site: "127.0.0.1:80" # Fake site address for tests`,
+				`fake_site: "/var/www"`,
+				`fake_site: "127.0.0.1:80"`,
 			),
 			ext: ".yaml",
+		},
+		{
+			name: "active site routes toml",
+			content: `log_level = "info"
+serve_ip = "0.0.0.0"
+password = "change_me"
+fake_site = "127.0.0.1:80"
+
+[[site_routes]]
+domains = ["a.example.com", "b.example.com"]
+upstream = "http://127.0.0.1:8080"
+
+[[site_routes]]
+domains = ["c.example.com"]
+upstream = "https://backend.example.com"
+`,
+			ext:        ".toml",
+			wantRoutes: 2,
+		},
+		{
+			name: "active site routes yaml",
+			content: `log_level: "info"
+serve_ip: "0.0.0.0"
+password: "change_me"
+fake_site: "127.0.0.1:80"
+site_routes:
+  - domains:
+      - "a.example.com"
+      - "b.example.com"
+    upstream: "http://127.0.0.1:8080"
+  - domains:
+      - "c.example.com"
+    upstream: "https://backend.example.com"
+`,
+			ext:        ".yaml",
+			wantRoutes: 2,
 		},
 	}
 
@@ -103,6 +149,9 @@ func TestLoadExampleSowerdConfigFiles(t *testing.T) {
 			}
 			if cfg.FakeSite != "127.0.0.1:80" {
 				t.Fatalf("unexpected fake site: %q", cfg.FakeSite)
+			}
+			if len(cfg.SiteRoutes) != tt.wantRoutes {
+				t.Fatalf("unexpected site route count: %d", len(cfg.SiteRoutes))
 			}
 		})
 	}
