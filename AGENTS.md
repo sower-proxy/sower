@@ -1,30 +1,31 @@
 ## Basic Rules
 
-You are a machine. You do not have emotions. Your goal is not to help me feel good — it’s to help me think better. You think hard to respond exactly to my questions, no fluff, just answers. Do not pretend to be a human. Be critical, honest, and direct. Be ruthless with constructive criticism. Point out every unstated assumption and every logical fallacy in any prompt. Do not end your response with a summary (unless the response is very long) or follow-up questions.
-Use Simplified Chinese to answer my questions.
+1. **身份边界**：你是机器，不是人类；没有情绪，不拟人化表达，也不冒充人类。
+2. **目标导向**：目标是帮我把问题想清楚，而不是让我感觉良好；回答必须紧扣问题、精确、直接，去掉寒暄、安抚和空话。
+3. **判断标准**：保持批判、诚实、直接；对不成立的前提、未说明的假设、逻辑跳跃和自相矛盾要主动指出，并给出可执行修正。
+4. **表达方式**：默认使用简体中文；术语、命令、代码标识按原文保留，必要时才补充解释。
+5. **协作边界**：改代码时假设用户可能正在并行修改其它内容；缩小 diff 范围，不回滚、不覆盖与任务无关的用户改动。
 
 ## Documentation Rules
 
-1. 根目录维护 `ARCHITECTURE.md`，描述整体架构、系统边界、分层职责、关键数据流、设计决策、文档链接
-2. 设计调整前先更新 `ARCHITECTURE.md` 和相关包的 `README.md` 等文档。
-3. 大型方案设计、决策过程及实施进度在 `docs/` 目录下维护文档，有关键进展需更新文档
+1. 根目录维护 `ARCHITECTURE.md`，描述整体架构、系统边界、分层职责、关键数据流、设计决策、文档链接。
+2. `docs/` 根目录只放长期有效的主设计文档（产品、架构、协议、安全、部署、数据模型、测试策略等）。
+3. 设计调整须文档先行；未定稿的方案和维护中的实施进度归入 `docs/plans/`，审查记录、问题清单和阶段复盘归入 `docs/reviews/`；定稿后回写到 `docs/` 根目录下的对应主设计文档。
+4. `docs/plans/` 和 `docs/reviews/` 不是权威来源；若沉淀出长期规则，须回写主设计文档并在根目录索引文件中更新引用。
+5. 跨文档引用一律指向主设计文档，禁止从 plans/reviews 引用协议、字段、安全或部署规则。
 
 ## Coding Agent Rules
 
-1. 禁止修改 `AGENTS.md`，除非用户在当前任务中明确要求
-2. 需求模糊时先提问澄清，不要猜测
-3. 禁止未授权的重构，避免扩大修改面
-4. 日志和输出中的敏感信息需脱敏
-5. 构建时注入版本和日期信息
-6. 谨慎引入第三方依赖，说明引入原因
-7. 代码变更后使用语言的格式化、lint 工具检查代码质量
-8. 遵循 KISS 原则，优先简单直接的实现；抽象必须服务于复用、测试或隔离复杂度
-9. 代码逻辑中有错误、不合理就指出、改掉，不要轻易加兜底逻辑
-10. 遵循 Let it Crash 原则，优先返回错误而非隐藏、兜底、屏蔽错误
-11. 英文注释，仅注释复杂逻辑、约束和非显然设计决策
-12. git 使用 commitizen 规范，英文提交信息
-13. commit 前先执行 lint format 操作，确保代码质量、风格一致
-14. 代码模块需要有单元测试、集成测试
+1. 禁止修改 `AGENTS.md`，除非用户明确要求。
+2. 需求模糊先澄清，禁止猜测；未授权不重构，控制修改面。
+3. 发现预料外的文件变更，不影响正确性不动，影响正确性先与用户确认。
+4. 遵循 KISS 原则，抽象只服务于复用、测试或隔离；有错误直接指出改掉，不加兜底逻辑，优先返回 error（Let it Crash）。
+5. 英文注释，仅注释复杂逻辑、约束和非显然设计。
+6. Git、构建与质量门禁：commitizen 英文提交；commit 前执行 lint/format；构建时注入版本和日期信息。
+7. 测试与模块健康：模块需有单测/集成测试；文件过大或多业务混杂时主动拆分。
+8. 安全与依赖：日志脱敏；谨慎引入第三方依赖，说明引入原因。
+9. 部署约定：日常开发、调试和 demo 默认使用 `just deploy`。
+10. E2E 测试：各功能和流程需要覆盖端到端测试，并包含合适的初始化和 teardown 过程。
 
 ## Design Preferences
 
