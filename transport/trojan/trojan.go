@@ -3,14 +3,14 @@ package trojan
 import (
 	"bytes"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"strconv"
-
-	"errors"
 )
 
 // +-----------------------+---------+----------------+---------+----------+
@@ -18,6 +18,10 @@ import (
 // +-----------------------+---------+----------------+---------+----------+
 // |          56           | X'0D0A' |    Variable    | X'0D0A' | Variable |
 // +-----------------------+---------+----------------+---------+----------+
+//
+// NOTE: The password hash is SHA-224 (28 bytes → 56 hex chars), produced by
+// crypto/sha256 via sha256.New224(). The import name is "crypto/sha256"
+// because Go's standard library does not have a separate "crypto/sha224".
 // +-----+------+----------+----------+
 // | CMD | ATYP | DST.ADDR | DST.PORT |
 // +-----+------+----------+----------+
@@ -82,19 +86,19 @@ func (a *domain) String() string {
 }
 
 func (a *domain) Fulfill(r io.Reader) error {
-	buf := make([]byte, 1)
-	if n, err := io.ReadFull(r, buf); err != nil || n != 1 {
-		return errors.New("read domain length failed")
+	var lenBuf [1]byte
+	if _, err := io.ReadFull(r, lenBuf[:]); err != nil {
+		return fmt.Errorf("read domain length: %w", err)
 	}
 
-	addrLen := int(buf[0])
-	buf = make([]byte, addrLen+4)
-	if n, err := io.ReadFull(r, buf); err != nil || n != addrLen+4 {
+	addrLen := int(lenBuf[0])
+	buf := make([]byte, addrLen+4)
+	if _, err := io.ReadFull(r, buf); err != nil {
 		return fmt.Errorf("read domain: %w", err)
 	}
 
 	a.ADDR = string(buf[:addrLen])
-	a.PORT = uint16(buf[addrLen])<<8 + uint16(buf[addrLen+1])
+	a.PORT = uint16(buf[addrLen])<<8 | uint16(buf[addrLen+1])
 	a.CRLF = [2]byte{buf[addrLen+2], buf[addrLen+3]}
 	return nil
 }
@@ -126,16 +130,16 @@ func New(password string) *Trojan {
 
 func (t *Trojan) Unwrap(conn net.Conn) (net.Addr, error) {
 	buf := make([]byte, headLen)
-	if n, err := io.ReadFull(conn, buf); err != nil || n != headLen {
-		return nil, fmt.Errorf("n: %d, err: %v", n, err)
+	if _, err := io.ReadFull(conn, buf); err != nil {
+		return nil, fmt.Errorf("read head: %w", err)
 	}
 
 	head := &staticHead{}
 	if err := binary.Read(bytes.NewBuffer(buf), binary.BigEndian, head); err != nil {
-		return nil, fmt.Errorf("read head: %w", err)
+		return nil, fmt.Errorf("decode head: %w", err)
 	}
 
-	if !bytes.Equal(head.Passwd[:], []byte(t.headPasswd)) {
+	if subtle.ConstantTimeCompare(head.Passwd[:], t.headPasswd) != 1 {
 		return nil, errors.New("auth fail")
 	}
 	if head.CRLF != [2]byte{0x0D, 0x0A} {
@@ -186,16 +190,13 @@ func (t *Trojan) Unwrap(conn net.Conn) (net.Addr, error) {
 func (t *Trojan) Wrap(conn net.Conn, tgtHost string, tgtPort uint16) error {
 	buf := bytes.NewBuffer(make([]byte, 0, headLen+1+len(tgtHost)+4))
 	ip := net.ParseIP(tgtHost)
-	switch {
-	case len(ip.To4()) != 0:
+	if ip4 := ip.To4(); ip4 != nil {
 		buf.Write(t.headIPv4)
-		buf.Write([]byte(ip.To4()))
-
-	case len(ip) != 0:
+		buf.Write(ip4)
+	} else if ip != nil {
 		buf.Write(t.headIPv6)
-		buf.Write([]byte(ip.To16()))
-
-	default:
+		buf.Write(ip.To16())
+	} else {
 		if len(tgtHost) > 255 {
 			return fmt.Errorf("target host too long: %d", len(tgtHost))
 		}
@@ -206,8 +207,8 @@ func (t *Trojan) Wrap(conn net.Conn, tgtHost string, tgtPort uint16) error {
 
 	buf.Write([]byte{byte(tgtPort >> 8), byte(tgtPort), 0x0D, 0x0A})
 
-	if n, err := conn.Write(buf.Bytes()); err != nil || n != len(buf.Bytes()) {
-		return fmt.Errorf("n: %d, err: %v", n, err)
+	if _, err := conn.Write(buf.Bytes()); err != nil {
+		return fmt.Errorf("write request: %w", err)
 	}
 	return nil
 }
