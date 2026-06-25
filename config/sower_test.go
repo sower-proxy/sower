@@ -73,7 +73,7 @@ func TestSowerConfigValidateRejectsInvalidTLSClientHello(t *testing.T) {
 	t.Parallel()
 
 	cfg := SowerConfig{}
-	cfg.Remote.Type = "trojan"
+	cfg.Remote.Type = "sower"
 	cfg.Remote.Addr = "example.com"
 	cfg.Remote.TLS.ClientHello = "not-supported"
 	cfg.DNS.Disable = true

@@ -17,7 +17,6 @@ import (
 
 	"github.com/sower-proxy/sower/config"
 	transportSower "github.com/sower-proxy/sower/transport/sower"
-	"github.com/sower-proxy/sower/transport/trojan"
 )
 
 func TestSanitizeConfig(t *testing.T) {
@@ -302,7 +301,7 @@ func TestHandleConnRoutesFallbackBySNI(t *testing.T) {
 	})
 	defer clientTLS.Close()
 
-	go handleConn(serverTLS, "127.0.0.1:1", router, transportSower.New("secret"), trojan.New("secret"))
+	go handleConn(serverTLS, "127.0.0.1:1", router, []proxyProtocolHandler{newSowerProtocolHandler(transportSower.New("secret"))})
 
 	if err := clientTLS.Handshake(); err != nil {
 		t.Fatalf("tls handshake: %v", err)
@@ -394,7 +393,7 @@ func TestHandleConnFallsBackToFakeSiteWhenSNIMisses(t *testing.T) {
 	router := newSiteRouter([]config.SiteRoute{
 		{Domains: []string{"route.example.com"}, Upstream: "http://127.0.0.1:1"},
 	})
-	go handleConn(serverTLS, fakeSite, router, transportSower.New("secret"), trojan.New("secret"))
+	go handleConn(serverTLS, fakeSite, router, []proxyProtocolHandler{newSowerProtocolHandler(transportSower.New("secret"))})
 
 	if err := clientTLS.Handshake(); err != nil {
 		t.Fatalf("tls handshake: %v", err)
@@ -412,6 +411,46 @@ func TestHandleConnFallsBackToFakeSiteWhenSNIMisses(t *testing.T) {
 	resp := string(buf[:n])
 	if !strings.Contains(resp, "fake-site-fallback") {
 		t.Fatalf("response does not contain fake site body: %q", resp)
+	}
+}
+
+func TestHandleConnFallsBackAfterSowerAuthFailure(t *testing.T) {
+	fakeSite := startRawTCPServer(t, "auth-fallback")
+
+	certServer := httptest.NewTLSServer(http.NotFoundHandler())
+	cert := certServer.TLS.Certificates[0]
+	certServer.Close()
+
+	serverRaw, clientRaw := net.Pipe()
+	serverTLS := tls.Server(serverRaw, &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		NextProtos:   []string{"http/1.1"},
+	})
+	clientTLS := tls.Client(clientRaw, &tls.Config{
+		InsecureSkipVerify: true,
+		ServerName:         "miss.example.com",
+		NextProtos:         []string{"http/1.1"},
+	})
+	defer clientTLS.Close()
+
+	go handleConn(serverTLS, fakeSite, siteRouter{}, []proxyProtocolHandler{newSowerProtocolHandler(transportSower.New("secret"))})
+
+	if err := clientTLS.Handshake(); err != nil {
+		t.Fatalf("tls handshake: %v", err)
+	}
+	_ = clientTLS.SetDeadline(time.Now().Add(2 * time.Second))
+	if err := transportSower.New("wrong-password").Wrap(clientTLS, "example.com", 443); err != nil {
+		t.Fatalf("write invalid sower request: %v", err)
+	}
+
+	buf := make([]byte, 4096)
+	n, err := clientTLS.Read(buf)
+	if err != nil {
+		t.Fatalf("read fallback response: %v", err)
+	}
+	resp := string(buf[:n])
+	if !strings.Contains(resp, "auth-fallback") {
+		t.Fatalf("response does not contain fallback body: %q", resp)
 	}
 }
 
@@ -439,6 +478,31 @@ func startHTTP1TCPServer(t *testing.T, body string) string {
 			}
 		}
 		_, _ = conn.Write([]byte("HTTP/1.1 200 OK\r\nContent-Length: " + fmt.Sprint(len(body)) + "\r\n\r\n" + body))
+	}()
+
+	return ln.Addr().String()
+}
+
+func startRawTCPServer(t *testing.T, body string) string {
+	t.Helper()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen raw server: %v", err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+
+		buf := make([]byte, 1024)
+		_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		_, _ = conn.Read(buf)
+		_, _ = conn.Write([]byte(body))
 	}()
 
 	return ln.Addr().String()
