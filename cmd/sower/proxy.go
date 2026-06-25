@@ -20,7 +20,6 @@ import (
 	"github.com/sower-proxy/sower/transport"
 	"github.com/sower-proxy/sower/transport/socks5"
 	"github.com/sower-proxy/sower/transport/sower"
-	"github.com/sower-proxy/sower/transport/trojan"
 )
 
 const (
@@ -55,16 +54,12 @@ func GenProxyDial(proxyType, proxyHost, proxyPassword, dns string, tlsOptions up
 	}
 
 	switch proxyType {
-	case "sower", "trojan":
+	case "sower":
 		tlsDialFn, err := newTLSDialFn(dialer, proxyHost, tlsOptions)
 		if err != nil {
 			return nil, err
 		}
-		if proxyType == "sower" {
-			proxy = sower.New(proxyPassword)
-		} else {
-			proxy = trojan.New(proxyPassword)
-		}
+		proxy = sower.New(proxyPassword)
 		dialFn = tlsDialFn
 	case "socks5":
 		proxy = socks5.New()

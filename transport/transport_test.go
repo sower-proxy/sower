@@ -7,7 +7,6 @@ import (
 	"github.com/sower-proxy/conns/reread"
 	"github.com/sower-proxy/sower/transport/socks5"
 	"github.com/sower-proxy/sower/transport/sower"
-	"github.com/sower-proxy/sower/transport/trojan"
 )
 
 func testPipe(tran Transport) (net.Addr, error) {
@@ -41,10 +40,6 @@ func Test_Transports(t *testing.T) {
 		t.Errorf("test sower, unexpected address: %s, err: %s", addr, err)
 	}
 
-	if addr, err := testPipe(newTrojan()); err != nil || addr.String() != "sower:443" {
-		t.Errorf("test trojan, unexpected address: %s, err: %s", addr, err)
-	}
-
 	if addr, err := testPipeDirect(socks5.New()); err != nil || addr.String() != "sower:443" {
 		t.Errorf("test socks5, unexpected address: %s, err: %s", addr, err)
 	}
@@ -52,8 +47,4 @@ func Test_Transports(t *testing.T) {
 
 func newSower() *sower.Sower {
 	return sower.New("123")
-}
-
-func newTrojan() *trojan.Trojan {
-	return trojan.New("123")
 }

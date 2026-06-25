@@ -23,7 +23,7 @@ password = "change_me"            # Password for client authentication
 fake_site = "/var/www"            # Fallback fake site directory or address (default: /var/www)
 
 # Site routing: map domains to upstream URLs for fallback traffic.
-# When a TLS connection does not match sower/trojan transport,
+# When a TLS connection does not match sower transport,
 # the SNI is looked up here. Unmatched connections fall through to fake_site.
 # Custom certificate mode requires the certificate SANs to cover all routed domains.
 #

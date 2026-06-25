@@ -16,7 +16,7 @@ type RemoteTLSConfig struct {
 }
 
 type RemoteConfig struct {
-	Type     string          `default:"sower" required:"true" usage:"option: sower/trojan/socks5"`
+	Type     string          `default:"sower" required:"true" usage:"option: sower/socks5"`
 	Addr     string          `required:"true" usage:"proxy address, eg: proxy.com or proxy.com:443"`
 	Password string          `usage:"remote proxy password"`
 	TLS      RemoteTLSConfig `flag:"tls"`
@@ -73,7 +73,7 @@ type SowerConfig struct {
 // Validate implements the validation interface for SowerConfig
 func (c *SowerConfig) Validate() error {
 	switch c.Remote.Type {
-	case "sower", "trojan", "socks5":
+	case "sower", "socks5":
 	default:
 		return fmt.Errorf("unsupported remote type %q", c.Remote.Type)
 	}
