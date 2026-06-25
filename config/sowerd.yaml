@@ -10,7 +10,7 @@ password: "change_me" # Password for client authentication
 fake_site: "/var/www" # Fallback fake site directory or address (default: /var/www)
 
 # Site routing configuration
-# When a TLS connection does not match sower/trojan transport, sowerd uses
+# When a TLS connection does not match sower transport, sowerd uses
 # the TLS SNI to select an upstream URL. Unmatched names fall back to fake_site.
 # Custom certificate mode requires the certificate SANs to cover all routed domains.
 # site_routes:

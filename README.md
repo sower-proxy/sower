@@ -80,7 +80,7 @@ addr = "<Sower 节点的 Tailscale IP>:1080"
 
 - 如果上游代理就在同一台机器上，例如 Clash 本地 SOCKS5 是 `127.0.0.1:7890`，就按上面这样写。
 - 如果上游代理在另一台机器上，把 `remote.addr` 改成对应的 `host:port`。
-- 如果你使用的是 `sowerd` 或 `trojan` 上游，把 `remote.type` 改成 `sower` 或 `trojan`，并按你的服务端信息填写 `remote.addr` 和 `remote.password`。
+- 如果你使用的是 `sowerd` 上游，把 `remote.type` 改成 `sower`，并按你的服务端信息填写 `remote.addr` 和 `remote.password`。
 - `dns.serve` 会同时决定 Sower 的 DNS 入口，以及 DNS 模式下 HTTP/HTTPS 透明代理监听的 IP。
 
 启动：
@@ -263,7 +263,7 @@ sudo sowerd -i
 - `router.country.mmdb` 是可选项，留空表示关闭 GeoIP，只使用配置里的 CIDR 规则。
 - HTTPS 透明代理只读取 TLS ClientHello 里的 SNI，不会在本机解密或终止 TLS。
 - HTTP/HTTPS 可达性探测结果会缓存 1 小时，减少重复探测，同时避免长期固定错误状态。
-- `sower` 和 `trojan` 上游的 `remote.addr` 可以写 `host`，也可以写 `host:port`。
+- `sower` 上游的 `remote.addr` 可以写 `host`，也可以写 `host:port`。
 - `remote.tls` 可以设置 SNI、跳过证书校验，或使用 `chrome`、`firefox` 等 uTLS 指纹。
 - 规则文件可以用 `file_skip_rules` 跳过第三方列表中的个别条目。例如在 `[router.block]` 中写 `file_skip_rules = ["t.co"]`。
 

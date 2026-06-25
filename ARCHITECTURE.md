@@ -41,8 +41,7 @@ For non-transport fallback traffic, it can route by TLS SNI to per-domain upstre
 `transport/sower`
 - Sower transport frame encode/decode
 
-`transport/trojan`
-- Trojan transport frame encode/decode
+
 
 `pkg/dhcp`
 - DHCP-based upstream DNS discovery for the client side
@@ -53,7 +52,7 @@ For non-transport fallback traffic, it can route by TLS SNI to per-domain upstre
 2. Validate remote type, listener addresses, and DNS IP fields.
 3. Log startup metadata with secrets redacted.
 4. Build the upstream proxy dialer with a stable DNS target. If `dns.upstream` is empty, the dialer uses `dns.fallback` to avoid recursive lookup through the local DNS listener.
-5. Build the upstream dialer for the configured remote transport, using standard TLS by default and optional uTLS fingerprints for `sower` and `trojan`.
+5. Build the upstream dialer for the configured remote transport, using standard TLS by default and optional uTLS fingerprints for `sower`.
 6. Build the router with suffix-tree rules and optional country CIDRs.
    Remote rule files are fetched through the configured upstream proxy dialer, never by direct outbound HTTP, so rule bootstrap uses the same stable egress path as proxied traffic.
    Remote domain rule files are filtered through per-router `file_skip_rules` before their prefixed entries are appended.
@@ -81,9 +80,9 @@ For non-transport fallback traffic, it can route by TLS SNI to per-domain upstre
 7. If `fakeSite` is a local directory, serve it only for loopback fallback traffic through `127.0.0.1:80`.
 8. Start `:443` TLS listener with HTTP/1.1 ALPN only.
 9. For each accepted connection, apply a short read deadline for protocol probing.
-10. Try `sower` transport first, then `trojan`.
-11. Relay matched transport traffic to the decoded target.
-12. If no transport matches, read the TLS SNI from the terminated TLS connection.
+10. Probe the connection's first bytes to identify the `sower` transport.
+11. If matched, authenticate and relay traffic to the decoded target.
+12. If authentication fails or no transport matches, read the TLS SNI from the terminated TLS connection.
 13. If the SNI exactly matches a configured `site_routes` domain, reverse-proxy the decrypted HTTP/1.1 request to that route's `http://` or `https://` upstream URL.
 14. If the SNI has no route, relay to `fakeSite`.
 

@@ -4,7 +4,7 @@
 
 ## 背景与现状
 
-`sowerd` 在 443 上对每条连接先探测 `sower`/`trojan` transport，两者都不匹配时 fallback 到单一 `fake_site`：
+`sowerd` 在 443 上对每条连接先探测 `sower` transport，不匹配时 fallback 到单一 `fake_site`：
 - 若 `fake_site` 是本地目录：在 `127.0.0.1:80` 用 `http.FileServer` 服务，443 fallback 通过 `relay.RelayTo` 转发到 `127.0.0.1:80`。
 - 若 `fake_site` 是 `host:port`：443 fallback 直接裸 TCP relay 到该地址。
 
@@ -19,7 +19,7 @@
 
 ## 非目标
 
-- 不动 `sower`/`trojan` 认证流量的目标路由（由 transport 帧解码决定，与域名无关）。
+- 不动 `sower` 认证流量的目标路由（由 transport 帧解码决定，与域名无关）。
 - 不支持通配域名（`*.example.com`）。精确匹配即可。
 - 不在 `sower` 客户端侧实现；本功能仅限 `sowerd`。
 - HTTP（:80）请求只做重定向到 HTTPS，不参与 site routing。
@@ -92,7 +92,7 @@ upstream = "https://backend.example.com"
 
 当前 `NextProtos = ["http/1.1", "h2"]`。fallback 的 reverse proxy 路径在 MVP 仅支持 HTTP/1.1（`http.Server` 默认不启用 h2，启用需额外 `http2.ConfigureServer`）。MVP 决策：将 `NextProtos` 改为 `["http/1.1"]`，简化 fallback 行为，避免协商到 h2 后 reverse proxy 不支持的错配。
 
-影响：fallback/伪装站点仅 HTTP/1.1；`sower`/`trojan` transport 不走 ALPN，不受影响。
+影响：fallback/伪装站点仅 HTTP/1.1；`sower` transport 不走 ALPN，不受影响。
 
 ## 兼容性
 
