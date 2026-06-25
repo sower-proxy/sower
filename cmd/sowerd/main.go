@@ -29,13 +29,11 @@ import (
 	"github.com/sower-proxy/sower/config"
 	"github.com/sower-proxy/sower/internal/install"
 	transportSower "github.com/sower-proxy/sower/transport/sower"
-	"github.com/sower-proxy/sower/transport/trojan"
 	"golang.org/x/crypto/acme/autocert"
 )
 
 const (
 	httpShutdownTimeout           = 5 * time.Second
-	probeTimeout                  = 10 * time.Second
 	reverseProxyReadHeaderTimeout = 10 * time.Second
 	reverseProxyIdleTimeout       = 30 * time.Second
 	upstreamDialTimeout           = 10 * time.Second
@@ -153,9 +151,13 @@ func run(ctx context.Context, conf config.SowerdConfig) error {
 	}
 	defer ln.Close()
 
+	protocolHandlers := []proxyProtocolHandler{
+		newSowerProtocolHandler(transportSower.New(conf.Password)),
+	}
+
 	httpsErrCh := make(chan error, 1)
 	go func() {
-		httpsErrCh <- serve443(ctx, ln, fakeSite, siteRouter, transportSower.New(conf.Password), trojan.New(conf.Password))
+		httpsErrCh <- serve443(ctx, ln, fakeSite, siteRouter, protocolHandlers)
 		close(httpsErrCh)
 	}()
 
@@ -255,7 +257,7 @@ func fakeSiteHandler(dirServer http.Handler) http.Handler {
 	})
 }
 
-func serve443(ctx context.Context, ln net.Listener, fakeSite string, router siteRouter, sower *transportSower.Sower, trojan *trojan.Trojan) error {
+func serve443(ctx context.Context, ln net.Listener, fakeSite string, router siteRouter, handlers []proxyProtocolHandler) error {
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
@@ -272,15 +274,15 @@ func serve443(ctx context.Context, ln net.Listener, fakeSite string, router site
 			return fmt.Errorf("accept tls connection: %w", err)
 		}
 
-		go handleConn(conn, fakeSite, router, sower, trojan)
+		go handleConn(conn, fakeSite, router, handlers)
 	}
 }
 
-func handleConn(conn net.Conn, fakeSite string, router siteRouter, sower *transportSower.Sower, trojan *trojan.Trojan) {
+func handleConn(conn net.Conn, fakeSite string, router siteRouter, handlers []proxyProtocolHandler) {
 	rereadConn := reread.New(conn)
 	defer rereadConn.Close()
 
-	_ = rereadConn.SetReadDeadline(time.Now().Add(probeTimeout))
+	_ = rereadConn.SetReadDeadline(time.Now().Add(protocolProbeTimeout))
 
 	var (
 		addr net.Addr
@@ -292,31 +294,43 @@ func handleConn(conn net.Conn, fakeSite string, router siteRouter, sower *transp
 	}()
 
 	rereadConn.Reread()
-	if addr, err = sower.Unwrap(rereadConn); err == nil {
-		rereadConn.Stop()
-		_ = rereadConn.SetReadDeadline(time.Time{})
-		dur, err = relay.RelayTo(rereadConn, addr.String())
+	probeBuf, err := readProtocolProbe(rereadConn)
+	if err != nil {
 		return
 	}
 
-	rereadConn.Reread()
-	if addr, err = trojan.Unwrap(rereadConn); err == nil {
-		rereadConn.Stop()
-		_ = rereadConn.SetReadDeadline(time.Time{})
-		dur, err = relay.RelayTo(rereadConn, addr.String())
-		return
+	for _, handler := range handlers {
+		switch handler.Probe(probeBuf) {
+		case probeNoMatch, probeNeedMore:
+			continue
+		case probeMatch:
+			rereadConn.Reread()
+			if addr, err = handler.Unwrap(rereadConn); err == nil {
+				rereadConn.Stop()
+				_ = rereadConn.SetReadDeadline(time.Time{})
+				dur, err = relay.RelayTo(rereadConn, addr.String())
+				return
+			}
+
+			slog.Debug("protocol auth or decode failed, fallback", "protocol", handler.Name(), "error", err)
+			rereadConn.Stop().Reread()
+			_ = rereadConn.SetReadDeadline(time.Time{})
+			dur, err = fallbackConn(rereadConn, conn, fakeSite, router)
+			return
+		}
 	}
 
 	rereadConn.Stop().Reread()
 	_ = rereadConn.SetReadDeadline(time.Time{})
+	dur, err = fallbackConn(rereadConn, conn, fakeSite, router)
+}
 
-	// Fallback: route by SNI if configured, otherwise relay to fakeSite.
-	if upstream := router.lookup(sniFromConn(conn)); upstream != nil {
-		err = reverseProxyConn(rereadConn, upstream)
-		return
+func fallbackConn(conn net.Conn, tlsConn net.Conn, fakeSite string, router siteRouter) (time.Duration, error) {
+	start := time.Now()
+	if upstream := router.lookup(sniFromConn(tlsConn)); upstream != nil {
+		return time.Since(start), reverseProxyConn(conn, upstream)
 	}
-
-	dur, err = relay.RelayTo(rereadConn, fakeSite)
+	return relay.RelayTo(conn, fakeSite)
 }
 
 func sanitizeConfig(cfg config.SowerdConfig) map[string]any {
