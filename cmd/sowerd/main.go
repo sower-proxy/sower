@@ -304,17 +304,16 @@ func handleConn(conn net.Conn, fakeSite string, router siteRouter, handlers []pr
 		case probeNoMatch, probeNeedMore:
 			continue
 		case probeMatch:
+			_ = rereadConn.SetReadDeadline(time.Time{})
 			rereadConn.Reread()
 			if addr, err = handler.Unwrap(rereadConn); err == nil {
 				rereadConn.Stop()
-				_ = rereadConn.SetReadDeadline(time.Time{})
 				dur, err = relay.RelayTo(rereadConn, addr.String())
 				return
 			}
 
 			slog.Debug("protocol auth or decode failed, fallback", "protocol", handler.Name(), "error", err)
 			rereadConn.Stop().Reread()
-			_ = rereadConn.SetReadDeadline(time.Time{})
 			dur, err = fallbackConn(rereadConn, conn, fakeSite, router)
 			return
 		}
