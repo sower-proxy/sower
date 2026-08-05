@@ -2,7 +2,7 @@ package sower
 
 import (
 	"bytes"
-	"crypto/md5"
+	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -93,11 +93,14 @@ func (s *Sower) Wrap(conn net.Conn, tgtHost string, tgtPort uint16) error {
 }
 
 func sumChecksum(target [maxDomainLength]byte, password []byte) uint64 {
-	h := md5.New()
+	h := sha256.New()
 	h.Write(target[:])
 	h.Write(password)
-	var checksum [md5.Size]byte
+	var checksum [sha256.Size]byte
 	h.Sum(checksum[:0])
-	checksumVal, _ := binary.Uvarint(checksum[:])
-	return checksumVal
+	// Take a fixed 64-bit window of the digest. binary.Uvarint would only
+	// consume bytes until the first continuation bit is clear (typically the
+	// first byte, ~50% of the time), collapsing the checksum to 7 bits of
+	// entropy and making the auth check brute-forceable.
+	return binary.BigEndian.Uint64(checksum[:8])
 }
