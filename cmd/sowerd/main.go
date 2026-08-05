@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -280,7 +281,12 @@ func serve443(ctx context.Context, ln net.Listener, fakeSite string, router site
 
 func handleConn(conn net.Conn, fakeSite string, router siteRouter, handlers []proxyProtocolHandler) {
 	rereadConn := reread.New(conn)
-	defer rereadConn.Close()
+	var hijacked atomic.Bool
+	defer func() {
+		if !hijacked.Load() {
+			rereadConn.Close()
+		}
+	}()
 
 	_ = rereadConn.SetReadDeadline(time.Now().Add(protocolProbeTimeout))
 
@@ -314,20 +320,20 @@ func handleConn(conn net.Conn, fakeSite string, router siteRouter, handlers []pr
 
 			slog.Debug("protocol auth or decode failed, fallback", "protocol", handler.Name(), "error", err)
 			rereadConn.Stop().Reread()
-			dur, err = fallbackConn(rereadConn, conn, fakeSite, router)
+			dur, err = fallbackConn(rereadConn, conn, fakeSite, router, &hijacked)
 			return
 		}
 	}
 
 	rereadConn.Stop().Reread()
 	_ = rereadConn.SetReadDeadline(time.Time{})
-	dur, err = fallbackConn(rereadConn, conn, fakeSite, router)
+	dur, err = fallbackConn(rereadConn, conn, fakeSite, router, &hijacked)
 }
 
-func fallbackConn(conn net.Conn, tlsConn net.Conn, fakeSite string, router siteRouter) (time.Duration, error) {
+func fallbackConn(conn net.Conn, tlsConn net.Conn, fakeSite string, router siteRouter, hijacked *atomic.Bool) (time.Duration, error) {
 	start := time.Now()
 	if upstream := router.lookup(sniFromConn(tlsConn)); upstream != nil {
-		return time.Since(start), reverseProxyConn(conn, upstream)
+		return time.Since(start), reverseProxyConn(conn, upstream, hijacked)
 	}
 	return relay.RelayTo(conn, fakeSite)
 }
@@ -426,7 +432,7 @@ func sniFromConn(conn net.Conn) string {
 
 // reverseProxyConn serves the decrypted HTTP connection through a reverse proxy
 // to the given upstream URL.
-func reverseProxyConn(conn net.Conn, upstream *url.URL) error {
+func reverseProxyConn(conn net.Conn, upstream *url.URL, hijacked *atomic.Bool) error {
 	proxy := httputil.NewSingleHostReverseProxy(upstream)
 	baseDirector := proxy.Director
 	proxy.Director = func(req *http.Request) {
@@ -450,11 +456,15 @@ func reverseProxyConn(conn net.Conn, upstream *url.URL) error {
 
 	ln := newSingleConnListener(conn)
 	srv := &http.Server{
-		Handler:           rejectUpgrade(proxy),
+		Handler:           proxy,
 		ReadHeaderTimeout: reverseProxyReadHeaderTimeout,
 		IdleTimeout:       reverseProxyIdleTimeout,
 		ConnState: func(_ net.Conn, state http.ConnState) {
-			if state == http.StateClosed || state == http.StateHijacked {
+			switch state {
+			case http.StateHijacked:
+				hijacked.Store(true)
+				_ = ln.Close()
+			case http.StateClosed:
 				_ = ln.Close()
 			}
 		},
@@ -464,30 +474,6 @@ func reverseProxyConn(conn net.Conn, upstream *url.URL) error {
 		return fmt.Errorf("serve reverse proxy connection: %w", err)
 	}
 	return nil
-}
-
-func rejectUpgrade(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if isUpgradeRequest(r) {
-			http.Error(w, "upgrade requests are not supported by sowerd site routing", http.StatusBadRequest)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-func isUpgradeRequest(r *http.Request) bool {
-	if r.Header.Get("Upgrade") != "" {
-		return true
-	}
-	for _, value := range r.Header.Values("Connection") {
-		for _, part := range strings.Split(value, ",") {
-			if strings.EqualFold(strings.TrimSpace(part), "upgrade") {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 // singleConnListener wraps a single net.Conn as a net.Listener.

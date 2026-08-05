@@ -2,7 +2,9 @@ package main
 
 import (
 	"bufio"
+	"crypto/sha1"
 	"crypto/tls"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -12,6 +14,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -240,7 +243,7 @@ func TestReverseProxyConnHTTP(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- reverseProxyConn(serverConn, upstreamURL)
+		errCh <- reverseProxyConn(serverConn, upstreamURL, &atomic.Bool{})
 	}()
 
 	// net.Pipe is synchronous; write and read must run concurrently.
@@ -325,11 +328,31 @@ func TestHandleConnRoutesFallbackBySNI(t *testing.T) {
 	}
 }
 
-func TestReverseProxyConnRejectsUpgrade(t *testing.T) {
-	upstreamHit := make(chan struct{}, 1)
+func TestReverseProxyConnWebSocket(t *testing.T) {
+	upstreamHit := make(chan *http.Request, 1)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		upstreamHit <- struct{}{}
-		w.WriteHeader(http.StatusOK)
+		upstreamHit <- r
+
+		if r.Header.Get("Upgrade") != "websocket" {
+			t.Errorf("Upgrade header = %q, want websocket", r.Header.Get("Upgrade"))
+		}
+		if !strings.Contains(strings.ToLower(r.Header.Get("Connection")), "upgrade") {
+			t.Errorf("Connection header = %q, want contains upgrade", r.Header.Get("Connection"))
+		}
+
+		key := r.Header.Get("Sec-WebSocket-Key")
+		if key == "" {
+			// The handler runs on the httptest server goroutine, not the test
+			// goroutine: t.Fatal would Goexit only this goroutine and can hang
+			// the test server, so report the failure and abort the handler.
+			t.Errorf("missing Sec-WebSocket-Key")
+			return
+		}
+
+		w.Header().Set("Upgrade", "websocket")
+		w.Header().Set("Connection", "Upgrade")
+		w.Header().Set("Sec-WebSocket-Accept", websocketAcceptKey(key))
+		w.WriteHeader(http.StatusSwitchingProtocols)
 	}))
 	defer upstream.Close()
 
@@ -338,11 +361,17 @@ func TestReverseProxyConnRejectsUpgrade(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- reverseProxyConn(serverConn, upstreamURL)
+		errCh <- reverseProxyConn(serverConn, upstreamURL, &atomic.Bool{})
 	}()
 
 	go func() {
-		_, _ = clientConn.Write([]byte("GET /ws HTTP/1.1\r\nHost: a.example.com\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n"))
+		req := "GET /ws HTTP/1.1\r\n" +
+			"Host: a.example.com\r\n" +
+			"Connection: Upgrade\r\n" +
+			"Upgrade: websocket\r\n" +
+			"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n" +
+			"Sec-WebSocket-Version: 13\r\n\r\n"
+		_, _ = clientConn.Write([]byte(req))
 	}()
 
 	clientConn.SetReadDeadline(time.Now().Add(2 * time.Second))
@@ -351,24 +380,35 @@ func TestReverseProxyConnRejectsUpgrade(t *testing.T) {
 	_ = clientConn.Close()
 
 	resp := string(buf[:n])
-	if !strings.Contains(resp, "400 Bad Request") {
-		t.Fatalf("upgrade response = %q, want 400", resp)
+	if !strings.Contains(resp, "101 Switching Protocols") {
+		t.Fatalf("upgrade response = %q, want 101 Switching Protocols", resp)
+	}
+	wantAccept := websocketAcceptKey("dGhlIHNhbXBsZSBub25jZQ==")
+	if !strings.Contains(resp, "Sec-Websocket-Accept: "+wantAccept) {
+		t.Fatalf("response missing accept key %q: %q", wantAccept, resp)
 	}
 
 	select {
 	case <-upstreamHit:
-		t.Fatal("upgrade request should not reach upstream")
-	default:
+	case <-time.After(2 * time.Second):
+		t.Fatal("upstream did not receive upgrade request")
 	}
 
 	select {
 	case err := <-errCh:
-		if err != nil {
+		if err != nil && !errors.Is(err, net.ErrClosed) {
 			t.Fatalf("reverseProxyConn error: %v", err)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("reverseProxyConn timed out")
 	}
+}
+
+func websocketAcceptKey(key string) string {
+	const magic = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+	h := sha1.New()
+	_, _ = h.Write([]byte(key + magic))
+	return base64.StdEncoding.EncodeToString(h.Sum(nil))
 }
 
 func TestHandleConnFallsBackToFakeSiteWhenSNIMisses(t *testing.T) {
