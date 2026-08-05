@@ -53,12 +53,15 @@ func (h sowerProtocolHandler) Unwrap(conn net.Conn) (net.Addr, error) {
 
 func readProtocolProbe(conn net.Conn) ([]byte, error) {
 	buf := make([]byte, protocolProbeMaxBytes)
-	n, err := conn.Read(buf)
-	if n > 0 {
-		return buf[:n], nil
+	for {
+		n, err := conn.Read(buf)
+		if n > 0 {
+			return buf[:n], nil
+		}
+		if err != nil {
+			return nil, fmt.Errorf("read probe bytes: %w", err)
+		}
+		// n == 0 && err == nil is legal (though rare) on TCP; retry instead
+		// of tearing down the connection.
 	}
-	if err != nil {
-		return nil, fmt.Errorf("read probe bytes: %w", err)
-	}
-	return nil, fmt.Errorf("read probe bytes: empty read")
 }
