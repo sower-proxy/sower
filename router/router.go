@@ -25,7 +25,8 @@ type (
 		ProxyRule  *RuleSet
 		ProxyDial  ProxyDialFn
 
-		accessCache *accessProbeCache
+		routeObserver RouteObserver
+		accessCache   *accessProbeCache
 
 		dns struct {
 			upstreamDNS  string
@@ -52,6 +53,32 @@ type (
 )
 
 var ErrBlocked = errors.New("route blocked")
+
+// RouteCategory identifies a connection routing decision.
+type RouteCategory string
+
+const (
+	RouteBlock  RouteCategory = "block"
+	RouteDirect RouteCategory = "direct"
+	RouteProxy  RouteCategory = "proxy"
+)
+
+// RouteObserver receives every connection routing decision, exactly once per
+// connection: block/direct decisions in DialSmart, proxy decisions in
+// DialProxyOnly (which also covers the HTTP/HTTPS proxy paths).
+type RouteObserver func(category RouteCategory, domain string)
+
+// SetRouteObserver installs the routing-decision observer, or clears it with
+// a nil argument.
+func (r *Router) SetRouteObserver(fn RouteObserver) {
+	r.routeObserver = fn
+}
+
+func (r *Router) observe(category RouteCategory, domain string) {
+	if r.routeObserver != nil {
+		r.routeObserver(category, domain)
+	}
+}
 
 func NewRouter(serveIPs []string, upstreamDNS, fallbackDNS, mmdbFile string, proxyDial ProxyDialFn) (*Router, error) {
 	r := Router{
@@ -144,12 +171,15 @@ func (r *Router) DialSmart(network, domain string, port uint16) (net.Conn, error
 	// 3. fallback( proxy )
 	switch {
 	case r.BlockRule.Match(domain):
+		r.observe(RouteBlock, domain)
 		return nil, ErrBlocked
 	case r.DirectRule.Match(domain):
+		r.observe(RouteDirect, domain)
 		return r.directDial(ctx, network, addr)
 	case r.ProxyRule.Match(domain):
 		return r.DialProxyOnly(network, domain, port)
 	case r.localSite(ctx, domain), r.isAccess(domain, port):
+		r.observe(RouteDirect, domain)
 		return r.directDial(ctx, network, addr)
 	default:
 		return r.DialProxyOnly(network, domain, port)
@@ -160,6 +190,7 @@ func (r *Router) DialProxyOnly(network, domain string, port uint16) (net.Conn, e
 	if r.ProxyDial == nil {
 		return nil, fmt.Errorf("proxy dialer unavailable")
 	}
+	r.observe(RouteProxy, domain)
 	start := time.Now()
 	rc, err := r.ProxyDial(network, domain, port)
 	if err != nil {

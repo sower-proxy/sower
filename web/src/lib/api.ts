@@ -19,9 +19,37 @@ export interface TrafficSnapshot {
   uptime: number
   dnsQueries: number
   conns: { http: number; https: number; socks5: number }
+  active: { http: number; https: number; socks5: number }
+  rates: {
+    bytesUpPerSec: number
+    bytesDownPerSec: number
+    dnsPerSec: number
+    connsPerSec: number
+  }
+  ruleHits: { block: number; direct: number; proxy: number }
+  system: { goroutines: number; heapAlloc: number }
   bytesUp: number
   bytesDown: number
   domains: DomainStat[]
+}
+
+export interface HistorySample {
+  at: string
+  bytesUp: number
+  bytesDown: number
+  dns: number
+  conns: number
+  active: number
+  activeHttp: number
+  activeHttps: number
+  activeSocks: number
+  block: number
+  direct: number
+  proxy: number
+}
+
+export interface History {
+  samples: HistorySample[]
 }
 
 export interface RulesResponse {
@@ -74,4 +102,5 @@ export const api = {
       body: JSON.stringify({ category, rules }),
     }),
   traffic: () => request<TrafficSnapshot>('/api/traffic'),
+  history: () => request<History>('/api/history'),
 }

@@ -186,7 +186,7 @@ func TestServeSharedHTTPRoutesAdminAndProxy(t *testing.T) {
 	addr := ln.Addr().String()
 	host, _, _ := net.SplitHostPort(addr)
 
-	stats := admin.NewStats()
+	stats := newTestStats(t)
 	srv := admin.NewServer(admin.Options{
 		Password: "secret",
 		Version:  "v1.2.3",

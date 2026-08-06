@@ -113,12 +113,19 @@ func run(ctx context.Context, stop context.CancelFunc, cfg config.SowerConfig) e
 		}
 	}()
 
+	stats, err := admin.NewStats()
+	if err != nil {
+		return fmt.Errorf("init stats: %w", err)
+	}
+	r.SetRouteObserver(func(c router.RouteCategory, _ string) {
+		stats.RecordRoute(string(c))
+	})
+
 	start := time.Now()
 	if err := loadRouterRules(ctx, r, proxyDial, cfg); err != nil {
 		return err
 	}
 
-	stats := admin.NewStats()
 	errCh := make(chan error, 8)
 	if err := startDNSListeners(ctx, cfg, r, stats, errCh); err != nil {
 		return err

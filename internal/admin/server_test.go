@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -48,7 +49,7 @@ func (f *fakeRules) RuleCount(c Category) uint64 {
 
 func newTestServer(t *testing.T, rules RuleManager) *httptest.Server {
 	t.Helper()
-	s := NewServer(Options{Password: "secret", Version: "v1.2.3", Date: "2026-01-01", Rules: rules, Stats: NewStats()})
+	s := NewServer(Options{Password: "secret", Version: "v1.2.3", Date: "2026-01-01", Rules: rules, Stats: newTestStats(t)})
 	ts := httptest.NewServer(s.http.Handler)
 	t.Cleanup(ts.Close)
 	return ts
@@ -310,7 +311,7 @@ func TestLogoutInvalidatesSession(t *testing.T) {
 }
 
 func TestTrafficEndpoint(t *testing.T) {
-	stats := NewStats()
+	stats := newTestStats(t)
 	s := NewServer(Options{Password: "secret", Version: "v1.2.3", Date: "2026-01-01", Rules: newFakeRules(), Stats: stats})
 	ts := httptest.NewServer(s.http.Handler)
 	t.Cleanup(ts.Close)
@@ -394,7 +395,7 @@ func TestUnknownAPIPathReturnsJSONNotFound(t *testing.T) {
 }
 
 func TestShutdown(t *testing.T) {
-	s := NewServer(Options{Password: "secret", Rules: newFakeRules(), Stats: NewStats()})
+	s := NewServer(Options{Password: "secret", Rules: newFakeRules(), Stats: newTestStats(t)})
 	ts := httptest.NewServer(s.http.Handler)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -403,4 +404,76 @@ func TestShutdown(t *testing.T) {
 		t.Fatalf("shutdown: %v", err)
 	}
 	ts.Close()
+}
+
+func TestHistoryEndpoint(t *testing.T) {
+	stats := newTestStats(t)
+	s := NewServer(Options{Password: "secret", Version: "v1.2.3", Date: "2026-01-01", Rules: newFakeRules(), Stats: stats})
+	ts := httptest.NewServer(s.http.Handler)
+	defer ts.Close()
+
+	cookie := login(t, ts, "secret")
+	resp := authedRequest(t, ts, http.MethodGet, "/api/history", cookie, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	var body struct {
+		Samples []HistorySample `json:"samples"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.Samples == nil {
+		t.Fatal("expected samples array")
+	}
+}
+
+func TestHistoryEndpointRequiresAuth(t *testing.T) {
+	stats := newTestStats(t)
+	s := NewServer(Options{Password: "secret", Version: "v1.2.3", Date: "2026-01-01", Rules: newFakeRules(), Stats: stats})
+	ts := httptest.NewServer(s.http.Handler)
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/api/history")
+	if err != nil {
+		t.Fatalf("get history: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401 without session, got %d", resp.StatusCode)
+	}
+}
+
+func TestMetricsEndpointServesPrometheusFormat(t *testing.T) {
+	stats := newTestStats(t)
+	s := NewServer(Options{Password: "secret", Version: "v1.2.3", Date: "2026-01-01", Rules: newFakeRules(), Stats: stats})
+	ts := httptest.NewServer(s.http.Handler)
+	defer ts.Close()
+
+	stats.RecordDNS("example.com")
+	stats.RecordRoute("proxy")
+	conn := stats.WrapConn(&fakeConn{}, "https")
+	_ = conn.Close()
+
+	resp, err := http.Get(ts.URL + "/metrics")
+	if err != nil {
+		t.Fatalf("get metrics: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	for _, want := range []string{
+		"sower_dns_queries_total 1",
+		`sower_rule_hits_total{route="proxy"} 1`,
+		`sower_connections_active{protocol="https"} 0`,
+	} {
+		if !strings.Contains(string(body), want) {
+			t.Fatalf("expected %q in metrics, got:\n%s", want, body)
+		}
+	}
 }

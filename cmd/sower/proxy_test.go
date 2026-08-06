@@ -81,7 +81,7 @@ func TestHandleSocks5ConnReturnsForbiddenForBlockedConnect(t *testing.T) {
 	defer client.Close()
 
 	r := newTestRouter()
-	go handleSocks5Conn(server, r, admin.NewStats())
+	go handleSocks5Conn(server, r, newTestStats(t))
 
 	client.SetDeadline(time.Now().Add(2 * time.Second))
 	if _, err := io.WriteString(client, "CONNECT example.com:443 HTTP/1.1\r\nHost: example.com:443\r\n\r\n"); err != nil {
@@ -102,7 +102,7 @@ func TestHandleSocks5ConnReturnsSocks5FailureForBlockedRequest(t *testing.T) {
 	defer client.Close()
 
 	r := newTestRouter()
-	go handleSocks5Conn(server, r, admin.NewStats())
+	go handleSocks5Conn(server, r, newTestStats(t))
 
 	client.SetDeadline(time.Now().Add(2 * time.Second))
 	if _, err := client.Write([]byte{0x05, 0x01, 0x00}); err != nil {
@@ -184,7 +184,7 @@ func TestHandleHTTPConnUsesProxyOnlyEvenWhenBlocked(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		handleHTTPConn(downstreamServer, r, admin.NewStats())
+		handleHTTPConn(downstreamServer, r, newTestStats(t))
 	}()
 
 	downstreamClient.SetWriteDeadline(time.Now().Add(2 * time.Second))
@@ -240,7 +240,7 @@ func TestHandleHTTPSConnRelaysClientHelloToUpstream(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		handleHTTPSConn(downstreamServer, r, admin.NewStats())
+		handleHTTPSConn(downstreamServer, r, newTestStats(t))
 	}()
 
 	writeErrCh := make(chan error, 1)
@@ -319,7 +319,7 @@ func TestHandleHTTPSConnRelaysClientHelloAfterReadingSNI(t *testing.T) {
 		},
 	}
 
-	go handleHTTPSConn(server, r, admin.NewStats())
+	go handleHTTPSConn(server, r, newTestStats(t))
 
 	tlsClient := tls.Client(client, &tls.Config{
 		ServerName:         "example.com",
@@ -419,4 +419,13 @@ func newTestRouter() *router.Router {
 			return nil, router.ErrBlocked
 		},
 	}
+}
+
+func newTestStats(t *testing.T) *admin.Stats {
+	t.Helper()
+	s, err := admin.NewStats()
+	if err != nil {
+		t.Fatalf("new stats: %v", err)
+	}
+	return s
 }

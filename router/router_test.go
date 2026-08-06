@@ -1113,3 +1113,46 @@ func startUDPTestDNSServer(t *testing.T, handler dns.Handler) string {
 	})
 	return udpConn.LocalAddr().String()
 }
+
+func TestRouteObserverFiresOncePerConnection(t *testing.T) {
+	t.Parallel()
+
+	r := newTestRouter(t, nil, "", "223.5.5.5", "", func(network, host string, port uint16) (net.Conn, error) {
+		return nil, errors.New("dial failed")
+	})
+	r.BlockRule.Add("blocked.example")
+	r.DirectRule.Add("direct.example")
+
+	var mu sync.Mutex
+	var got []RouteCategory
+	r.SetRouteObserver(func(c RouteCategory, _ string) {
+		mu.Lock()
+		got = append(got, c)
+		mu.Unlock()
+	})
+
+	if _, err := r.DialSmart("tcp", "blocked.example", 443); !errors.Is(err, ErrBlocked) {
+		t.Fatalf("expected ErrBlocked, got %v", err)
+	}
+	if _, err := r.DialSmart("tcp", "direct.example", 443); err == nil {
+		t.Fatal("expected direct dial to fail")
+	}
+	if _, err := r.DialSmart("tcp", "proxy.example", 443); err == nil {
+		t.Fatal("expected proxy dial to fail")
+	}
+	if _, err := r.DialProxyOnly("tcp", "http.example", 80); err == nil {
+		t.Fatal("expected proxy dial to fail")
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	want := []RouteCategory{RouteBlock, RouteDirect, RouteProxy, RouteProxy}
+	if len(got) != len(want) {
+		t.Fatalf("expected %d observations, got %d: %v", len(want), len(got), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("observation %d: expected %q, got %q", i, want[i], got[i])
+		}
+	}
+}

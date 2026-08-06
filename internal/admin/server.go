@@ -90,6 +90,10 @@ func NewServer(opts Options) *Server {
 	mux.HandleFunc("POST /api/rules", s.mutateGuard(s.auth(s.handleRulesAdd)))
 	mux.HandleFunc("DELETE /api/rules", s.mutateGuard(s.auth(s.handleRulesRemove)))
 	mux.HandleFunc("GET /api/traffic", s.mutateGuard(s.auth(s.handleTraffic)))
+	mux.HandleFunc("GET /api/history", s.mutateGuard(s.auth(s.handleHistory)))
+	if s.opts.Stats != nil {
+		mux.HandleFunc("GET /metrics", s.handleMetrics)
+	}
 	mux.HandleFunc("/", s.handleStatic)
 
 	s.http = &http.Server{
@@ -307,6 +311,25 @@ func (s *Server) handleTraffic(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, s.opts.Stats.Snapshot())
+}
+
+func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
+	if s.opts.Stats == nil {
+		writeError(w, http.StatusInternalServerError, "stats unavailable")
+		return
+	}
+	writeJSON(w, http.StatusOK, s.opts.Stats.History())
+}
+
+// handleMetrics serves the Prometheus exposition format. It is intentionally
+// unauthenticated: scrapers cannot carry the session cookie, and the exposed
+// metrics are aggregate counters without per-domain or credential data.
+func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	if s.opts.Stats == nil {
+		writeError(w, http.StatusInternalServerError, "stats unavailable")
+		return
+	}
+	s.opts.Stats.Metrics().ServeHTTP(w, r)
 }
 
 // --- static frontend ---

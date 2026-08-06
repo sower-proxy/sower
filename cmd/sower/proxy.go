@@ -292,9 +292,9 @@ func readTLSClientHello(conn io.Reader) ([]byte, error) {
 }
 
 func handleSocks5Conn(conn net.Conn, r *router.Router, stats *admin.Stats) {
+	conn = stats.WrapConn(conn, "socks5")
 	defer conn.Close()
 
-	conn = stats.WrapConn(conn, "socks5")
 	rereadConn := reread.New(conn)
 	_ = rereadConn.SetDeadline(time.Now().Add(proxyReadTimeout))
 
