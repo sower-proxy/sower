@@ -14,10 +14,19 @@ import (
 )
 
 const (
-	maxDomainEntries = 10000
-	staleDomainAge   = time.Hour
-	snapshotTopN     = 100
-	clientsTopN      = 50
+	// maxTotalDomains bounds the cumulative domain map. Domains are never
+	// dropped for staleness (unlike the old window-only table); the map only
+	// evicts its least-recently-seen entry once full, so from-start totals
+	// survive while memory stays bounded.
+	maxTotalDomains = 100000
+	// maxTotalClients bounds the cumulative per-client table.
+	maxTotalClients = 4096
+	// maxClientsPerDomain guards one domain's per-client breakdown against a
+	// pathological number of source IPs; extra clients are not attributed.
+	maxClientsPerDomain = 64
+	staleDomainAge      = time.Hour
+	snapshotTopN        = 100
+	clientsTopN         = 50
 
 	// historyCapacity keeps one hour of samples at the 5s poll cadence.
 	historyCapacity = 720
@@ -181,6 +190,9 @@ type Stats struct {
 
 	mu      sync.Mutex
 	domains map[string]*domainStat
+	// clients holds the from-start cumulative per-client totals. It is
+	// independent of the domain map so client totals survive domain eviction.
+	clients map[string]*clientStat
 
 	histMu     sync.Mutex
 	history    []HistorySample
@@ -236,6 +248,7 @@ func NewStats() (*Stats, error) {
 		start:   time.Now(),
 		metrics: m,
 		domains: make(map[string]*domainStat),
+		clients: make(map[string]*clientStat),
 	}, nil
 }
 
@@ -250,7 +263,7 @@ func (s *Stats) RecordDNS(qname string, clientIP string) {
 	if domain == "" {
 		return
 	}
-	s.record(domain, SourceDNS, clientIP, func(d *domainStat, src *sourceStat, dc *clientStat) {
+	s.record(domain, SourceDNS, clientIP, 1, 0, 0, func(d *domainStat, src *sourceStat, dc *clientStat) {
 		d.conns++
 		src.conns++
 		if dc != nil {
@@ -312,7 +325,7 @@ func (s *Stats) BindConn(conn net.Conn, domain string) {
 	}
 	cc.bind(domain)
 	source := Source(cc.kind)
-	s.record(domain, source, cc.clientIP, func(d *domainStat, src *sourceStat, dc *clientStat) {
+	s.record(domain, source, cc.clientIP, 1, 0, 0, func(d *domainStat, src *sourceStat, dc *clientStat) {
 		d.conns++
 		src.conns++
 		if dc != nil {
@@ -321,11 +334,12 @@ func (s *Stats) BindConn(conn net.Conn, domain string) {
 	})
 }
 
-// Snapshot returns an immutable view of the current stats, advancing the
-// history ring and evicting stale domains along the way. sort selects the
-// domain ordering, source restricts domains to one entry point, and client
-// restricts them to one client IP; invalid values fall back to
-// DomainSortBytes and SourceAll, and an empty client disables the filter.
+// Snapshot returns the window view of the current stats, advancing the
+// history ring along the way. Domains stale for over staleDomainAge are
+// hidden from the window but kept in the map for the cumulative Totals view.
+// sort selects the domain ordering, source restricts domains to one entry
+// point, and client restricts them to one client IP; invalid values fall back
+// to DomainSortBytes and SourceAll, and an empty client disables the filter.
 // Clients aggregates per-client counters over the source-filtered view and
 // is intentionally unaffected by the client filter, so the console's client
 // chips stay stable while one is selected.
@@ -357,7 +371,8 @@ func (s *Stats) Snapshot(sort DomainSort, source Source, client string) TrafficS
 	clientAgg := make(map[string]*ClientStat)
 	for domain, d := range s.domains {
 		if time.Since(d.lastSeen) > staleDomainAge {
-			delete(s.domains, domain)
+			// Window view only: the entry stays in the map so the cumulative
+			// Totals view keeps its from-start counters.
 			continue
 		}
 		ds := DomainStat{
@@ -443,6 +458,67 @@ func topClients(agg map[string]*ClientStat) []ClientStat {
 		out = out[:clientsTopN]
 	}
 	return out
+}
+
+// Totals is the from-start cumulative traffic view, independent of the
+// window's staleness filter.
+type Totals struct {
+	Domains []DomainStat `json:"domains"`
+	Clients []ClientStat `json:"clients"`
+}
+
+// Totals returns the cumulative top domains and clients since start, each
+// ordered by total bytes. Unlike Snapshot it ignores staleness: counters
+// accumulate until the bounded maps evict their least-recently-seen entries.
+func (s *Stats) Totals() Totals {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	domains := make([]DomainStat, 0, len(s.domains))
+	for domain, d := range s.domains {
+		ds := DomainStat{
+			Domain:    domain,
+			Conns:     d.conns,
+			BytesUp:   d.bytesUp,
+			BytesDown: d.bytesDown,
+			LastSeen:  d.lastSeen,
+		}
+		var latest time.Time
+		for ip, c := range d.byClient {
+			if c.lastSeen.After(latest) {
+				latest, ds.LastClientIP = c.lastSeen, ip
+			}
+		}
+		domains = append(domains, ds)
+	}
+	sortDomains(domains, DomainSortBytes)
+	if len(domains) > snapshotTopN {
+		domains = domains[:snapshotTopN]
+	}
+
+	clients := make([]ClientStat, 0, len(s.clients))
+	for ip, c := range s.clients {
+		clients = append(clients, ClientStat{
+			IP:        ip,
+			Conns:     c.conns,
+			BytesUp:   c.bytesUp,
+			BytesDown: c.bytesDown,
+			LastSeen:  c.lastSeen,
+		})
+	}
+	sort.Slice(clients, func(i, j int) bool {
+		ti := clients[i].BytesUp + clients[i].BytesDown
+		tj := clients[j].BytesUp + clients[j].BytesDown
+		if ti == tj {
+			return clients[i].IP < clients[j].IP
+		}
+		return ti > tj
+	})
+	if len(clients) > clientsTopN {
+		clients = clients[:clientsTopN]
+	}
+
+	return Totals{Domains: domains, Clients: clients}
 }
 
 // sortDomains orders domains by the selected mode: total bytes (default),
@@ -562,14 +638,16 @@ func (s *Stats) rates() (up, down, dns, conns float64) {
 }
 
 // record attributes one event to a domain, its source, and optionally its
-// client IP. The client IP may be empty when it cannot be determined; the
-// per-client stat is then nil and callers must guard.
-func (s *Stats) record(domain string, source Source, clientIP string, update func(*domainStat, *sourceStat, *clientStat)) {
+// client IP, with the given counter deltas. The client IP may be empty when it
+// cannot be determined; the per-client stat is then nil and callers must
+// guard. The deltas also feed the independent cumulative client table, so
+// client totals are exact regardless of domain eviction.
+func (s *Stats) record(domain string, source Source, clientIP string, conns, up, down uint64, update func(*domainStat, *sourceStat, *clientStat)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	d := s.domains[domain]
 	if d == nil {
-		if len(s.domains) >= maxDomainEntries {
+		if len(s.domains) >= maxTotalDomains {
 			s.evictOldestLocked()
 		}
 		d = &domainStat{bySource: make(map[Source]*sourceStat)}
@@ -586,16 +664,32 @@ func (s *Stats) record(domain string, source Source, clientIP string, update fun
 			d.byClient = make(map[string]*clientStat)
 		}
 		dc = d.byClient[clientIP]
-		if dc == nil {
+		if dc == nil && len(d.byClient) < maxClientsPerDomain {
 			dc = &clientStat{}
 			d.byClient[clientIP] = dc
 		}
 	}
 	update(d, src, dc)
-	d.lastSeen = time.Now()
-	src.lastSeen = time.Now()
+	now := time.Now()
+	d.lastSeen = now
+	src.lastSeen = now
 	if dc != nil {
-		dc.lastSeen = time.Now()
+		dc.lastSeen = now
+	}
+
+	if clientIP != "" {
+		cc := s.clients[clientIP]
+		if cc == nil {
+			if len(s.clients) >= maxTotalClients {
+				s.evictOldestClientLocked()
+			}
+			cc = &clientStat{}
+			s.clients[clientIP] = cc
+		}
+		cc.conns += conns
+		cc.bytesUp += up
+		cc.bytesDown += down
+		cc.lastSeen = now
 	}
 }
 
@@ -612,6 +706,22 @@ func (s *Stats) evictOldestLocked() {
 	}
 	if oldestKey != "" {
 		delete(s.domains, oldestKey)
+	}
+}
+
+// evictOldestClientLocked drops the single least-recently-seen client to keep
+// the cumulative client table bounded.
+func (s *Stats) evictOldestClientLocked() {
+	var oldestKey string
+	var oldest time.Time
+	for ip, c := range s.clients {
+		if oldestKey == "" || c.lastSeen.Before(oldest) {
+			oldestKey = ip
+			oldest = c.lastSeen
+		}
+	}
+	if oldestKey != "" {
+		delete(s.clients, oldestKey)
 	}
 }
 
@@ -675,7 +785,13 @@ func (c *countingConn) recordBytes(n int, up bool) {
 		return
 	}
 	source := Source(c.kind)
-	c.stats.record(domain, source, c.clientIP, func(d *domainStat, src *sourceStat, dc *clientStat) {
+	var upBytes, downBytes uint64
+	if up {
+		upBytes = uint64(n)
+	} else {
+		downBytes = uint64(n)
+	}
+	c.stats.record(domain, source, c.clientIP, 0, upBytes, downBytes, func(d *domainStat, src *sourceStat, dc *clientStat) {
 		if up {
 			d.bytesUp += uint64(n)
 			src.bytesUp += uint64(n)

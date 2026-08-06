@@ -403,6 +403,28 @@ func TestTrafficEndpoint(t *testing.T) {
 	}
 }
 
+func TestTotalsEndpoint(t *testing.T) {
+	stats := newTestStats(t)
+	s := NewServer(Options{Password: "secret", Version: "v1.2.3", Date: "2026-01-01", Rules: newFakeRules(), Stats: stats})
+	ts := httptest.NewServer(s.http.Handler)
+	t.Cleanup(ts.Close)
+
+	cookie := login(t, ts, "secret")
+	stats.RecordDNS("example.com.", "192.168.1.10")
+
+	resp := authedRequest(t, ts, http.MethodGet, "/api/totals", cookie, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	body := decodeBody(t, resp)
+	if domains, ok := body["domains"].([]any); !ok || len(domains) != 1 {
+		t.Fatalf("expected 1 domain in totals, got %v", body["domains"])
+	}
+	if clients, ok := body["clients"].([]any); !ok || len(clients) != 1 {
+		t.Fatalf("expected 1 client in totals, got %v", body["clients"])
+	}
+}
+
 func TestTrafficEndpointRejectsMissingStats(t *testing.T) {
 	s := NewServer(Options{Password: "secret", Rules: newFakeRules()})
 	ts := httptest.NewServer(s.http.Handler)

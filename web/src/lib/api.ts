@@ -47,6 +47,11 @@ export interface TrafficSnapshot {
 	clients: ClientStat[];
 }
 
+export interface Totals {
+	domains: DomainStat[];
+	clients: ClientStat[];
+}
+
 export interface HistorySample {
 	at: string;
 	bytesUp: number;
@@ -138,7 +143,9 @@ export const api = {
 		if (sort) params.push(`sort=${sort}`);
 		if (source && source !== "all") params.push(`source=${source}`);
 		if (client) params.push(`client=${encodeURIComponent(client)}`);
-		return request<TrafficSnapshot>(params.length ? `/api/traffic?${params.join("&")}` : "/api/traffic");
+		return request<TrafficSnapshot>(
+			params.length ? `/api/traffic?${params.join("&")}` : "/api/traffic",
+		);
 	},
 	history: () => request<History>("/api/history"),
 };

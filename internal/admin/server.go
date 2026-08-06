@@ -107,6 +107,7 @@ func NewServer(opts Options) *Server {
 	mux.HandleFunc("POST /api/rules", s.mutateGuard(s.auth(s.handleRulesAdd)))
 	mux.HandleFunc("DELETE /api/rules", s.mutateGuard(s.auth(s.handleRulesRemove)))
 	mux.HandleFunc("GET /api/traffic", s.mutateGuard(s.auth(s.handleTraffic)))
+	mux.HandleFunc("GET /api/totals", s.mutateGuard(s.auth(s.handleTotals)))
 	mux.HandleFunc("GET /api/history", s.mutateGuard(s.auth(s.handleHistory)))
 	mux.HandleFunc("GET /api/stream", s.mutateGuard(s.auth(s.handleStream)))
 	if s.opts.Stats != nil {
@@ -447,6 +448,16 @@ func (s *Server) handleTraffic(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.opts.Stats.Snapshot(sort, source, client))
 }
 
+// handleTotals serves the from-start cumulative traffic view. It ignores
+// staleness and query filters: totals are the whole picture, not a window.
+func (s *Server) handleTotals(w http.ResponseWriter, r *http.Request) {
+	if s.opts.Stats == nil {
+		writeError(w, http.StatusInternalServerError, "stats unavailable")
+		return
+	}
+	writeJSON(w, http.StatusOK, s.opts.Stats.Totals())
+}
+
 // parseTrafficQuery extracts the domain sort, source, and client filters
 // shared by /api/traffic and the SSE stream.
 func parseTrafficQuery(r *http.Request) (sort DomainSort, source Source, client string) {
@@ -508,11 +519,14 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	send("status", s.statusPayload())
 	send("traffic", s.opts.Stats.Snapshot(sort, source, client))
 	send("history", s.opts.Stats.History())
+	send("totals", s.opts.Stats.Totals())
 
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	historyTicker := time.NewTicker(10 * time.Second)
 	defer historyTicker.Stop()
+	totalsTicker := time.NewTicker(30 * time.Second)
+	defer totalsTicker.Stop()
 
 	for {
 		select {
@@ -527,6 +541,8 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 			send("traffic", s.opts.Stats.Snapshot(sort, source, client))
 		case <-historyTicker.C:
 			send("history", s.opts.Stats.History())
+		case <-totalsTicker.C:
+			send("totals", s.opts.Stats.Totals())
 		}
 	}
 }

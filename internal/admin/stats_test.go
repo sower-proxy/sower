@@ -139,13 +139,13 @@ func TestStatsSnapshotEvictsStaleDomains(t *testing.T) {
 
 func TestStatsDomainCapIsEnforced(t *testing.T) {
 	s := newTestStats(t)
-	for i := 0; i < maxDomainEntries+50; i++ {
-		s.record(fmt.Sprintf("host%d.example", i), SourceHTTP, "", func(d *domainStat, src *sourceStat, dc *clientStat) {})
+	for i := 0; i < maxTotalDomains+50; i++ {
+		s.record(fmt.Sprintf("host%d.example", i), SourceHTTP, "", 1, 0, 0, func(d *domainStat, src *sourceStat, dc *clientStat) {})
 	}
 	s.mu.Lock()
 	n := len(s.domains)
 	s.mu.Unlock()
-	if n > maxDomainEntries {
+	if n > maxTotalDomains {
 		t.Fatalf("expected domain cap enforced, got %d entries", n)
 	}
 	if n == 0 {
@@ -169,15 +169,15 @@ func TestEvictOldestLocked(t *testing.T) {
 
 func TestStatsSnapshotSortsByTotalBytes(t *testing.T) {
 	s := newTestStats(t)
-	s.record("small.example", SourceHTTP, "", func(d *domainStat, src *sourceStat, dc *clientStat) {
+	s.record("small.example", SourceHTTP, "", 0, 0, 0, func(d *domainStat, src *sourceStat, dc *clientStat) {
 		d.bytesUp, d.bytesDown = 1, 1
 		src.bytesUp, src.bytesDown = 1, 1
 	})
-	s.record("big.example", SourceHTTP, "", func(d *domainStat, src *sourceStat, dc *clientStat) {
+	s.record("big.example", SourceHTTP, "", 0, 0, 0, func(d *domainStat, src *sourceStat, dc *clientStat) {
 		d.bytesUp, d.bytesDown = 100, 100
 		src.bytesUp, src.bytesDown = 100, 100
 	})
-	s.record("mid.example", SourceHTTP, "", func(d *domainStat, src *sourceStat, dc *clientStat) {
+	s.record("mid.example", SourceHTTP, "", 0, 0, 0, func(d *domainStat, src *sourceStat, dc *clientStat) {
 		d.bytesUp, d.bytesDown = 10, 10
 		src.bytesUp, src.bytesDown = 10, 10
 	})
@@ -529,5 +529,77 @@ func TestStatsSnapshotClientsAggregate(t *testing.T) {
 	}
 	if snap.Clients[1].IP != "192.168.1.20" {
 		t.Fatalf("unexpected second client: %+v", snap.Clients[1])
+	}
+}
+
+func TestStatsTotalsSurviveStaleness(t *testing.T) {
+	s := newTestStats(t)
+	old := time.Now().Add(-2 * staleDomainAge)
+	s.mu.Lock()
+	s.domains["old.example"] = &domainStat{
+		conns: 5, bytesUp: 500, bytesDown: 500, lastSeen: old,
+		bySource: map[Source]*sourceStat{
+			SourceHTTP: {conns: 5, bytesUp: 500, bytesDown: 500, lastSeen: old},
+		},
+	}
+	s.mu.Unlock()
+
+	// the window view hides the stale domain, the totals keep it
+	snap := s.Snapshot(DomainSortBytes, SourceAll, "")
+	if len(snap.Domains) != 0 {
+		t.Fatalf("expected stale domain hidden from window, got %+v", snap.Domains)
+	}
+	tot := s.Totals()
+	if len(tot.Domains) != 1 || tot.Domains[0].Domain != "old.example" || tot.Domains[0].Conns != 5 {
+		t.Fatalf("expected stale domain kept in totals, got %+v", tot.Domains)
+	}
+}
+
+func TestStatsTotalsClientsSurviveDomainEviction(t *testing.T) {
+	s := newTestStats(t)
+	s.record("evicted.example", SourceHTTP, "192.168.1.10", 2, 100, 200, func(d *domainStat, src *sourceStat, dc *clientStat) {
+		d.conns += 2
+		src.conns += 2
+	})
+	s.mu.Lock()
+	delete(s.domains, "evicted.example") // simulate cap eviction
+	s.mu.Unlock()
+
+	tot := s.Totals()
+	if len(tot.Domains) != 0 {
+		t.Fatalf("expected no domains after eviction, got %+v", tot.Domains)
+	}
+	if len(tot.Clients) != 1 || tot.Clients[0].IP != "192.168.1.10" ||
+		tot.Clients[0].Conns != 2 || tot.Clients[0].BytesUp != 100 || tot.Clients[0].BytesDown != 200 {
+		t.Fatalf("expected client totals to survive domain eviction, got %+v", tot.Clients)
+	}
+}
+
+func TestStatsClientCapIsEnforced(t *testing.T) {
+	s := newTestStats(t)
+	for i := 0; i < maxTotalClients+10; i++ {
+		s.record(fmt.Sprintf("host%d.example", i), SourceHTTP, fmt.Sprintf("192.168.%d.%d", i/256, i%256), 1, 0, 0, func(d *domainStat, src *sourceStat, dc *clientStat) {})
+	}
+	s.mu.Lock()
+	n := len(s.clients)
+	s.mu.Unlock()
+	if n > maxTotalClients {
+		t.Fatalf("expected client cap enforced, got %d entries", n)
+	}
+	if n == 0 {
+		t.Fatal("expected some clients to survive")
+	}
+}
+
+func TestStatsClientsPerDomainCap(t *testing.T) {
+	s := newTestStats(t)
+	for i := 0; i < maxClientsPerDomain+10; i++ {
+		s.record("shared.example", SourceHTTP, fmt.Sprintf("192.0.2.%d", i), 1, 0, 0, func(d *domainStat, src *sourceStat, dc *clientStat) {})
+	}
+	s.mu.Lock()
+	n := len(s.domains["shared.example"].byClient)
+	s.mu.Unlock()
+	if n > maxClientsPerDomain {
+		t.Fatalf("expected per-domain client cap, got %d entries", n)
 	}
 }

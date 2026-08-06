@@ -18,9 +18,17 @@
     { value: 'conns', label: '连接数' },
   ]
 
-  // The domain table is fed by the shared SSE stream, filtered by the
-  // connection params below.
-  const traffic = $derived(live.traffic)
+  type View = 'live' | 'totals'
+  let view = $state<View>('live')
+
+  // Live view is fed by the SSE traffic events; totals are the cumulative
+  // since-start view pushed every 30s.
+  const domains = $derived(
+    view === 'totals' ? (live.totals?.domains ?? []) : (live.traffic?.domains ?? []),
+  )
+  const clients = $derived(
+    view === 'totals' ? (live.totals?.clients ?? []) : (live.traffic?.clients ?? []),
+  )
   let filter = $state('')
   let sort: SortMode = $state('bytes')
   let client = $state('')
@@ -37,11 +45,14 @@
   const isDNSView = $derived(source === 'dns')
 
   const visibleDomains = $derived.by(() => {
-    const domains = traffic?.domains ?? []
     const q = filter.trim().toLowerCase()
     if (!q) return domains
     return domains.filter((d) => d.domain.toLowerCase().includes(q))
   })
+
+  // The totals view spans every source, so byte columns stay visible even
+  // when the breadcrumb has narrowed the live view to DNS.
+  const showBytes = $derived(view === 'totals' || !isDNSView)
 
   // Re-point the SSE stream whenever a page filter changes.
   $effect(() => {
@@ -55,7 +66,7 @@
   const headCell = 'sticky top-0 z-10 bg-card'
 </script>
 
-{#if !traffic}
+{#if !live.traffic && !live.totals}
   <Loading />
 {:else}
   {#if !live.connected}
@@ -76,50 +87,81 @@
     <div
       class="flex shrink-0 items-center gap-0.5 rounded-md border bg-muted/50 p-0.5"
       role="group"
-      aria-label="排序方式"
+      aria-label="数据范围"
     >
-      {#each sortModes as m}
-        <button
-          type="button"
-          class="rounded-sm px-2.5 py-1 text-xs font-medium transition-colors {sort === m.value
-            ? 'bg-card text-foreground shadow-sm'
-            : 'text-muted-foreground hover:text-foreground'}"
-          aria-pressed={sort === m.value}
-          onclick={() => (sort = m.value)}
-        >
-          {m.label}
-        </button>
-      {/each}
+      <button
+        type="button"
+        class="rounded-sm px-2.5 py-1 text-xs font-medium transition-colors {view === 'live'
+          ? 'bg-card text-foreground shadow-sm'
+          : 'text-muted-foreground hover:text-foreground'}"
+        aria-pressed={view === 'live'}
+        onclick={() => (view = 'live')}
+      >
+        实时
+      </button>
+      <button
+        type="button"
+        class="rounded-sm px-2.5 py-1 text-xs font-medium transition-colors {view === 'totals'
+          ? 'bg-card text-foreground shadow-sm'
+          : 'text-muted-foreground hover:text-foreground'}"
+        aria-pressed={view === 'totals'}
+        onclick={() => (view = 'totals')}
+      >
+        总计
+      </button>
     </div>
+    {#if view === 'live'}
+      <div
+        class="flex shrink-0 items-center gap-0.5 rounded-md border bg-muted/50 p-0.5"
+        role="group"
+        aria-label="排序方式"
+      >
+        {#each sortModes as m}
+          <button
+            type="button"
+            class="rounded-sm px-2.5 py-1 text-xs font-medium transition-colors {sort === m.value
+              ? 'bg-card text-foreground shadow-sm'
+              : 'text-muted-foreground hover:text-foreground'}"
+            aria-pressed={sort === m.value}
+            onclick={() => (sort = m.value)}
+          >
+            {m.label}
+          </button>
+        {/each}
+      </div>
+    {/if}
     <Badge variant="secondary" class="ml-auto shrink-0">
-      {#if visibleDomains.length === (traffic.domains ?? []).length}
+      {#if visibleDomains.length === domains.length}
         {formatCount(visibleDomains.length)} domains
       {:else}
-        {formatCount(visibleDomains.length)} / {formatCount((traffic.domains ?? []).length)} domains
+        {formatCount(visibleDomains.length)} / {formatCount(domains.length)} domains
       {/if}
     </Badge>
   </div>
-  {#if (traffic.clients ?? []).length > 0}
+  {#if clients.length > 0}
     <div class="mb-3 flex flex-wrap items-center gap-1.5" role="group" aria-label="客户端过滤">
       <button
         type="button"
-        class="rounded-full border px-3 py-1 text-xs font-medium transition-colors {!client
+        class="rounded-full border px-3 py-1 text-xs font-medium transition-colors {view === 'live' && !client
           ? 'border-primary/40 bg-primary/10 text-foreground'
           : 'text-muted-foreground hover:text-foreground'}"
-        aria-pressed={!client}
+        aria-pressed={view === 'live' && !client}
         onclick={() => (client = '')}
       >
         全部客户端
       </button>
-      {#each traffic.clients as c}
+      {#each clients as c}
         <button
           type="button"
-          class="rounded-full border px-3 py-1 font-mono text-xs transition-colors {client === c.ip
+          class="rounded-full border px-3 py-1 font-mono text-xs transition-colors {view === 'live' && client === c.ip
             ? 'border-primary/40 bg-primary/10 text-foreground'
             : 'text-muted-foreground hover:text-foreground'}"
-          aria-pressed={client === c.ip}
+          aria-pressed={view === 'live' && client === c.ip}
           title={`${formatCount(c.conns)} 次 · ↑${formatBytes(c.bytesUp)} ↓${formatBytes(c.bytesDown)}`}
-          onclick={() => (client = c.ip)}
+          onclick={() => {
+            if (view === 'totals') view = 'live'
+            client = c.ip
+          }}
         >
           {c.ip}
           <span class="ms-1 text-muted-foreground">{formatCount(c.conns)}</span>
@@ -127,10 +169,10 @@
       {/each}
     </div>
   {/if}
-  {#if (traffic.domains ?? []).length === 0}
+  {#if domains.length === 0}
     <div class="flex flex-col items-center gap-2 rounded-lg border border-dashed py-10 text-sm text-muted-foreground">
       <Inbox class="size-5" aria-hidden="true" />
-      <p>暂无{sourceLabel}记录。</p>
+      <p>{view === 'totals' ? '暂无总计记录。' : `暂无${sourceLabel}记录。`}</p>
     </div>
   {:else}
     <Card.Card class="max-h-[70vh] overflow-auto">
@@ -139,7 +181,7 @@
         <Table.TableRow>
           <Table.TableHead class={headCell}>Domain</Table.TableHead>
           <Table.TableHead class={headCell + ' text-right'}>Requests</Table.TableHead>
-          {#if !isDNSView}
+          {#if showBytes}
             <Table.TableHead class={headCell + ' text-right'}>Up</Table.TableHead>
             <Table.TableHead class={headCell + ' text-right'}>Down</Table.TableHead>
             <Table.TableHead class={headCell + ' text-right'}>Total</Table.TableHead>
@@ -151,7 +193,7 @@
       <Table.TableBody>
         {#if visibleDomains.length === 0}
           <Table.TableRow>
-            <Table.TableCell colspan={isDNSView ? 4 : 7} class="py-8 text-center text-sm text-muted-foreground">
+            <Table.TableCell colspan={showBytes ? 7 : 4} class="py-8 text-center text-sm text-muted-foreground">
               没有匹配“{filter}”的域名。
             </Table.TableCell>
           </Table.TableRow>
@@ -160,7 +202,7 @@
           <Table.TableRow>
             <Table.TableCell class="max-w-[20rem] truncate font-mono text-xs">{d.domain}</Table.TableCell>
             <Table.TableCell class="text-right tabular-nums">{formatCount(d.conns)}</Table.TableCell>
-            {#if !isDNSView}
+            {#if showBytes}
               <Table.TableCell class="text-right tabular-nums">{formatBytes(d.bytesUp)}</Table.TableCell>
               <Table.TableCell class="text-right tabular-nums">{formatBytes(d.bytesDown)}</Table.TableCell>
               <Table.TableCell class="text-right font-medium tabular-nums">
@@ -179,7 +221,13 @@
     </Table.Table>
     </Card.Card>
   {/if}
-  <p class="mt-2 text-xs text-muted-foreground">
-    按{activeSortLabel}排序的前 100 个{isDNSView ? 'DNS 查询域名' : sourceLabel + '域名'}，实时推送。
-  </p>
+  {#if view === 'totals'}
+    <p class="mt-2 text-xs text-muted-foreground">
+      自启动以来按流量排序的前 {formatCount(domains.length)} 个域名与客户端，每 30 秒更新。
+    </p>
+  {:else}
+    <p class="mt-2 text-xs text-muted-foreground">
+      按{activeSortLabel}排序的前 100 个{isDNSView ? 'DNS 查询域名' : sourceLabel + '域名'}，实时推送。
+    </p>
+  {/if}
 {/if}
