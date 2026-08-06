@@ -71,13 +71,16 @@ func (s Source) valid() bool {
 }
 
 // DomainStat aggregates traffic for a single domain. Conns counts both proxy
-// connections and DNS queries involving the domain.
+// connections and DNS queries involving the domain. LastClientIP is the most
+// recent client IP for the displayed view: the filtered client itself when a
+// client filter is active, otherwise the latest client across all sources.
 type DomainStat struct {
-	Domain    string    `json:"domain"`
-	Conns     uint64    `json:"conns"`
-	BytesUp   uint64    `json:"bytesUp"`
-	BytesDown uint64    `json:"bytesDown"`
-	LastSeen  time.Time `json:"lastSeen"`
+	Domain       string    `json:"domain"`
+	Conns        uint64    `json:"conns"`
+	BytesUp      uint64    `json:"bytesUp"`
+	BytesDown    uint64    `json:"bytesDown"`
+	LastSeen     time.Time `json:"lastSeen"`
+	LastClientIP string    `json:"lastClientIP"`
 }
 
 // TrafficSnapshot is an immutable point-in-time view of traffic stats.
@@ -400,6 +403,17 @@ func (s *Stats) Snapshot(sort DomainSort, source Source, client string) TrafficS
 			ds.BytesUp = dc.bytesUp
 			ds.BytesDown = dc.bytesDown
 			ds.LastSeen = dc.lastSeen
+			ds.LastClientIP = client
+		} else {
+			// Most recent client across all sources for the domain; the
+			// per-client map has no source dimension, so this is the best
+			// approximation for a source-filtered view.
+			var latest time.Time
+			for ip, c := range d.byClient {
+				if c.lastSeen.After(latest) {
+					latest, ds.LastClientIP = c.lastSeen, ip
+				}
+			}
 		}
 		snap.Domains = append(snap.Domains, ds)
 	}

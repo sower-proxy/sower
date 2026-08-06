@@ -17,6 +17,7 @@ export interface DomainStat {
 	bytesUp: number;
 	bytesDown: number;
 	lastSeen: string;
+	lastClientIP: string;
 }
 
 export interface ClientStat {

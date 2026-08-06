@@ -473,6 +473,33 @@ func TestStatsSnapshotClientFilter(t *testing.T) {
 	}
 }
 
+func TestStatsSnapshotLastClientIP(t *testing.T) {
+	s := newTestStats(t)
+	now := time.Now()
+
+	s.mu.Lock()
+	s.domains["a.example"] = &domainStat{
+		lastSeen: now,
+		byClient: map[string]*clientStat{
+			"192.168.1.10": {conns: 1, bytesUp: 100, bytesDown: 100, lastSeen: now.Add(-2 * time.Minute)},
+			"192.168.1.20": {conns: 1, bytesUp: 100, bytesDown: 100, lastSeen: now.Add(-1 * time.Minute)},
+		},
+	}
+	s.mu.Unlock()
+
+	// unfiltered: the client with the most recent activity wins
+	view := s.Snapshot(DomainSortBytes, SourceAll, "")
+	if len(view.Domains) != 1 || view.Domains[0].LastClientIP != "192.168.1.20" {
+		t.Fatalf("expected .20 as last client, got %+v", view.Domains)
+	}
+
+	// client-filtered: the filter itself is the last client of the view
+	filtered := s.Snapshot(DomainSortBytes, SourceAll, "192.168.1.10")
+	if len(filtered.Domains) != 1 || filtered.Domains[0].LastClientIP != "192.168.1.10" {
+		t.Fatalf("expected filter client as last client, got %+v", filtered.Domains)
+	}
+}
+
 func TestStatsSnapshotClientsAggregate(t *testing.T) {
 	s := newTestStats(t)
 	now := time.Now()

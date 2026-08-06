@@ -144,13 +144,14 @@
             <Table.TableHead class={headCell + ' text-right'}>Down</Table.TableHead>
             <Table.TableHead class={headCell + ' text-right'}>Total</Table.TableHead>
           {/if}
+          <Table.TableHead class={headCell}>Client</Table.TableHead>
           <Table.TableHead class={headCell + ' text-right'}>Last seen</Table.TableHead>
         </Table.TableRow>
       </Table.TableHeader>
       <Table.TableBody>
         {#if visibleDomains.length === 0}
           <Table.TableRow>
-            <Table.TableCell colspan={isDNSView ? 3 : 6} class="py-8 text-center text-sm text-muted-foreground">
+            <Table.TableCell colspan={isDNSView ? 4 : 7} class="py-8 text-center text-sm text-muted-foreground">
               没有匹配“{filter}”的域名。
             </Table.TableCell>
           </Table.TableRow>
@@ -166,6 +167,9 @@
                 {formatBytes(d.bytesUp + d.bytesDown)}
               </Table.TableCell>
             {/if}
+            <Table.TableCell class="max-w-[9rem] truncate font-mono text-xs text-muted-foreground" title={d.lastClientIP}>
+              {d.lastClientIP || '—'}
+            </Table.TableCell>
             <Table.TableCell class="text-right text-muted-foreground tabular-nums">
               {formatTime(d.lastSeen)}
             </Table.TableCell>
