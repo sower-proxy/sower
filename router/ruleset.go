@@ -90,6 +90,57 @@ func (rs *RuleSet) Match(item string) bool {
 	return rs.tree.Match(item)
 }
 
+// MatchRule reports the first retained rule that matches item, mirroring the
+// suffix semantics of Match: case-insensitive, trailing dot stripped, "*"
+// matching one label and a trailing "**" any number. It is linear in the
+// rule count and exists for the admin domain test; Match stays the fast path.
+func (rs *RuleSet) MatchRule(item string) (string, bool) {
+	if rs == nil {
+		return "", false
+	}
+
+	rs.mu.RLock()
+	defer rs.mu.RUnlock()
+	for _, rule := range rs.rules {
+		if matchRule(rule, item) {
+			return rule, true
+		}
+	}
+	return "", false
+}
+
+// matchRule reports whether one rule pattern matches item. A "**" in the
+// last label position matches any remaining labels (including none); in the
+// middle it behaves like "*" (one label), matching the suffix-tree builder.
+func matchRule(rule, item string) bool {
+	rule = strings.ToLower(strings.TrimSuffix(rule, "."))
+	item = strings.ToLower(strings.TrimSuffix(item, "."))
+	r := strings.Split(rule, ".")
+	i := strings.Split(item, ".")
+	ri, ii := len(r)-1, len(i)-1
+	for ri >= 0 {
+		switch r[ri] {
+		case "**":
+			if ri == 0 {
+				return true // trailing "**" matches any remaining labels
+			}
+			fallthrough // mid-rule "**" behaves like "*"
+		case "*":
+			if ii < 0 {
+				return false
+			}
+			ii--
+		default:
+			if ii < 0 || r[ri] != i[ii] {
+				return false
+			}
+			ii--
+		}
+		ri--
+	}
+	return ii < 0
+}
+
 // List returns a copy of the retained rules.
 func (rs *RuleSet) List() []string {
 	rs.mu.RLock()

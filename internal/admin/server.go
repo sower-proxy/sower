@@ -70,6 +70,7 @@ type RuleManager interface {
 	RuleAdd(category Category, rules ...string) error
 	RuleRemove(category Category, rule string) (bool, error)
 	RuleCount(category Category) uint64
+	TestDomain(domain string) (DomainTest, error)
 }
 
 // Options configures the admin server.
@@ -106,6 +107,7 @@ func NewServer(opts Options) *Server {
 	mux.HandleFunc("GET /api/rules", s.mutateGuard(s.auth(s.handleRulesList)))
 	mux.HandleFunc("POST /api/rules", s.mutateGuard(s.auth(s.handleRulesAdd)))
 	mux.HandleFunc("DELETE /api/rules", s.mutateGuard(s.auth(s.handleRulesRemove)))
+	mux.HandleFunc("GET /api/rules/test", s.mutateGuard(s.auth(s.handleRulesTest)))
 	mux.HandleFunc("GET /api/traffic", s.mutateGuard(s.auth(s.handleTraffic)))
 	mux.HandleFunc("GET /api/totals", s.mutateGuard(s.auth(s.handleTotals)))
 	mux.HandleFunc("GET /api/history", s.mutateGuard(s.auth(s.handleHistory)))
@@ -367,6 +369,40 @@ func (s *Server) statusPayload() map[string]any {
 type rulesRequest struct {
 	Category Category `json:"category"`
 	Rules    []string `json:"rules"`
+}
+
+// CategoryTest reports whether one rule category matched a tested domain and
+// which retained rule did so.
+type CategoryTest struct {
+	Category Category `json:"category"`
+	Matched  bool     `json:"matched"`
+	Rule     string   `json:"rule"`
+}
+
+// DomainTest is the result of testing a domain against the rule sets. Route
+// is block, direct, or proxy when a rule decides it, or auto when no rule
+// matched and the connection would fall through to detection / proxy.
+type DomainTest struct {
+	Domain  string         `json:"domain"`
+	Route   string         `json:"route"`
+	Matches []CategoryTest `json:"matches"`
+	Note    string         `json:"note,omitempty"`
+}
+
+// handleRulesTest reports which rules match the queried domain and the
+// resulting route decision, without performing any live detection.
+func (s *Server) handleRulesTest(w http.ResponseWriter, r *http.Request) {
+	domain := strings.TrimSpace(r.URL.Query().Get("domain"))
+	if domain == "" {
+		writeError(w, http.StatusBadRequest, "domain is required")
+		return
+	}
+	res, err := s.opts.Rules.TestDomain(domain)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
 }
 
 func (s *Server) handleRulesList(w http.ResponseWriter, r *http.Request) {

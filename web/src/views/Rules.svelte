@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api, ApiError, type Category } from '$lib/api'
+  import { api, ApiError, type Category, type DomainTest } from '$lib/api'
   import { formatCount } from '$lib/format'
   import * as Card from '$lib/components/ui/card'
   import * as Alert from '$lib/components/ui/alert'
@@ -135,6 +135,66 @@
     }
   }
 
+  // Domain routing test: report which rules match a domain and the route a
+  // connection to it would take, without live detection.
+  let testDomain = $state('')
+  let testResult = $state<DomainTest | null>(null)
+  let testing = $state(false)
+  let testError = $state('')
+
+  const routeLabels: Record<DomainTest['route'], string> = {
+    block: '拦截',
+    direct: '直连',
+    proxy: '代理',
+    auto: '自动检测',
+  }
+
+  type BadgeVariant = 'default' | 'secondary' | 'destructive' | 'outline'
+
+  function routeVariant(route: DomainTest['route']): BadgeVariant {
+    switch (route) {
+      case 'block':
+        return 'destructive'
+      case 'direct':
+        return 'secondary'
+      case 'proxy':
+        return 'default'
+      default:
+        return 'outline'
+    }
+  }
+
+  function matchVariant(category: Category, matched: boolean): BadgeVariant {
+    if (!matched) return 'outline'
+    switch (category) {
+      case 'block':
+        return 'destructive'
+      case 'direct':
+        return 'secondary'
+      default:
+        return 'default'
+    }
+  }
+
+  async function runTest() {
+    const domain = testDomain.trim()
+    if (!domain || testing) return
+    testing = true
+    testError = ''
+    testResult = null
+    try {
+      testResult = await api.rulesTest(domain)
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) {
+        onUnauthorized()
+        return
+      }
+      testError = e instanceof Error ? e.message : 'test failed'
+    } finally {
+      testing = false
+    }
+  }
+
   // Reset and reload whenever the breadcrumb-driven category changes.
   $effect(() => {
     category
@@ -167,15 +227,46 @@
 
 <Card.Card class="mb-4">
   <Card.CardContent class="grid gap-3 pt-6">
-    <Textarea
-      bind:value={draft}
-      rows={3}
-      placeholder={'One rule per line, e.g. example.com or **.cn\nRules take effect immediately and reset on restart.'}
-    />
-    <div class="flex gap-2">
-      <Button onclick={addRules} disabled={busy || !draft.trim()}>Add rules</Button>
-      <Button variant="outline" onclick={() => load(true)} disabled={busy}>Refresh</Button>
+    <div class="flex items-center gap-2">
+      <Input
+        bind:value={testDomain}
+        placeholder="检测域名路由，如 example.com"
+        aria-label="检测域名"
+        onkeydown={(e) => {
+          if (e.key === 'Enter') void runTest()
+        }}
+      />
+      <Button onclick={runTest} disabled={testing || !testDomain.trim()}>
+        {testing ? '检测中…' : '检测'}
+      </Button>
     </div>
+    {#if testError}
+      <p class="text-sm text-destructive">{testError}</p>
+    {/if}
+    {#if testResult}
+      <div class="grid gap-2">
+        <div class="flex items-center gap-2 text-sm">
+          <span class="text-muted-foreground">路由</span>
+          <Badge variant={routeVariant(testResult.route)}>{routeLabels[testResult.route]}</Badge>
+          <code class="min-w-0 break-all font-mono">{testResult.domain}</code>
+        </div>
+        <div class="grid gap-1.5">
+          {#each testResult.matches as m}
+            <div class="flex items-center gap-2 text-sm">
+              <Badge variant={matchVariant(m.category, m.matched)}>
+                {m.category}{m.matched ? '' : ' 未命中'}
+              </Badge>
+              {#if m.matched}
+                <code class="min-w-0 break-all font-mono text-xs text-muted-foreground">{m.rule}</code>
+              {/if}
+            </div>
+          {/each}
+        </div>
+        {#if testResult.note}
+          <p class="text-xs text-muted-foreground">{testResult.note}</p>
+        {/if}
+      </div>
+    {/if}
   </Card.CardContent>
 </Card.Card>
 

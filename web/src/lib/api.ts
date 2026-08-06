@@ -79,6 +79,19 @@ export interface RulesResponse {
 	limit: number;
 }
 
+export interface CategoryTest {
+	category: Category;
+	matched: boolean;
+	rule: string;
+}
+
+export interface DomainTest {
+	domain: string;
+	route: "block" | "direct" | "proxy" | "auto";
+	matches: CategoryTest[];
+	note?: string;
+}
+
 export interface RulesQuery {
 	q?: string;
 	offset?: number;
@@ -138,6 +151,8 @@ export const api = {
 			method: "DELETE",
 			body: JSON.stringify({ category, rules }),
 		}),
+	rulesTest: (domain: string) =>
+		request<DomainTest>(`/api/rules/test?domain=${encodeURIComponent(domain)}`),
 	traffic: (sort?: DomainSort, source?: Source, client?: string) => {
 		const params: string[] = [];
 		if (sort) params.push(`sort=${sort}`);

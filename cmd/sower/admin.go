@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/miekg/dns"
@@ -74,6 +75,40 @@ func (a adminRules) rules(category admin.Category) (*router.RuleSet, error) {
 	default:
 		return nil, fmt.Errorf("unknown rule category %q", category)
 	}
+}
+
+// TestDomain reports which rule sets match the domain and the route a
+// connection to it would take. It mirrors DialSmart's rule priority
+// (block > direct > proxy); when no rule matches it reports "auto" without
+// performing live detection.
+func (a adminRules) TestDomain(domain string) (admin.DomainTest, error) {
+	domain = strings.ToLower(strings.TrimSpace(strings.TrimSuffix(domain, ".")))
+	if domain == "" {
+		return admin.DomainTest{}, fmt.Errorf("domain is required")
+	}
+	blockRule, blockOK := a.r.BlockRule.MatchRule(domain)
+	directRule, directOK := a.r.DirectRule.MatchRule(domain)
+	proxyRule, proxyOK := a.r.ProxyRule.MatchRule(domain)
+	res := admin.DomainTest{
+		Domain: domain,
+		Matches: []admin.CategoryTest{
+			{Category: admin.CategoryBlock, Matched: blockOK, Rule: blockRule},
+			{Category: admin.CategoryDirect, Matched: directOK, Rule: directRule},
+			{Category: admin.CategoryProxy, Matched: proxyOK, Rule: proxyRule},
+		},
+	}
+	switch {
+	case blockOK:
+		res.Route = "block"
+	case directOK:
+		res.Route = "direct"
+	case proxyOK:
+		res.Route = "proxy"
+	default:
+		res.Route = "auto"
+		res.Note = "未命中任何规则，将按自动检测（本地站点/可直连）或默认代理路由"
+	}
+	return res, nil
 }
 
 // dnsStatsHandler counts DNS queries before delegating to the router.

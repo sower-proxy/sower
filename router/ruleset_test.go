@@ -47,6 +47,49 @@ func TestRuleSetMatch(t *testing.T) {
 	}
 }
 
+func TestRuleSetMatchRule(t *testing.T) {
+	rs := NewRuleSet("example.com", "**.example.org", "ads.*.com")
+
+	cases := []struct {
+		item string
+		want string
+	}{
+		{"example.com", "example.com"},
+		{"EXAMPLE.COM.", "example.com"}, // normalized like Match
+		{"sub.example.com", ""},
+		{"sub.example.org", "**.example.org"},
+		{"a.b.example.org", "**.example.org"},
+		{"example.org", "**.example.org"},
+		{"ads.cdn.com", "ads.*.com"},
+		{"ads.a.b.com", ""}, // mid-rule * matches one label only
+		{"github.com", ""},
+	}
+	for _, tc := range cases {
+		got, ok := rs.MatchRule(tc.item)
+		if tc.want == "" {
+			if ok {
+				t.Fatalf("MatchRule(%q) = %q, want no match", tc.item, got)
+			}
+			continue
+		}
+		if !ok || got != tc.want {
+			t.Fatalf("MatchRule(%q) = %q, %v; want %q", tc.item, got, ok, tc.want)
+		}
+	}
+
+	// MatchRule agrees with Match on every case the tree sees
+	for _, item := range []string{"example.com", "sub.example.com", "sub.example.org", "anything"} {
+		if got, ok := rs.MatchRule(item); ok != rs.Match(item) {
+			t.Fatalf("MatchRule(%q) = %q, %v diverges from Match %v", item, got, ok, rs.Match(item))
+		}
+	}
+
+	var nilRS *RuleSet
+	if _, ok := nilRS.MatchRule("x"); ok {
+		t.Fatal("expected nil RuleSet MatchRule to miss")
+	}
+}
+
 func TestRuleSetRemoveRebuildsTree(t *testing.T) {
 	rs := NewRuleSet("example.com", "github.com", "**.cn")
 

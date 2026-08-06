@@ -70,6 +70,41 @@ func (f *fakeRules) RuleCount(c Category) uint64 {
 	return uint64(len(f.lists[c]))
 }
 
+func (f *fakeRules) TestDomain(domain string) (DomainTest, error) {
+	domain = strings.ToLower(strings.TrimSpace(strings.TrimSuffix(domain, ".")))
+	if domain == "" {
+		return DomainTest{}, fmt.Errorf("domain is required")
+	}
+	res := DomainTest{Domain: domain}
+	for _, c := range []Category{CategoryBlock, CategoryDirect, CategoryProxy} {
+		rule, ok := fakeRuleMatch(f.lists[c], domain)
+		res.Matches = append(res.Matches, CategoryTest{Category: c, Matched: ok, Rule: rule})
+		if ok && res.Route == "" {
+			res.Route = string(c)
+		}
+	}
+	if res.Route == "" {
+		res.Route = "auto"
+		res.Note = "no rule matched"
+	}
+	return res, nil
+}
+
+// fakeRuleMatch is the fake's linear matcher: exact match, "*", or "**." prefix.
+func fakeRuleMatch(rules []string, item string) (string, bool) {
+	for _, rule := range rules {
+		switch {
+		case rule == "*":
+			return rule, true
+		case strings.HasPrefix(rule, "**.") && strings.HasSuffix(item, strings.TrimPrefix(rule, "**")):
+			return rule, true
+		case rule == item:
+			return rule, true
+		}
+	}
+	return "", false
+}
+
 func newTestServer(t *testing.T, rules RuleManager) *httptest.Server {
 	t.Helper()
 	s := NewServer(Options{Password: "secret", Version: "v1.2.3", Date: "2026-01-01", Rules: rules, Stats: newTestStats(t)})
@@ -422,6 +457,51 @@ func TestTotalsEndpoint(t *testing.T) {
 	}
 	if clients, ok := body["clients"].([]any); !ok || len(clients) != 1 {
 		t.Fatalf("expected 1 client in totals, got %v", body["clients"])
+	}
+}
+
+func TestRulesTestEndpoint(t *testing.T) {
+	s := NewServer(Options{Password: "secret", Rules: newFakeRules()})
+	if err := s.opts.Rules.RuleAdd(CategoryBlock, "ads.example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.opts.Rules.RuleAdd(CategoryProxy, "**.example.org"); err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(s.http.Handler)
+	t.Cleanup(ts.Close)
+	cookie := login(t, ts, "secret")
+
+	resp := authedRequest(t, ts, http.MethodGet, "/api/rules/test?domain=ads.example.com", cookie, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	body := decodeBody(t, resp)
+	if body["domain"] != "ads.example.com" || body["route"] != "block" {
+		t.Fatalf("unexpected test result: %v", body)
+	}
+	matches := body["matches"].([]any)
+	first := matches[0].(map[string]any)
+	if first["category"] != "block" || first["matched"] != true || first["rule"] != "ads.example.com" {
+		t.Fatalf("unexpected block match: %v", first)
+	}
+
+	resp = authedRequest(t, ts, http.MethodGet, "/api/rules/test?domain=sub.example.org", cookie, "")
+	body = decodeBody(t, resp)
+	if body["route"] != "proxy" {
+		t.Fatalf("expected proxy route for wildcard match, got %v", body)
+	}
+
+	// no rules matched: auto with a note, block takes priority over proxy
+	resp = authedRequest(t, ts, http.MethodGet, "/api/rules/test?domain=unknown.test", cookie, "")
+	body = decodeBody(t, resp)
+	if body["route"] != "auto" {
+		t.Fatalf("expected auto route, got %v", body)
+	}
+
+	resp = authedRequest(t, ts, http.MethodGet, "/api/rules/test", cookie, "")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 without domain, got %d", resp.StatusCode)
 	}
 }
 
