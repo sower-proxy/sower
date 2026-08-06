@@ -28,6 +28,15 @@ func (a adminRules) RuleList(category admin.Category) ([]string, error) {
 	return rs.List(), nil
 }
 
+func (a adminRules) RuleSearch(category admin.Category, q string, offset, limit int) ([]string, uint64, error) {
+	rs, err := a.rules(category)
+	if err != nil {
+		return nil, 0, err
+	}
+	rules, total := rs.ListFiltered(q, offset, limit)
+	return rules, total, nil
+}
+
 func (a adminRules) RuleAdd(category admin.Category, rules ...string) error {
 	rs, err := a.rules(category)
 	if err != nil {

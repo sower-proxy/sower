@@ -57,6 +57,15 @@ export interface History {
 export interface RulesResponse {
 	category: Category;
 	rules: string[];
+	total: number;
+	offset: number;
+	limit: number;
+}
+
+export interface RulesQuery {
+	q?: string;
+	offset?: number;
+	limit?: number;
 }
 
 export class ApiError extends Error {
@@ -95,15 +104,20 @@ export const api = {
 		}),
 	logout: () => request<void>("/api/session", { method: "DELETE" }),
 	status: () => request<Status>("/api/status"),
-	rules: (category: Category) =>
-		request<RulesResponse>(`/api/rules?category=${category}`),
+	rules: (category: Category, params?: RulesQuery) => {
+		const sp = new URLSearchParams({ category });
+		if (params?.q) sp.set("q", params.q);
+		if (params?.offset != null) sp.set("offset", String(params.offset));
+		if (params?.limit != null) sp.set("limit", String(params.limit));
+		return request<RulesResponse>(`/api/rules?${sp}`);
+	},
 	addRules: (category: Category, rules: string[]) =>
-		request<RulesResponse>("/api/rules", {
+		request<void>("/api/rules", {
 			method: "POST",
 			body: JSON.stringify({ category, rules }),
 		}),
 	removeRules: (category: Category, rules: string[]) =>
-		request<RulesResponse>("/api/rules", {
+		request<void>("/api/rules", {
 			method: "DELETE",
 			body: JSON.stringify({ category, rules }),
 		}),

@@ -28,6 +28,26 @@ func (f *fakeRules) RuleList(c Category) ([]string, error) {
 	return append([]string(nil), f.lists[c]...), nil
 }
 
+func (f *fakeRules) RuleSearch(c Category, q string, offset, limit int) ([]string, uint64, error) {
+	all := f.lists[c]
+	matched := make([]string, 0, len(all))
+	q = strings.ToLower(q)
+	for _, rule := range all {
+		if q == "" || strings.Contains(strings.ToLower(rule), q) {
+			matched = append(matched, rule)
+		}
+	}
+	total := uint64(len(matched))
+	if offset >= len(matched) {
+		return []string{}, total, nil
+	}
+	end := offset + limit
+	if end > len(matched) {
+		end = len(matched)
+	}
+	return matched[offset:end], total, nil
+}
+
 func (f *fakeRules) RuleAdd(c Category, rules ...string) error {
 	f.lists[c] = append(f.lists[c], rules...)
 	return nil
@@ -183,24 +203,71 @@ func TestRulesCRUD(t *testing.T) {
 		t.Fatalf("expected empty rules, got %v", rules)
 	}
 
-	// add
+	// add returns 204 and the list reflects the addition
 	resp = authedRequest(t, ts, http.MethodPost, "/api/rules", cookie, `{"category":"proxy","rules":["example.com","**.cn"]}`)
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("add status: %d", resp.StatusCode)
 	}
-	body = decodeBody(t, resp)
+	resp.Body.Close()
+	body = decodeBody(t, authedRequest(t, ts, http.MethodGet, "/api/rules?category=proxy", cookie, ""))
 	if rules, _ := body["rules"].([]any); len(rules) != 2 {
 		t.Fatalf("expected 2 rules after add, got %v", rules)
 	}
 
-	// remove
+	// remove returns 204 and the list reflects the removal
 	resp = authedRequest(t, ts, http.MethodDelete, "/api/rules", cookie, `{"category":"proxy","rules":["example.com"]}`)
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("remove status: %d", resp.StatusCode)
 	}
-	body = decodeBody(t, resp)
+	resp.Body.Close()
+	body = decodeBody(t, authedRequest(t, ts, http.MethodGet, "/api/rules?category=proxy", cookie, ""))
 	if rules, _ := body["rules"].([]any); len(rules) != 1 || rules[0] != "**.cn" {
 		t.Fatalf("unexpected rules after remove: %v", rules)
+	}
+}
+
+func TestRulesListPaginationAndSearch(t *testing.T) {
+	ts := newTestServer(t, newFakeRules())
+	cookie := login(t, ts, "secret")
+
+	for _, rule := range []string{"a.com", "b.cn", "a.cn", "github.com", "mail.com"} {
+		resp := authedRequest(t, ts, http.MethodPost, "/api/rules", cookie,
+			fmt.Sprintf(`{"category":"proxy","rules":[%q]}`, rule))
+		if resp.StatusCode != http.StatusNoContent {
+			t.Fatalf("add %s: %d", rule, resp.StatusCode)
+		}
+		resp.Body.Close()
+	}
+
+	// pagination
+	resp := authedRequest(t, ts, http.MethodGet, "/api/rules?category=proxy&offset=1&limit=2", cookie, "")
+	body := decodeBody(t, resp)
+	if rules, _ := body["rules"].([]any); len(rules) != 2 || rules[0] != "b.cn" || rules[1] != "a.cn" {
+		t.Fatalf("unexpected page: %v", rules)
+	}
+	if total, _ := body["total"].(float64); total != 5 {
+		t.Fatalf("expected total 5, got %v", total)
+	}
+
+	// fuzzy search (case-insensitive substring)
+	resp = authedRequest(t, ts, http.MethodGet, "/api/rules?category=proxy&q=CN", cookie, "")
+	body = decodeBody(t, resp)
+	if rules, _ := body["rules"].([]any); len(rules) != 2 {
+		t.Fatalf("expected 2 matches for CN, got %v", rules)
+	}
+
+	// search + pagination
+	resp = authedRequest(t, ts, http.MethodGet, "/api/rules?category=proxy&q=cn&offset=1&limit=1", cookie, "")
+	body = decodeBody(t, resp)
+	if rules, _ := body["rules"].([]any); len(rules) != 1 || rules[0] != "a.cn" {
+		t.Fatalf("unexpected search page: %v", rules)
+	}
+
+	// limit clamp
+	resp = authedRequest(t, ts, http.MethodGet, "/api/rules?category=proxy&limit=99999", cookie, "")
+	body = decodeBody(t, resp)
+	if limit, _ := body["limit"].(float64); limit != maxPageSize {
+		t.Fatalf("expected limit clamped to %d, got %v", maxPageSize, limit)
 	}
 }
 

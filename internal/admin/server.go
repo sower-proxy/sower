@@ -15,6 +15,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -30,6 +31,9 @@ const (
 	maxBodyBytes     = 64 << 10
 	maxRulesPerBatch = 100
 	maxRuleLength    = 253
+
+	defaultPageSize = 200
+	maxPageSize     = 1000
 )
 
 // Category identifies a routing rule category managed through the admin API.
@@ -54,6 +58,7 @@ func (c Category) valid() bool {
 // concrete adapter lives in cmd/sower; tests inject a fake.
 type RuleManager interface {
 	RuleList(category Category) ([]string, error)
+	RuleSearch(category Category, q string, offset, limit int) ([]string, uint64, error)
 	RuleAdd(category Category, rules ...string) error
 	RuleRemove(category Category, rule string) (bool, error)
 	RuleCount(category Category) uint64
@@ -259,12 +264,30 @@ func (s *Server) handleRulesList(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid category")
 		return
 	}
-	rules, err := s.opts.Rules.RuleList(category)
+	q := r.URL.Query().Get("q")
+	offset, err := strconv.Atoi(r.URL.Query().Get("offset"))
+	if err != nil || offset < 0 {
+		offset = 0
+	}
+	limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil || limit <= 0 {
+		limit = defaultPageSize
+	}
+	if limit > maxPageSize {
+		limit = maxPageSize
+	}
+	rules, total, err := s.opts.Rules.RuleSearch(category, q, offset, limit)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, rulesResponse{Category: category, Rules: rules})
+	writeJSON(w, http.StatusOK, rulesResponse{
+		Category: category,
+		Rules:    rules,
+		Total:    total,
+		Offset:   offset,
+		Limit:    limit,
+	})
 }
 
 func (s *Server) handleRulesAdd(w http.ResponseWriter, r *http.Request) {
@@ -282,7 +305,7 @@ func (s *Server) handleRulesAdd(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeRulesResult(w, s.opts.Rules, req.Category)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleRulesRemove(w http.ResponseWriter, r *http.Request) {
@@ -302,7 +325,7 @@ func (s *Server) handleRulesRemove(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	writeRulesResult(w, s.opts.Rules, req.Category)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleTraffic(w http.ResponseWriter, r *http.Request) {
@@ -389,6 +412,9 @@ func statStart(stats *Stats) time.Time {
 type rulesResponse struct {
 	Category Category `json:"category"`
 	Rules    []string `json:"rules"`
+	Total    uint64   `json:"total"`
+	Offset   int      `json:"offset"`
+	Limit    int      `json:"limit"`
 }
 
 func writeRulesResult(w http.ResponseWriter, rm RuleManager, category Category) {

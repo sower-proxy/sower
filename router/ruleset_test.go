@@ -105,3 +105,38 @@ func TestRuleSetConcurrentAccess(t *testing.T) {
 		t.Fatal("expected seed rule to survive concurrent access")
 	}
 }
+
+func TestListFilteredPaginationAndSearch(t *testing.T) {
+	rs := NewRuleSet("example.com", "**.cn", "GitHub.com", "mail.google.com", "a.cn")
+
+	// empty query: paginated over the full list
+	rules, total := rs.ListFiltered("", 1, 2)
+	if total != 5 {
+		t.Fatalf("expected total 5, got %d", total)
+	}
+	if len(rules) != 2 || rules[0] != "**.cn" || rules[1] != "GitHub.com" {
+		t.Fatalf("unexpected page: %v", rules)
+	}
+
+	// case-insensitive substring search
+	rules, total = rs.ListFiltered("GITHUB", 0, 10)
+	if total != 1 || len(rules) != 1 || rules[0] != "GitHub.com" {
+		t.Fatalf("unexpected search result: %v (total %d)", rules, total)
+	}
+
+	// search with pagination ("cn" matches **.cn and a.cn)
+	rules, total = rs.ListFiltered("cn", 0, 1)
+	if total != 2 || len(rules) != 1 || rules[0] != "**.cn" {
+		t.Fatalf("unexpected search page: %v (total %d)", rules, total)
+	}
+	rules, _ = rs.ListFiltered("cn", 1, 1)
+	if len(rules) != 1 || rules[0] != "a.cn" {
+		t.Fatalf("unexpected second page: %v", rules)
+	}
+
+	// offset beyond the end yields an empty page with the full total
+	rules, total = rs.ListFiltered("", 99, 10)
+	if len(rules) != 0 || total != 5 {
+		t.Fatalf("expected empty page with total 5, got %v (total %d)", rules, total)
+	}
+}

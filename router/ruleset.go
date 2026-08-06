@@ -1,6 +1,7 @@
 package router
 
 import (
+	"strings"
 	"sync"
 
 	"github.com/sower-proxy/sower/pkg/suffixtree"
@@ -94,6 +95,55 @@ func (rs *RuleSet) List() []string {
 	rs.mu.RLock()
 	defer rs.mu.RUnlock()
 	return append([]string(nil), rs.rules...)
+}
+
+// ListFiltered returns up to limit retained rules that contain q as a
+// case-insensitive substring, starting at offset, plus the total number of
+// matches. An empty q matches every rule. It avoids copying the full list
+// when the caller only needs a page.
+func (rs *RuleSet) ListFiltered(q string, offset, limit int) ([]string, uint64) {
+	rs.mu.RLock()
+	defer rs.mu.RUnlock()
+	if q == "" {
+		if offset >= len(rs.rules) {
+			return []string{}, uint64(len(rs.rules))
+		}
+		end := offset + limit
+		if end > len(rs.rules) {
+			end = len(rs.rules)
+		}
+		return append([]string(nil), rs.rules[offset:end]...), uint64(len(rs.rules))
+	}
+
+	matched := make([]string, 0, min(limit, 64))
+	total := uint64(0)
+	for _, rule := range rs.rules {
+		if !containsFold(rule, q) {
+			continue
+		}
+		if total >= uint64(offset) && len(matched) < limit {
+			matched = append(matched, rule)
+		}
+		total++
+	}
+	return matched, total
+}
+
+// containsFold reports whether s contains substr as a case-insensitive
+// substring, without allocating per comparison.
+func containsFold(s, substr string) bool {
+	if substr == "" {
+		return true
+	}
+	if len(substr) > len(s) {
+		return false
+	}
+	for i := 0; i+len(substr) <= len(s); i++ {
+		if strings.EqualFold(s[i:i+len(substr)], substr) {
+			return true
+		}
+	}
+	return false
 }
 
 // Count returns the number of retained rules.
