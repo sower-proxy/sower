@@ -85,7 +85,7 @@ For non-transport fallback traffic, it can route by TLS SNI to per-domain upstre
    HTTPS transparent proxying reads only the TLS ClientHello, then replays the untouched bytes to the selected upstream; it must not complete or terminate TLS locally.
 10. For SOCKS5 traffic and explicit HTTP proxy traffic, read the client-supplied target host and port, apply smart routing rules, and either dial directly or wrap traffic in the configured upstream transport.
 11. Wrap every proxied client connection in the admin stats recorder before protocol parsing, attribute bytes to the discovered domain after parsing, and count DNS queries through a handler decorator. Admin rule mutations go through the thread-safe `RuleSet` (add/rebuild on remove) and take effect immediately.
-12. When `[admin]` is enabled, serve the admin console on its own listener: session-cookie auth for the API, rule CRUD, and traffic snapshots; the Svelte frontend is served from the embedded `web/dist`.
+12. When `[admin]` is enabled, serve the admin console: session-cookie auth for the API, rule CRUD, and traffic snapshots; the Svelte frontend is served from the embedded `web/dist`. By default the admin server owns a dedicated listener; when `admin.addr` exactly matches `dns.serve:80`, the admin console and the HTTP proxy share one listener and each connection is classified by its request head (origin-form with the listener IP as Host goes to admin; CONNECT, absolute-form, and other Hosts go to the proxy).
 13. On shutdown signal, stop listeners and DNS servers through `context` propagation.
 
 ## sowerd Data Flow
@@ -123,6 +123,7 @@ For non-transport fallback traffic, it can route by TLS SNI to per-domain upstre
 - Network operations use timeouts and `context` to limit hangs during dialing and remote rule downloads.
 - The admin console is a runtime management surface, not a config editor: rule changes apply immediately and reset on restart; the config file is never rewritten.
 - The admin server is disabled by default, binds to loopback by default, and requires a password when enabled; the frontend never stores the password (HttpOnly session cookie only).
+- The admin console can share the DNS HTTP proxy listener on port 80 when `admin.addr` equals `dns.serve:80`; classification is Host-based (origin-form requests with the listener IP as Host are admin traffic), so proxying a target whose Host equals the listener IP is inherently ambiguous and routes to admin. The HTTPS and DNS listeners speak different protocols and cannot be shared.
 - Traffic monitoring reports proxied payload bytes and request/connection counters, not packet-level network accounting.
 - Upstream TLS behavior is configured only on the client side; `sowerd` remains a normal TLS server and does not need uTLS-specific logic.
 - Rule loading supports local files and remote HTTP sources; remote downloads must use the configured upstream proxy and fail startup if the proxy path cannot fetch them.

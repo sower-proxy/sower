@@ -126,7 +126,11 @@ func run(ctx context.Context, stop context.CancelFunc, cfg config.SowerConfig) e
 	if err := startSocks5Listener(ctx, cfg, r, stats, errCh); err != nil {
 		return err
 	}
-	if err := startAdminListener(ctx, cfg, r, stats, errCh); err != nil {
+	if _, shared := sharedAdminHTTPAddr(cfg); shared {
+		if err := startSharedHTTPListener(ctx, cfg, r, stats, errCh); err != nil {
+			return err
+		}
+	} else if err := startAdminListener(ctx, cfg, r, stats, errCh); err != nil {
 		return err
 	}
 
@@ -192,9 +196,14 @@ func startDNSListeners(ctx context.Context, cfg config.SowerConfig, r *router.Ro
 		return nil
 	}
 
+	_, shared := sharedAdminHTTPAddr(cfg)
 	for _, ip := range dnsListenIPs(cfg) {
-		if err := startHTTPListener(ctx, ip, r, stats, errCh); err != nil {
-			return err
+		// In shared mode the admin console takes over the primary HTTP
+		// listener; the HTTPS and DNS listeners still start normally.
+		if !(shared && ip == cfg.DNS.Serve) {
+			if err := startHTTPListener(ctx, ip, r, stats, errCh); err != nil {
+				return err
+			}
 		}
 		if err := startHTTPSListener(ctx, ip, r, stats, errCh); err != nil {
 			return err

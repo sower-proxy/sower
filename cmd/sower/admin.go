@@ -112,3 +112,39 @@ func startAdminListener(ctx context.Context, cfg config.SowerConfig, r *router.R
 	})
 	return nil
 }
+
+// startSharedHTTPListener serves the admin console and the HTTP proxy from
+// one listener on the DNS HTTP address. It is used when admin.addr exactly
+// matches dns.serve:80.
+func startSharedHTTPListener(ctx context.Context, cfg config.SowerConfig, r *router.Router, stats *admin.Stats, errCh chan<- error) error {
+	addr, ok := sharedAdminHTTPAddr(cfg)
+	if !ok {
+		return nil
+	}
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("listen shared http on %s: %w", addr, err)
+	}
+	slog.Info("service listening", "service", "http proxy + admin", "network", "tcp", "addr", addr)
+
+	srv := admin.NewServer(admin.Options{
+		Password: cfg.Admin.Password,
+		Version:  version,
+		Date:     date,
+		Rules:    adminRules{r: r},
+		Stats:    stats,
+	})
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), adminShutdownTimeout)
+		defer cancel()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			slog.Warn("shutdown admin server", "error", err)
+		}
+	}()
+	go closeOnDone(ctx, ln)
+	go serveAndReport(errCh, "http proxy + admin", func() error {
+		return ServeSharedHTTP(ctx, ln, r, stats, srv, cfg.DNS.Serve, errCh)
+	})
+	return nil
+}

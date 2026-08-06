@@ -270,6 +270,33 @@ password = "your_admin_password"  # 启用时必填
 
 启动后打开 `http://127.0.0.1:19090`，输入 admin 密码即可。密码只用于换取会话 cookie，不会保存在浏览器里。
 
+### 与 HTTP 代理共享端口
+
+如果希望管理台与 HTTP 代理复用同一个 `IP:80`，把 `admin.addr` 设为 `dns.serve:80`：
+
+```toml
+[dns]
+disable = false
+serve   = "192.168.1.10"
+
+[admin]
+disable  = false
+addr     = "192.168.1.10:80"  # 与 dns.serve:80 相同，进入共享模式
+password = "your_admin_password"
+```
+
+共享模式下，同一个监听器按请求头区分流量：
+
+- `Host` 等于监听 IP 的普通请求（如浏览器访问 `http://192.168.1.10/`）→ 管理台
+- `CONNECT`、absolute-form 请求、以及其他 `Host` 的请求 → HTTP 代理
+
+注意：
+
+- 只支持共享 `80` 端口；`443`（HTTPS 透明代理）和 `53`（DNS）无法共享，配置冲突会启动失败。
+- 代理一个 `Host` 恰好等于监听 IP 的目标时无法区分，会进入管理台。
+- 管理台仍只提供明文 HTTP，共享 `80` 时请勿在公网直接暴露。
+- 独立监听模式（默认 `127.0.0.1:19090`）不受影响。
+
 ## 规则和配置补充
 
 `sower.toml` 是默认示例配置。完整示例见 [config/sower.toml](./config/sower.toml)。

@@ -33,6 +33,12 @@ addr = "127.0.0.1:1080" # SOCKS5 listen address
 # Admin web server configuration
 # Serves the embedded admin console for runtime rule management and traffic monitoring.
 # Disabled by default; when enabled, a non-empty password is required.
+#
+# Standalone mode (default): admin listens on its own address, e.g. 127.0.0.1:19090.
+# Shared mode: set addr to the DNS HTTP proxy address (dns.serve:80) to serve the
+# admin console and the HTTP proxy from one listener. Requests whose Host equals
+# the listener IP are admin traffic; CONNECT, absolute-form, and other Hosts are
+# proxy traffic. The HTTPS (443) and DNS (53) listeners cannot be shared.
 [admin]
 disable = true           # Disable admin web server
 addr = "127.0.0.1:19090" # Admin web server listen address

@@ -144,12 +144,21 @@ func (c *SowerConfig) Validate() error {
 	}
 
 	if !c.Admin.Disable && c.Admin.Addr != "" {
-		host, _, err := net.SplitHostPort(c.Admin.Addr)
+		host, port, err := net.SplitHostPort(c.Admin.Addr)
 		if err != nil || host == "" {
 			return fmt.Errorf("invalid admin listen address %q", c.Admin.Addr)
 		}
 		if c.Admin.Password == "" {
 			return fmt.Errorf("admin password is required when admin is enabled")
+		}
+		// The admin console can share the DNS HTTP proxy listener on port 80
+		// (admin.addr == dns.serve:80), but it cannot share the HTTPS or DNS
+		// listeners, which speak different protocols.
+		if !c.DNS.Disable && c.DNS.Serve != "" && host == c.DNS.Serve {
+			switch port {
+			case "443", "53":
+				return fmt.Errorf("admin listen address %q conflicts with the %s proxy listener on %s", c.Admin.Addr, port, c.DNS.Serve)
+			}
 		}
 	}
 
