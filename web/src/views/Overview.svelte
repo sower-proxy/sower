@@ -80,7 +80,7 @@
   const fmtRate = (v: number) => `${formatBytes(v)}/s`
   const fmtPerSec = (v: number) => `${v.toFixed(1)}/s`
 
-  const rangeNote = $derived(() => {
+  const rangeNote = $derived.by(() => {
     const first = history[0]
     const last = history[history.length - 1]
     return first && last
@@ -236,6 +236,9 @@
           </span>
           <span class="tabular-nums">{traffic.active.socks5}</span>
         </div>
+        <p class="border-t pt-2 text-xs text-muted-foreground tabular-nums">
+          累计 {formatCount(traffic.conns.http)} / {formatCount(traffic.conns.https)} / {formatCount(traffic.conns.socks5)}
+        </p>
       </Card.CardContent>
     </Card.Card>
 
@@ -265,6 +268,9 @@
           </span>
           <span class="tabular-nums">{formatCount(traffic.ruleHits.proxy)}</span>
         </div>
+        <p class="border-t pt-2 text-xs text-muted-foreground tabular-nums">
+          已配置 {formatCount(status.rules.block)} / {formatCount(status.rules.direct)} / {formatCount(status.rules.proxy)} 条
+        </p>
       </Card.CardContent>
     </Card.Card>
 
