@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -632,5 +633,67 @@ func TestExpiredSessionsDroppedOnLoad(t *testing.T) {
 	}
 	if _, ok := s.sessions["alive"]; !ok {
 		t.Fatal("expected live session to be restored")
+	}
+}
+
+func TestStreamEndpointRequiresAuth(t *testing.T) {
+	ts := newTestServer(t, newFakeRules())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/api/stream")
+	if err != nil {
+		t.Fatalf("get stream: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401 without session, got %d", resp.StatusCode)
+	}
+}
+
+func TestStreamEndpointPushesEvents(t *testing.T) {
+	stats := newTestStats(t)
+	s := NewServer(Options{Password: "secret", Version: "v1.2.3", Date: "2026-01-01", Rules: newFakeRules(), Stats: stats})
+	ts := httptest.NewServer(s.http.Handler)
+	defer ts.Close()
+
+	cookie := login(t, ts, "secret")
+	req, err := http.NewRequest(http.MethodGet, ts.URL+"/api/stream?source=dns", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Cookie", sessionCookieName+"="+cookie)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("get stream: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/event-stream") {
+		t.Fatalf("expected text/event-stream, got %q", ct)
+	}
+
+	type line struct{ text string }
+	lines := make(chan line, 8)
+	go func() {
+		scanner := bufio.NewScanner(resp.Body)
+		scanner.Buffer(make([]byte, 64<<10), 1<<20)
+		for scanner.Scan() {
+			lines <- line{scanner.Text()}
+		}
+	}()
+
+	saw := map[string]bool{}
+	deadline := time.After(3 * time.Second)
+	for !saw["status"] || !saw["traffic"] || !saw["history"] {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for events: %v", saw)
+		case l := <-lines:
+			if prefix, ok := strings.CutPrefix(l.text, "event: "); ok {
+				saw[prefix] = true
+			}
+		}
 	}
 }

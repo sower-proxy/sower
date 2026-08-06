@@ -1,18 +1,15 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
-  import { api, ApiError, type Source, type TrafficSnapshot } from '$lib/api'
+  import { type Source } from '$lib/api'
   import { formatBytes, formatCount, formatTime } from '$lib/format'
-  import { startPolling } from '$lib/poll'
-  import * as Alert from '$lib/components/ui/alert'
+  import { connectLive, live } from '$lib/live.svelte.ts'
   import * as Card from '$lib/components/ui/card'
   import * as Table from '$lib/components/ui/table'
   import Badge from '$lib/components/ui/badge/badge.svelte'
-  import Button from '$lib/components/ui/button/button.svelte'
   import Input from '$lib/components/ui/input/input.svelte'
   import Loading from '$lib/components/Loading.svelte'
-  import { CircleAlert, Inbox, Pause, Play, Search } from 'lucide-svelte'
+  import { Inbox, Search } from 'lucide-svelte'
 
-  let { source = 'all', onUnauthorized }: { source?: Source; onUnauthorized: () => void } = $props()
+  let { source = 'all' }: { source?: Source } = $props()
 
   type SortMode = 'bytes' | 'recent' | 'conns'
   const sortModes: { value: SortMode; label: string }[] = [
@@ -21,9 +18,9 @@
     { value: 'conns', label: '连接数' },
   ]
 
-  let traffic = $state<TrafficSnapshot | null>(null)
-  let error = $state('')
-  let paused = $state(false)
+  // The domain table is fed by the shared SSE stream, filtered by the
+  // connection params below.
+  const traffic = $derived(live.traffic)
   let filter = $state('')
   let sort: SortMode = $state('bytes')
   let client = $state('')
@@ -46,43 +43,19 @@
     return domains.filter((d) => d.domain.toLowerCase().includes(q))
   })
 
-  async function reload() {
-    try {
-      traffic = await api.traffic(sort, source, client || undefined)
-      error = ''
-    } catch (e) {
-      if (e instanceof ApiError && e.status === 401) {
-        onUnauthorized()
-        return
-      }
-      error = e instanceof Error ? e.message : 'refresh failed'
-    }
-  }
-
-  async function refresh() {
-    if (paused) return
-    await reload()
-  }
-
-  onMount(() => startPolling(refresh, 5000))
-
-  // Breadcrumb-driven source or client switch always reloads, even while paused.
+  // Re-point the SSE stream whenever a page filter changes.
   $effect(() => {
-    source
-    client
-    traffic = null
-    void reload()
+    const params = new URLSearchParams()
+    if (sort !== 'bytes') params.set('sort', sort)
+    if (source !== 'all') params.set('source', source)
+    if (client) params.set('client', client)
+    connectLive(params.toString())
   })
 
   const headCell = 'sticky top-0 z-10 bg-card'
 </script>
 
-{#if error}
-  <Alert.Alert variant="destructive" class="mb-4">
-    <CircleAlert class="size-4" />
-    <Alert.AlertDescription>{error}</Alert.AlertDescription>
-  </Alert.Alert>
-{:else if !traffic}
+{#if !traffic}
   <Loading />
 {:else if (traffic.domains ?? []).length === 0}
   <div class="flex flex-col items-center gap-2 py-10 text-sm text-muted-foreground">
@@ -90,6 +63,11 @@
     <p>暂无{sourceLabel}记录。</p>
   </div>
 {:else}
+  {#if !live.connected}
+    <p class="mb-3 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+      实时连接已断开，正在自动重连…
+    </p>
+  {/if}
   <div class="mb-3 flex items-center gap-2">
     <div class="relative min-w-0 flex-1 sm:max-w-xs">
       <Search class="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -112,31 +90,13 @@
             ? 'bg-card text-foreground shadow-sm'
             : 'text-muted-foreground hover:text-foreground'}"
           aria-pressed={sort === m.value}
-          onclick={() => {
-            sort = m.value
-            void refresh()
-          }}
+          onclick={() => (sort = m.value)}
         >
           {m.label}
         </button>
       {/each}
     </div>
-    <Button
-      variant="outline"
-      size="sm"
-      class="ml-auto shrink-0 gap-1.5"
-      aria-pressed={paused}
-      onclick={() => (paused = !paused)}
-    >
-      {#if paused}
-        <Play class="size-3.5" />
-        继续
-      {:else}
-        <Pause class="size-3.5" />
-        暂停
-      {/if}
-    </Button>
-    <Badge variant="secondary" class="shrink-0">
+    <Badge variant="secondary" class="ml-auto shrink-0">
       {#if visibleDomains.length === (traffic.domains ?? []).length}
         {formatCount(visibleDomains.length)} domains
       {:else}
@@ -214,7 +174,6 @@
     </Table.Table>
   </Card.Card>
   <p class="mt-2 text-xs text-muted-foreground">
-    按{activeSortLabel}排序的前 100 个{isDNSView ? 'DNS 查询域名' : sourceLabel + '域名'}
-    {paused ? '，自动刷新已暂停。' : '，每 5 秒刷新。'}
+    按{activeSortLabel}排序的前 100 个{isDNSView ? 'DNS 查询域名' : sourceLabel + '域名'}，实时推送。
   </p>
 {/if}

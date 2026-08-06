@@ -6,30 +6,18 @@
   import Traffic from './views/Traffic.svelte'
   import BreadcrumbHeader from './lib/components/BreadcrumbHeader.svelte'
   import { navItems, type BreadcrumbContextSegment, type NavKey } from './lib/navigation'
-  import { api, ApiError, type Category, type Source, type Status } from './lib/api'
-  import { startPolling } from './lib/poll'
+  import { api, type Category, type Source } from './lib/api'
+  import { closeLive, connectLive, live, setUnauthorizedHandler } from './lib/live.svelte.ts'
 
   let authed = $state(false)
   let activeNav: NavKey = $state('overview')
   let ruleCategory: Category = $state('proxy')
   let trafficSource: Source = $state('all')
-  let status: Status | null = $state(null)
   let statusError = $state('')
-  let stopStatusPoll: (() => void) | undefined
 
-  async function refreshStatus() {
-    if (!authed) return
-    try {
-      status = await api.status()
-      statusError = ''
-    } catch (e) {
-      if (e instanceof ApiError && e.status === 401) {
-        onUnauthorized()
-        return
-      }
-      statusError = e instanceof Error ? e.message : 'status failed'
-    }
-  }
+  // Status, traffic, and history come from the shared SSE stream; App only
+  // owns the connection lifecycle and the session.
+  const status = $derived(live.status)
 
   const activeItem = $derived(navItems.find((item) => item.key === activeNav) ?? navItems[0]!)
 
@@ -77,9 +65,8 @@
   function onLogin() {
     authed = true
     activeNav = 'overview'
-    status = null
     statusError = ''
-    stopStatusPoll = startPolling(refreshStatus, 5000)
+    connectLive()
   }
 
   async function handleLogout() {
@@ -94,11 +81,14 @@
 
   function onUnauthorized() {
     authed = false
-    status = null
     statusError = ''
-    stopStatusPoll?.()
-    stopStatusPoll = undefined
+    closeLive()
   }
+
+  // Route the stream's session-expiry event to the logout flow.
+  $effect(() => {
+    setUnauthorizedHandler(onUnauthorized)
+  })
 
   function handleContextSelect(label: string, value: string) {
     if (label === 'category') {
@@ -125,11 +115,11 @@
     {#key activeNav}
       <div in:fade={{ duration: 120 }}>
         {#if activeNav === 'overview'}
-          <Overview {status} {onUnauthorized} />
+          <Overview {status} />
         {:else if activeNav === 'rules'}
           <Rules category={ruleCategory} {onUnauthorized} />
         {:else}
-          <Traffic source={trafficSource} {onUnauthorized} />
+          <Traffic source={trafficSource} />
         {/if}
       </div>
     {/key}

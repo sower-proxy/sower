@@ -1,8 +1,7 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
-  import { api, ApiError, type Status, type TrafficSnapshot, type HistorySample } from '$lib/api'
+  import { type Status } from '$lib/api'
   import { formatBytes, formatUptime, formatCount } from '$lib/format'
-  import { startPolling } from '$lib/poll'
+  import { live } from '$lib/live.svelte.ts'
   import * as Card from '$lib/components/ui/card'
   import * as Alert from '$lib/components/ui/alert'
   import Badge from '$lib/components/ui/badge/badge.svelte'
@@ -22,44 +21,11 @@
     Route,
   } from 'lucide-svelte'
 
-  let { status, onUnauthorized }: { status: Status | null; onUnauthorized: () => void } = $props()
+  let { status }: { status: Status | null } = $props()
 
-  let traffic = $state<TrafficSnapshot | null>(null)
-  let history = $state<HistorySample[]>([])
-  let error = $state('')
-
-  async function refreshTraffic() {
-    try {
-      traffic = await api.traffic()
-      error = ''
-    } catch (e) {
-      if (e instanceof ApiError && e.status === 401) {
-        onUnauthorized()
-        return
-      }
-      error = e instanceof Error ? e.message : 'refresh failed'
-    }
-  }
-
-  async function refreshHistory() {
-    try {
-      history = (await api.history()).samples
-    } catch (e) {
-      if (e instanceof ApiError && e.status === 401) {
-        onUnauthorized()
-        return
-      }
-    }
-  }
-
-  onMount(() => {
-    const stopTraffic = startPolling(refreshTraffic, 5000)
-    const stopHistory = startPolling(refreshHistory, 10000)
-    return () => {
-      stopTraffic()
-      stopHistory()
-    }
-  })
+  // Traffic and history arrive via the shared SSE stream.
+  const traffic = $derived(live.traffic)
+  const history = $derived(live.history)
 
   // --- history series helpers ---
   const ts = (iso: string) => new Date(iso).toTimeString().slice(0, 5)
@@ -89,14 +55,15 @@
   })
 </script>
 
-{#if error}
-  <Alert.Alert variant="destructive">
-    <CircleAlert class="size-4" />
-    <Alert.AlertDescription>{error}</Alert.AlertDescription>
-  </Alert.Alert>
-{:else if !status || !traffic}
+{#if !status || !traffic}
   <Loading />
 {:else}
+  {#if !live.connected}
+    <Alert.Alert variant="destructive" class="mb-4">
+      <CircleAlert class="size-4" />
+      <Alert.AlertDescription>实时连接已断开，正在重连…</Alert.AlertDescription>
+    </Alert.Alert>
+  {/if}
   <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
     <Card.Card>
       <Card.CardHeader>

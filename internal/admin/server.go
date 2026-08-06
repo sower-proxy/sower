@@ -102,6 +102,7 @@ func NewServer(opts Options) *Server {
 	mux.HandleFunc("DELETE /api/rules", s.mutateGuard(s.auth(s.handleRulesRemove)))
 	mux.HandleFunc("GET /api/traffic", s.mutateGuard(s.auth(s.handleTraffic)))
 	mux.HandleFunc("GET /api/history", s.mutateGuard(s.auth(s.handleHistory)))
+	mux.HandleFunc("GET /api/stream", s.mutateGuard(s.auth(s.handleStream)))
 	if s.opts.Stats != nil {
 		mux.HandleFunc("GET /metrics", s.handleMetrics)
 	}
@@ -339,7 +340,12 @@ func (s *Server) mutateGuard(next http.HandlerFunc) http.HandlerFunc {
 // --- API handlers ---
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{
+	writeJSON(w, http.StatusOK, s.statusPayload())
+}
+
+// statusPayload is the /api/status body, reused by the SSE stream.
+func (s *Server) statusPayload() map[string]any {
+	return map[string]any{
 		"version": s.opts.Version,
 		"date":    s.opts.Date,
 		"uptime":  int64(time.Since(statStart(s.opts.Stats)).Seconds()),
@@ -348,7 +354,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 			string(CategoryDirect): s.opts.Rules.RuleCount(CategoryDirect),
 			string(CategoryProxy):  s.opts.Rules.RuleCount(CategoryProxy),
 		},
-	})
+	}
 }
 
 type rulesRequest struct {
@@ -431,16 +437,23 @@ func (s *Server) handleTraffic(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "stats unavailable")
 		return
 	}
-	sort := DomainSort(r.URL.Query().Get("sort"))
+	sort, source, client := parseTrafficQuery(r)
+	writeJSON(w, http.StatusOK, s.opts.Stats.Snapshot(sort, source, client))
+}
+
+// parseTrafficQuery extracts the domain sort, source, and client filters
+// shared by /api/traffic and the SSE stream.
+func parseTrafficQuery(r *http.Request) (sort DomainSort, source Source, client string) {
+	sort = DomainSort(r.URL.Query().Get("sort"))
 	if !sort.valid() {
 		sort = DomainSortBytes
 	}
-	source := Source(r.URL.Query().Get("source"))
+	source = Source(r.URL.Query().Get("source"))
 	if !source.valid() {
 		source = SourceAll
 	}
-	client := r.URL.Query().Get("client")
-	writeJSON(w, http.StatusOK, s.opts.Stats.Snapshot(sort, source, client))
+	client = r.URL.Query().Get("client")
+	return
 }
 
 func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
@@ -449,6 +462,67 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, s.opts.Stats.History())
+}
+
+// handleStream is the Server-Sent Events endpoint that pushes status, traffic
+// snapshots, and history to the console. The connection carries the same
+// sort/source/client filters as /api/traffic and revalidates the session on
+// each tick, closing with an auth event when it lapses. The initial payload
+// is sent immediately so the page renders without waiting for a tick.
+func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
+	if s.opts.Stats == nil {
+		writeError(w, http.StatusInternalServerError, "stats unavailable")
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "streaming unsupported")
+		return
+	}
+	sort, source, client := parseTrafficQuery(r)
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	fmt.Fprintln(w, "retry: 5000")
+	fmt.Fprintln(w)
+	flusher.Flush()
+
+	send := func(event string, v any) {
+		data, err := json.Marshal(v)
+		if err != nil {
+			slog.Debug("marshal sse event", "error", err)
+			return
+		}
+		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, data)
+		flusher.Flush()
+	}
+
+	send("status", s.statusPayload())
+	send("traffic", s.opts.Stats.Snapshot(sort, source, client))
+	send("history", s.opts.Stats.History())
+
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	historyTicker := time.NewTicker(10 * time.Second)
+	defer historyTicker.Stop()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-ticker.C:
+			if !s.validSession(r) {
+				send("auth", map[string]any{"status": http.StatusUnauthorized})
+				return
+			}
+			send("status", s.statusPayload())
+			send("traffic", s.opts.Stats.Snapshot(sort, source, client))
+		case <-historyTicker.C:
+			send("history", s.opts.Stats.History())
+		}
+	}
 }
 
 // handleMetrics serves the Prometheus exposition format. It is intentionally
