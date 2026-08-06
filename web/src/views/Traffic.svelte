@@ -57,11 +57,6 @@
 
 {#if !traffic}
   <Loading />
-{:else if (traffic.domains ?? []).length === 0}
-  <div class="flex flex-col items-center gap-2 py-10 text-sm text-muted-foreground">
-    <Inbox class="size-5" aria-hidden="true" />
-    <p>暂无{sourceLabel}记录。</p>
-  </div>
 {:else}
   {#if !live.connected}
     <p class="mb-3 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive">
@@ -132,7 +127,13 @@
       {/each}
     </div>
   {/if}
-  <Card.Card class="max-h-[70vh] overflow-auto">
+  {#if (traffic.domains ?? []).length === 0}
+    <div class="flex flex-col items-center gap-2 rounded-lg border border-dashed py-10 text-sm text-muted-foreground">
+      <Inbox class="size-5" aria-hidden="true" />
+      <p>暂无{sourceLabel}记录。</p>
+    </div>
+  {:else}
+    <Card.Card class="max-h-[70vh] overflow-auto">
     <Table.Table>
       <Table.TableHeader>
         <Table.TableRow>
@@ -172,7 +173,8 @@
         {/each}
       </Table.TableBody>
     </Table.Table>
-  </Card.Card>
+    </Card.Card>
+  {/if}
   <p class="mt-2 text-xs text-muted-foreground">
     按{activeSortLabel}排序的前 100 个{isDNSView ? 'DNS 查询域名' : sourceLabel + '域名'}，实时推送。
   </p>

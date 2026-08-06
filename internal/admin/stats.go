@@ -323,6 +323,9 @@ func (s *Stats) BindConn(conn net.Conn, domain string) {
 // domain ordering, source restricts domains to one entry point, and client
 // restricts them to one client IP; invalid values fall back to
 // DomainSortBytes and SourceAll, and an empty client disables the filter.
+// Clients aggregates per-client counters over the source-filtered view and
+// is intentionally unaffected by the client filter, so the console's client
+// chips stay stable while one is selected.
 func (s *Stats) Snapshot(sort DomainSort, source Source, client string) TrafficSnapshot {
 	s.sample()
 
@@ -371,18 +374,9 @@ func (s *Stats) Snapshot(sort DomainSort, source Source, client string) TrafficS
 			ds.BytesDown = src.bytesDown
 			ds.LastSeen = src.lastSeen
 		}
-		if client != "" {
-			dc, ok := d.byClient[client] // nil map read is safe
-			if !ok || (dc.conns == 0 && dc.bytesUp == 0 && dc.bytesDown == 0) {
-				continue
-			}
-			ds.Conns = dc.conns
-			ds.BytesUp = dc.bytesUp
-			ds.BytesDown = dc.bytesDown
-			ds.LastSeen = dc.lastSeen
-		}
-		snap.Domains = append(snap.Domains, ds)
-
+		// Aggregate the client chips over the source-filtered view but before
+		// the client filter: the chip row is a navigation device and must stay
+		// stable (and globally counted) while a client filter is active.
 		for ip, c := range d.byClient {
 			agg := clientAgg[ip]
 			if agg == nil {
@@ -396,6 +390,18 @@ func (s *Stats) Snapshot(sort DomainSort, source Source, client string) TrafficS
 				agg.LastSeen = c.lastSeen
 			}
 		}
+
+		if client != "" {
+			dc, ok := d.byClient[client] // nil map read is safe
+			if !ok || (dc.conns == 0 && dc.bytesUp == 0 && dc.bytesDown == 0) {
+				continue
+			}
+			ds.Conns = dc.conns
+			ds.BytesUp = dc.bytesUp
+			ds.BytesDown = dc.bytesDown
+			ds.LastSeen = dc.lastSeen
+		}
+		snap.Domains = append(snap.Domains, ds)
 	}
 	sortDomains(snap.Domains, sort)
 	if len(snap.Domains) > snapshotTopN {

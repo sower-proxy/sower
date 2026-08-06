@@ -433,6 +433,12 @@ func TestStatsSnapshotClientFilter(t *testing.T) {
 			"192.168.1.10": {conns: 2, bytesUp: 200, bytesDown: 200, lastSeen: now},
 		},
 	}
+	s.domains["c.example"] = &domainStat{
+		conns: 7, bytesUp: 700, bytesDown: 700, lastSeen: now,
+		byClient: map[string]*clientStat{
+			"192.168.1.20": {conns: 7, bytesUp: 700, bytesDown: 700, lastSeen: now},
+		},
+	}
 	s.mu.Unlock()
 
 	// filtered by client: only that client's domains, with that client's values
@@ -451,6 +457,19 @@ func TestStatsSnapshotClientFilter(t *testing.T) {
 	empty := s.Snapshot(DomainSortBytes, SourceAll, "203.0.113.9")
 	if len(empty.Domains) != 0 {
 		t.Fatalf("expected no domains for unknown client, got %+v", empty.Domains)
+	}
+
+	// the client chips are a navigation device: they must stay stable and
+	// globally counted regardless of the active client filter, including
+	// clients that share no domain with the selected one
+	if len(view.Clients) != 2 {
+		t.Fatalf("expected both clients in chips under filter, got %+v", view.Clients)
+	}
+	if view.Clients[0].IP != "192.168.1.20" || view.Clients[0].Conns != 8 {
+		t.Fatalf("client .20 must keep its global conns (8) under filter, got %+v", view.Clients[0])
+	}
+	if len(empty.Clients) != 2 {
+		t.Fatalf("chips must survive an unknown-client filter, got %+v", empty.Clients)
 	}
 }
 
