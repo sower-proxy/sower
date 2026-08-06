@@ -20,9 +20,9 @@ import (
 type (
 	ProxyDialFn func(network, host string, port uint16) (net.Conn, error)
 	Router      struct {
-		BlockRule  *suffixtree.Node
-		DirectRule *suffixtree.Node
-		ProxyRule  *suffixtree.Node
+		BlockRule  *RuleSet
+		DirectRule *RuleSet
+		ProxyRule  *RuleSet
 		ProxyDial  ProxyDialFn
 
 		accessCache *accessProbeCache
@@ -55,9 +55,9 @@ var ErrBlocked = errors.New("route blocked")
 
 func NewRouter(serveIPs []string, upstreamDNS, fallbackDNS, mmdbFile string, proxyDial ProxyDialFn) (*Router, error) {
 	r := Router{
-		BlockRule:   suffixtree.NewNodeFromRules(),
-		DirectRule:  suffixtree.NewNodeFromRules(),
-		ProxyRule:   suffixtree.NewNodeFromRules(),
+		BlockRule:   NewRuleSet(),
+		DirectRule:  NewRuleSet(),
+		ProxyRule:   NewRuleSet(),
 		ProxyDial:   proxyDial,
 		accessCache: newAccessCache(accessCacheTTL, httpPing),
 	}

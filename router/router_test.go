@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/miekg/dns"
-	"github.com/sower-proxy/sower/pkg/suffixtree"
 )
 
 func newTestRouter(t *testing.T, serveIPs []string, upstreamDNS, fallbackDNS, mmdbFile string, proxyDial ProxyDialFn) *Router {
@@ -453,9 +452,9 @@ func TestServeDNSForProxyRuleSuppressesNonAddressQuestion(t *testing.T) {
 	})
 
 	r := newTestRouter(t, []string{"127.0.0.2"}, "", "223.5.5.5", "", nil)
-	r.BlockRule = suffixtree.NewNodeFromRules()
-	r.DirectRule = suffixtree.NewNodeFromRules()
-	r.ProxyRule = suffixtree.NewNodeFromRules("example.com.")
+	r.BlockRule = NewRuleSet()
+	r.DirectRule = NewRuleSet()
+	r.ProxyRule = NewRuleSet("example.com.")
 	r.dns.upstreamAddrs = []string{udpConn.LocalAddr().String()}
 	r.dns.upstreamIndex = 0
 
@@ -503,9 +502,9 @@ func TestServeDNSForProxyRuleSuppressesHTTPSQuestion(t *testing.T) {
 	})
 
 	r := newTestRouter(t, []string{"127.0.0.2"}, "", "223.5.5.5", "", nil)
-	r.BlockRule = suffixtree.NewNodeFromRules()
-	r.DirectRule = suffixtree.NewNodeFromRules()
-	r.ProxyRule = suffixtree.NewNodeFromRules("example.com.")
+	r.BlockRule = NewRuleSet()
+	r.DirectRule = NewRuleSet()
+	r.ProxyRule = NewRuleSet("example.com.")
 	r.dns.upstreamAddrs = []string{udpConn.LocalAddr().String()}
 	r.dns.upstreamIndex = 0
 
@@ -560,9 +559,9 @@ func TestServeDNSForProxyRuleSuppressesSRVQuestion(t *testing.T) {
 	})
 
 	r := newTestRouter(t, []string{"127.0.0.2"}, "", "223.5.5.5", "", nil)
-	r.BlockRule = suffixtree.NewNodeFromRules()
-	r.DirectRule = suffixtree.NewNodeFromRules()
-	r.ProxyRule = suffixtree.NewNodeFromRules("example.com.")
+	r.BlockRule = NewRuleSet()
+	r.DirectRule = NewRuleSet()
+	r.ProxyRule = NewRuleSet("example.com.")
 	r.dns.upstreamAddrs = []string{udpConn.LocalAddr().String()}
 	r.dns.upstreamIndex = 0
 
@@ -614,9 +613,9 @@ func TestServeDNSDoesNotStripServicePrefixForNonServiceQuestion(t *testing.T) {
 	})
 
 	r := newTestRouter(t, []string{"127.0.0.2"}, "", "223.5.5.5", "", nil)
-	r.BlockRule = suffixtree.NewNodeFromRules()
-	r.DirectRule = suffixtree.NewNodeFromRules()
-	r.ProxyRule = suffixtree.NewNodeFromRules("example.com.")
+	r.BlockRule = NewRuleSet()
+	r.DirectRule = NewRuleSet()
+	r.ProxyRule = NewRuleSet("example.com.")
 	r.dns.upstreamAddrs = []string{udpConn.LocalAddr().String()}
 	r.dns.upstreamIndex = 0
 
@@ -644,9 +643,9 @@ func TestServeDNSForProxyRuleReturnsNoDataWhenAddressFamilyUnavailable(t *testin
 	t.Parallel()
 
 	r := newTestRouter(t, []string{"127.0.0.1"}, "", "223.5.5.5", "", nil)
-	r.BlockRule = suffixtree.NewNodeFromRules()
-	r.DirectRule = suffixtree.NewNodeFromRules()
-	r.ProxyRule = suffixtree.NewNodeFromRules("example.com.")
+	r.BlockRule = NewRuleSet()
+	r.DirectRule = NewRuleSet()
+	r.ProxyRule = NewRuleSet("example.com.")
 
 	req := new(dns.Msg)
 	req.SetQuestion("example.com.", dns.TypeAAAA)
@@ -972,9 +971,9 @@ func TestServeDNSReturnsNXDomainForBlockedDomain(t *testing.T) {
 	t.Parallel()
 
 	r := newTestRouter(t, []string{"127.0.0.1"}, "", "223.5.5.5", "", nil)
-	r.BlockRule = suffixtree.NewNodeFromRules("example.com.")
-	r.DirectRule = suffixtree.NewNodeFromRules()
-	r.ProxyRule = suffixtree.NewNodeFromRules()
+	r.BlockRule = NewRuleSet("example.com.")
+	r.DirectRule = NewRuleSet()
+	r.ProxyRule = NewRuleSet()
 
 	req := new(dns.Msg)
 	req.SetQuestion("example.com.", dns.TypeA)
