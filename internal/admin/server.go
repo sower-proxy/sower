@@ -28,7 +28,13 @@ import (
 const (
 	sessionCookieName = "sower_admin"
 	sessionTTL        = 24 * time.Hour
-	maxSessionPurge   = 1024
+	// sessionCookieMaxAge is how long the browser keeps the session cookie.
+	// It is deliberately much longer than sessionTTL: the cookie is only a
+	// bearer-token carrier, and the server-side session map (with sliding
+	// expiry) is the real gate. A short MaxAge would log the user out after
+	// 24h even while the server session stays refreshed.
+	sessionCookieMaxAge = 30 * 24 * time.Hour
+	maxSessionPurge     = 1024
 
 	maxBodyBytes     = 64 << 10
 	maxRulesPerBatch = 100
@@ -266,7 +272,7 @@ func (s *Server) issueSession(w http.ResponseWriter, r *http.Request) bool {
 	s.persistLocked()
 	s.mu.Unlock()
 
-	http.SetCookie(w, s.sessionCookie(value, int(sessionTTL.Seconds()), r.TLS != nil))
+	http.SetCookie(w, s.sessionCookie(value, int(sessionCookieMaxAge.Seconds()), r.TLS != nil))
 	return true
 }
 

@@ -13,7 +13,6 @@
   let activeNav: NavKey = $state('overview')
   let ruleCategory: Category = $state('proxy')
   let trafficSource: Source = $state('all')
-  let statusError = $state('')
 
   // Status, traffic, and history come from the shared SSE stream; App only
   // owns the connection lifecycle and the session.
@@ -65,7 +64,6 @@
   function onLogin() {
     authed = true
     activeNav = 'overview'
-    statusError = ''
     connectLive()
   }
 
@@ -81,7 +79,6 @@
 
   function onUnauthorized() {
     authed = false
-    statusError = ''
     closeLive()
   }
 
@@ -108,7 +105,6 @@
     onContextSelect={handleContextSelect}
     onSelectItem={(key) => (activeNav = key)}
     {status}
-    {statusError}
     onLogout={handleLogout}
   />
   <main>
