@@ -42,9 +42,10 @@ type SowerConfig struct {
 	} `flag:"socks5"`
 
 	Admin struct {
-		Disable  bool   `default:"true" usage:"disable admin web server"`
-		Addr     string `default:"127.0.0.1:19090" usage:"admin web server listen address"`
-		Password string `usage:"admin web server password, required when enabled"`
+		Disable     bool   `default:"true" usage:"disable admin web server"`
+		Addr        string `default:"127.0.0.1:19090" usage:"admin web server listen address"`
+		Password    string `usage:"admin web server password, required when enabled"`
+		SessionFile string `default:"/etc/sower/sessions.json" usage:"persist admin sessions to this file, empty disables persistence"`
 	} `flag:"admin"`
 
 	Router struct {

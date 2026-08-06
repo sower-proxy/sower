@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -542,5 +544,93 @@ func TestMetricsEndpointServesPrometheusFormat(t *testing.T) {
 		if !strings.Contains(string(body), want) {
 			t.Fatalf("expected %q in metrics, got:\n%s", want, body)
 		}
+	}
+}
+
+func TestSessionSurvivesRestart(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "sessions.json")
+	newServer := func() *httptest.Server {
+		s := NewServer(Options{
+			Password: "secret", Version: "v1.2.3", Date: "2026-01-01",
+			Rules: newFakeRules(), Stats: newTestStats(t), SessionFile: file,
+		})
+		ts := httptest.NewServer(s.http.Handler)
+		t.Cleanup(ts.Close)
+		return ts
+	}
+
+	ts1 := newServer()
+	cookie := login(t, ts1, "secret")
+
+	// simulate a process restart: a brand-new server sharing the file
+	ts2 := newServer()
+	resp := authedRequest(t, ts2, http.MethodGet, "/api/status", cookie, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected session to survive restart, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	// the persisted file must be private
+	fi, err := os.Stat(file)
+	if err != nil {
+		t.Fatalf("stat session file: %v", err)
+	}
+	if fi.Mode().Perm() != 0o600 {
+		t.Fatalf("expected session file 0600, got %v", fi.Mode().Perm())
+	}
+
+	// logout on the new server must revoke the persisted session
+	resp = authedRequest(t, ts2, http.MethodDelete, "/api/session", cookie, "")
+	resp.Body.Close()
+	resp = authedRequest(t, ts2, http.MethodGet, "/api/status", cookie, "")
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected logout to revoke session, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+}
+
+func TestSessionSlidingExpiry(t *testing.T) {
+	s := NewServer(Options{Password: "secret", Rules: newFakeRules(), Stats: newTestStats(t)})
+	s.mu.Lock()
+	s.sessions["token"] = time.Now().Add(sessionTTL / 4) // less than half TTL remaining
+	s.mu.Unlock()
+
+	r := httptest.NewRequest("GET", "/api/status", nil)
+	r.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "token"})
+	if !s.validSession(r) {
+		t.Fatal("expected session valid")
+	}
+
+	s.mu.Lock()
+	exp := s.sessions["token"]
+	s.mu.Unlock()
+	if remaining := time.Until(exp); remaining < sessionTTL/2 {
+		t.Fatalf("expected sliding expiry to refresh TTL, remaining %v", remaining)
+	}
+}
+
+func TestExpiredSessionsDroppedOnLoad(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "sessions.json")
+	now := time.Now()
+	data, err := json.Marshal(map[string]time.Time{
+		"expired": now.Add(-time.Minute),
+		"alive":   now.Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if err := os.WriteFile(file, data, 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	s := NewServer(Options{Password: "secret", Rules: newFakeRules(), Stats: newTestStats(t), SessionFile: file})
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.sessions["expired"]; ok {
+		t.Fatal("expected expired session to be dropped on load")
+	}
+	if _, ok := s.sessions["alive"]; !ok {
+		t.Fatal("expected live session to be restored")
 	}
 }

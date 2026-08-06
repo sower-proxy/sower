@@ -95,11 +95,12 @@ func startAdminListener(ctx context.Context, cfg config.SowerConfig, r *router.R
 	}
 
 	srv := admin.NewServer(admin.Options{
-		Password: cfg.Admin.Password,
-		Version:  version,
-		Date:     date,
-		Rules:    adminRules{r: r},
-		Stats:    stats,
+		Password:    cfg.Admin.Password,
+		Version:     version,
+		Date:        date,
+		Rules:       adminRules{r: r},
+		Stats:       stats,
+		SessionFile: cfg.Admin.SessionFile,
 	})
 
 	ln, err := net.Listen("tcp", cfg.Admin.Addr)
@@ -137,11 +138,12 @@ func startSharedHTTPListener(ctx context.Context, cfg config.SowerConfig, r *rou
 	slog.Info("service listening", "service", "http proxy + admin", "network", "tcp", "addr", addr)
 
 	srv := admin.NewServer(admin.Options{
-		Password: cfg.Admin.Password,
-		Version:  version,
-		Date:     date,
-		Rules:    adminRules{r: r},
-		Stats:    stats,
+		Password:    cfg.Admin.Password,
+		Version:     version,
+		Date:        date,
+		Rules:       adminRules{r: r},
+		Stats:       stats,
+		SessionFile: cfg.Admin.SessionFile,
 	})
 	go func() {
 		<-ctx.Done()

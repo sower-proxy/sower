@@ -15,6 +15,8 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -66,26 +68,30 @@ type RuleManager interface {
 
 // Options configures the admin server.
 type Options struct {
-	Password string
-	Version  string
-	Date     string
-	Rules    RuleManager
-	Stats    *Stats
+	Password    string
+	Version     string
+	Date        string
+	Rules       RuleManager
+	Stats       *Stats
+	SessionFile string
 }
 
 // Server serves the admin API and the embedded frontend on one listener.
 type Server struct {
-	opts     Options
-	sessions map[string]time.Time
-	mu       sync.Mutex
-	http     *http.Server
+	opts        Options
+	sessions    map[string]time.Time
+	sessionFile string
+	mu          sync.Mutex
+	http        *http.Server
 }
 
 func NewServer(opts Options) *Server {
 	s := &Server{
-		opts:     opts,
-		sessions: make(map[string]time.Time),
+		opts:        opts,
+		sessions:    make(map[string]time.Time),
+		sessionFile: opts.SessionFile,
 	}
+	s.loadSessions()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/session", s.handleLogin)
@@ -106,6 +112,81 @@ func NewServer(opts Options) *Server {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	return s
+}
+
+// loadSessions restores persisted sessions at startup, dropping any that
+// already expired while the process was down.
+func (s *Server) loadSessions() {
+	if s.sessionFile == "" {
+		return
+	}
+	data, err := os.ReadFile(s.sessionFile)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			slog.Warn("read session file", "error", err)
+		}
+		return
+	}
+	var stored map[string]time.Time
+	if err := json.Unmarshal(data, &stored); err != nil {
+		slog.Warn("parse session file", "error", err)
+		return
+	}
+	now := time.Now()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for token, exp := range stored {
+		if now.Before(exp) {
+			s.sessions[token] = exp
+		}
+	}
+	if len(s.sessions) > 0 {
+		slog.Info("restored admin sessions", "count", len(s.sessions), "file", s.sessionFile)
+	}
+}
+
+// persistLocked writes the current sessions to disk atomically with 0600
+// permissions. It must be called with s.mu held. IO errors degrade to an
+// in-memory session store, never to a failed request.
+func (s *Server) persistLocked() {
+	if s.sessionFile == "" {
+		return
+	}
+	data, err := json.Marshal(s.sessions)
+	if err != nil {
+		slog.Warn("marshal sessions", "error", err)
+		return
+	}
+	dir := filepath.Dir(s.sessionFile)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		slog.Warn("create session dir", "error", err)
+		return
+	}
+	tmp, err := os.CreateTemp(dir, ".sessions-*")
+	if err != nil {
+		slog.Warn("create session temp file", "error", err)
+		return
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		slog.Warn("write session temp file", "error", err)
+		return
+	}
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		slog.Warn("chmod session temp file", "error", err)
+		return
+	}
+	if err := tmp.Close(); err != nil {
+		slog.Warn("close session temp file", "error", err)
+		return
+	}
+	if err := os.Rename(tmpName, s.sessionFile); err != nil {
+		slog.Warn("rename session file", "error", err)
+		return
+	}
 }
 
 // Serve accepts connections on ln until Shutdown or a fatal serve error.
@@ -145,6 +226,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie(sessionCookieName); err == nil {
 		s.mu.Lock()
 		delete(s.sessions, c.Value)
+		s.persistLocked()
 		s.mu.Unlock()
 	}
 	http.SetCookie(w, s.sessionCookie("", -1, r.TLS != nil))
@@ -180,6 +262,7 @@ func (s *Server) issueSession(w http.ResponseWriter, r *http.Request) bool {
 		s.purgeExpiredLocked()
 	}
 	s.sessions[value] = time.Now().Add(sessionTTL)
+	s.persistLocked()
 	s.mu.Unlock()
 
 	http.SetCookie(w, s.sessionCookie(value, int(sessionTTL.Seconds()), r.TLS != nil))
@@ -188,10 +271,15 @@ func (s *Server) issueSession(w http.ResponseWriter, r *http.Request) bool {
 
 func (s *Server) purgeExpiredLocked() {
 	now := time.Now()
+	purged := false
 	for token, exp := range s.sessions {
 		if now.After(exp) {
 			delete(s.sessions, token)
+			purged = true
 		}
+	}
+	if purged {
+		s.persistLocked()
 	}
 }
 
@@ -206,9 +294,19 @@ func (s *Server) validSession(r *http.Request) bool {
 	if !ok {
 		return false
 	}
-	if time.Now().After(exp) {
+	now := time.Now()
+	if now.After(exp) {
 		delete(s.sessions, c.Value)
+		s.persistLocked()
 		return false
+	}
+	// Sliding expiry: refresh a session that is more than halfway through
+	// its TTL so an active user is never logged out mid-session, while an
+	// inactive session still lapses. Persisting only on refresh bounds the
+	// disk writes to a couple per session per TTL.
+	if exp.Sub(now) < sessionTTL/2 {
+		s.sessions[c.Value] = now.Add(sessionTTL)
+		s.persistLocked()
 	}
 	return true
 }
