@@ -26,6 +26,7 @@
   let paused = $state(false)
   let filter = $state('')
   let sort: SortMode = $state('bytes')
+  let client = $state('')
 
   const activeSortLabel = $derived(sortModes.find((m) => m.value === sort)?.label ?? '流量')
   const sourceLabels: Record<Source, string> = {
@@ -47,7 +48,7 @@
 
   async function reload() {
     try {
-      traffic = await api.traffic(sort, source)
+      traffic = await api.traffic(sort, source, client || undefined)
       error = ''
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) {
@@ -65,9 +66,10 @@
 
   onMount(() => startPolling(refresh, 5000))
 
-  // Breadcrumb-driven source switch always reloads, even while paused.
+  // Breadcrumb-driven source or client switch always reloads, even while paused.
   $effect(() => {
     source
+    client
     traffic = null
     void reload()
   })
@@ -142,6 +144,34 @@
       {/if}
     </Badge>
   </div>
+  {#if (traffic.clients ?? []).length > 0}
+    <div class="mb-3 flex flex-wrap items-center gap-1.5" role="group" aria-label="客户端过滤">
+      <button
+        type="button"
+        class="rounded-full border px-3 py-1 text-xs font-medium transition-colors {!client
+          ? 'border-primary/40 bg-primary/10 text-foreground'
+          : 'text-muted-foreground hover:text-foreground'}"
+        aria-pressed={!client}
+        onclick={() => (client = '')}
+      >
+        全部客户端
+      </button>
+      {#each traffic.clients as c}
+        <button
+          type="button"
+          class="rounded-full border px-3 py-1 font-mono text-xs transition-colors {client === c.ip
+            ? 'border-primary/40 bg-primary/10 text-foreground'
+            : 'text-muted-foreground hover:text-foreground'}"
+          aria-pressed={client === c.ip}
+          title={`${formatCount(c.conns)} 次 · ↑${formatBytes(c.bytesUp)} ↓${formatBytes(c.bytesDown)}`}
+          onclick={() => (client = c.ip)}
+        >
+          {c.ip}
+          <span class="ms-1 text-muted-foreground">{formatCount(c.conns)}</span>
+        </button>
+      {/each}
+    </div>
+  {/if}
   <Card.Card class="max-h-[70vh] overflow-auto">
     <Table.Table>
       <Table.TableHeader>

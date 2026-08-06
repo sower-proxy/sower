@@ -439,7 +439,8 @@ func (s *Server) handleTraffic(w http.ResponseWriter, r *http.Request) {
 	if !source.valid() {
 		source = SourceAll
 	}
-	writeJSON(w, http.StatusOK, s.opts.Stats.Snapshot(sort, source))
+	client := r.URL.Query().Get("client")
+	writeJSON(w, http.StatusOK, s.opts.Stats.Snapshot(sort, source, client))
 }
 
 func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {

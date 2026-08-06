@@ -84,7 +84,7 @@ type dnsStatsHandler struct {
 
 func (h dnsStatsHandler) ServeDNS(w dns.ResponseWriter, req *dns.Msg) {
 	if len(req.Question) == 1 {
-		h.stats.RecordDNS(req.Question[0].Name)
+		h.stats.RecordDNS(req.Question[0].Name, admin.ClientIPOf(w.RemoteAddr()))
 	}
 	h.Handler.ServeDNS(w, req)
 }

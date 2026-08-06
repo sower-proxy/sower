@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -386,7 +386,7 @@ func TestTrafficEndpoint(t *testing.T) {
 	t.Cleanup(ts.Close)
 
 	cookie := login(t, ts, "secret")
-	stats.RecordDNS("example.com.")
+	stats.RecordDNS("example.com.", "")
 	stats.WrapConn(&fakeConn{}, "socks5")
 
 	resp := authedRequest(t, ts, http.MethodGet, "/api/traffic", cookie, "")
@@ -519,7 +519,7 @@ func TestMetricsEndpointServesPrometheusFormat(t *testing.T) {
 	ts := httptest.NewServer(s.http.Handler)
 	defer ts.Close()
 
-	stats.RecordDNS("example.com")
+	stats.RecordDNS("example.com", "")
 	stats.RecordRoute("proxy")
 	conn := stats.WrapConn(&fakeConn{}, "https")
 	_ = conn.Close()

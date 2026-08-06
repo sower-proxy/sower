@@ -19,6 +19,14 @@ export interface DomainStat {
 	lastSeen: string;
 }
 
+export interface ClientStat {
+	ip: string;
+	conns: number;
+	bytesUp: number;
+	bytesDown: number;
+	lastSeen: string;
+}
+
 export interface TrafficSnapshot {
 	uptime: number;
 	dnsQueries: number;
@@ -35,6 +43,7 @@ export interface TrafficSnapshot {
 	bytesUp: number;
 	bytesDown: number;
 	domains: DomainStat[];
+	clients: ClientStat[];
 }
 
 export interface HistorySample {
@@ -123,10 +132,11 @@ export const api = {
 			method: "DELETE",
 			body: JSON.stringify({ category, rules }),
 		}),
-	traffic: (sort?: DomainSort, source?: Source) => {
+	traffic: (sort?: DomainSort, source?: Source, client?: string) => {
 		const params: string[] = [];
 		if (sort) params.push(`sort=${sort}`);
 		if (source && source !== "all") params.push(`source=${source}`);
+		if (client) params.push(`client=${encodeURIComponent(client)}`);
 		return request<TrafficSnapshot>(params.length ? `/api/traffic?${params.join("&")}` : "/api/traffic");
 	},
 	history: () => request<History>("/api/history"),

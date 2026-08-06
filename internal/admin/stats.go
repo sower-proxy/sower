@@ -17,6 +17,7 @@ const (
 	maxDomainEntries = 10000
 	staleDomainAge   = time.Hour
 	snapshotTopN     = 100
+	clientsTopN      = 50
 
 	// historyCapacity keeps one hour of samples at the 5s poll cadence.
 	historyCapacity = 720
@@ -114,6 +115,17 @@ type TrafficSnapshot struct {
 	BytesUp   uint64       `json:"bytesUp"`
 	BytesDown uint64       `json:"bytesDown"`
 	Domains   []DomainStat `json:"domains"`
+	Clients   []ClientStat `json:"clients"`
+}
+
+// ClientStat aggregates traffic for a single client IP. Conns counts both
+// proxy connections and DNS queries originating from the IP.
+type ClientStat struct {
+	IP        string    `json:"ip"`
+	Conns     uint64    `json:"conns"`
+	BytesUp   uint64    `json:"bytesUp"`
+	BytesDown uint64    `json:"bytesDown"`
+	LastSeen  time.Time `json:"lastSeen"`
 }
 
 // HistorySample is one point in the in-process history ring. Byte, query,
@@ -190,12 +202,21 @@ type domainStat struct {
 	bytesDown uint64
 	lastSeen  time.Time
 	bySource  map[Source]*sourceStat
+	byClient  map[string]*clientStat // client IP -> per-domain stats
 }
 
 // sourceStat is the per-source breakdown of a domain's traffic. A domain can
 // be reached through several entry points (HTTP/HTTPS/SOCKS5 proxies and DNS
 // queries), so each is tracked separately for the source-filtered views.
 type sourceStat struct {
+	conns     uint64
+	bytesUp   uint64
+	bytesDown uint64
+	lastSeen  time.Time
+}
+
+// clientStat is the per-client-IP breakdown of a domain's traffic.
+type clientStat struct {
 	conns     uint64
 	bytesUp   uint64
 	bytesDown uint64
@@ -218,17 +239,20 @@ func NewStats() (*Stats, error) {
 // Metrics exposes the OpenTelemetry export surface (Prometheus /metrics).
 func (s *Stats) Metrics() *metrics.Metrics { return s.metrics }
 
-// RecordDNS counts a DNS query for the given qname.
-func (s *Stats) RecordDNS(qname string) {
+// RecordDNS counts a DNS query for the given qname from the given client IP.
+func (s *Stats) RecordDNS(qname string, clientIP string) {
 	s.dnsQueries.Add(1)
 	s.metrics.RecordDNS()
 	domain := normalizeDomain(qname)
 	if domain == "" {
 		return
 	}
-	s.record(domain, SourceDNS, func(d *domainStat, src *sourceStat) {
+	s.record(domain, SourceDNS, clientIP, func(d *domainStat, src *sourceStat, dc *clientStat) {
 		d.conns++
 		src.conns++
+		if dc != nil {
+			dc.conns++
+		}
 	})
 }
 
@@ -262,7 +286,13 @@ func (s *Stats) WrapConn(conn net.Conn, kind string) net.Conn {
 		s.activeSocks.Add(1)
 	}
 	s.metrics.ConnOpened(kind)
-	return &countingConn{Conn: conn, stats: s, kind: kind, created: time.Now()}
+	return &countingConn{
+		Conn:     conn,
+		stats:    s,
+		kind:     kind,
+		clientIP: ClientIPOf(conn.RemoteAddr()),
+		created:  time.Now(),
+	}
 }
 
 // BindConn attributes an already-wrapped connection to a domain and bumps the
@@ -279,17 +309,21 @@ func (s *Stats) BindConn(conn net.Conn, domain string) {
 	}
 	cc.bind(domain)
 	source := Source(cc.kind)
-	s.record(domain, source, func(d *domainStat, src *sourceStat) {
+	s.record(domain, source, cc.clientIP, func(d *domainStat, src *sourceStat, dc *clientStat) {
 		d.conns++
 		src.conns++
+		if dc != nil {
+			dc.conns++
+		}
 	})
 }
 
 // Snapshot returns an immutable view of the current stats, advancing the
 // history ring and evicting stale domains along the way. sort selects the
-// domain ordering and source restricts domains to one entry point; invalid
-// values fall back to DomainSortBytes and SourceAll.
-func (s *Stats) Snapshot(sort DomainSort, source Source) TrafficSnapshot {
+// domain ordering, source restricts domains to one entry point, and client
+// restricts them to one client IP; invalid values fall back to
+// DomainSortBytes and SourceAll, and an empty client disables the filter.
+func (s *Stats) Snapshot(sort DomainSort, source Source, client string) TrafficSnapshot {
 	s.sample()
 
 	snap := TrafficSnapshot{
@@ -314,6 +348,7 @@ func (s *Stats) Snapshot(sort DomainSort, source Source) TrafficSnapshot {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	clientAgg := make(map[string]*ClientStat)
 	for domain, d := range s.domains {
 		if time.Since(d.lastSeen) > staleDomainAge {
 			delete(s.domains, domain)
@@ -336,13 +371,58 @@ func (s *Stats) Snapshot(sort DomainSort, source Source) TrafficSnapshot {
 			ds.BytesDown = src.bytesDown
 			ds.LastSeen = src.lastSeen
 		}
+		if client != "" {
+			dc, ok := d.byClient[client] // nil map read is safe
+			if !ok || (dc.conns == 0 && dc.bytesUp == 0 && dc.bytesDown == 0) {
+				continue
+			}
+			ds.Conns = dc.conns
+			ds.BytesUp = dc.bytesUp
+			ds.BytesDown = dc.bytesDown
+			ds.LastSeen = dc.lastSeen
+		}
 		snap.Domains = append(snap.Domains, ds)
+
+		for ip, c := range d.byClient {
+			agg := clientAgg[ip]
+			if agg == nil {
+				agg = &ClientStat{IP: ip}
+				clientAgg[ip] = agg
+			}
+			agg.Conns += c.conns
+			agg.BytesUp += c.bytesUp
+			agg.BytesDown += c.bytesDown
+			if c.lastSeen.After(agg.LastSeen) {
+				agg.LastSeen = c.lastSeen
+			}
+		}
 	}
 	sortDomains(snap.Domains, sort)
 	if len(snap.Domains) > snapshotTopN {
 		snap.Domains = snap.Domains[:snapshotTopN]
 	}
+	snap.Clients = topClients(clientAgg)
 	return snap
+}
+
+// topClients orders per-IP aggregates by total bytes and caps the list.
+func topClients(agg map[string]*ClientStat) []ClientStat {
+	out := make([]ClientStat, 0, len(agg))
+	for _, c := range agg {
+		out = append(out, *c)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		ti := out[i].BytesUp + out[i].BytesDown
+		tj := out[j].BytesUp + out[j].BytesDown
+		if ti == tj {
+			return out[i].IP < out[j].IP
+		}
+		return ti > tj
+	})
+	if len(out) > clientsTopN {
+		out = out[:clientsTopN]
+	}
+	return out
 }
 
 // sortDomains orders domains by the selected mode: total bytes (default),
@@ -461,9 +541,10 @@ func (s *Stats) rates() (up, down, dns, conns float64) {
 	return float64(sumUp) / elapsed, float64(sumDown) / elapsed, float64(sumDNS) / elapsed, float64(sumConns) / elapsed
 }
 
-// record attributes one event to a domain and its source. It must be called
-// with the domain and source both normalized.
-func (s *Stats) record(domain string, source Source, update func(*domainStat, *sourceStat)) {
+// record attributes one event to a domain, its source, and optionally its
+// client IP. The client IP may be empty when it cannot be determined; the
+// per-client stat is then nil and callers must guard.
+func (s *Stats) record(domain string, source Source, clientIP string, update func(*domainStat, *sourceStat, *clientStat)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	d := s.domains[domain]
@@ -479,9 +560,23 @@ func (s *Stats) record(domain string, source Source, update func(*domainStat, *s
 		src = &sourceStat{}
 		d.bySource[source] = src
 	}
-	update(d, src)
+	var dc *clientStat
+	if clientIP != "" {
+		if d.byClient == nil {
+			d.byClient = make(map[string]*clientStat)
+		}
+		dc = d.byClient[clientIP]
+		if dc == nil {
+			dc = &clientStat{}
+			d.byClient[clientIP] = dc
+		}
+	}
+	update(d, src, dc)
 	d.lastSeen = time.Now()
 	src.lastSeen = time.Now()
+	if dc != nil {
+		dc.lastSeen = time.Now()
+	}
 }
 
 // evictOldestLocked drops the single least-recently-seen entry to keep the
@@ -503,11 +598,12 @@ func (s *Stats) evictOldestLocked() {
 // countingConn wraps a client connection and feeds byte counts into Stats.
 type countingConn struct {
 	net.Conn
-	stats   *Stats
-	kind    string
-	created time.Time
-	domain  atomic.Value // string; empty until BindConn
-	closed  atomic.Bool
+	stats    *Stats
+	kind     string
+	clientIP string
+	created  time.Time
+	domain   atomic.Value // string; empty until BindConn
+	closed   atomic.Bool
 }
 
 func (c *countingConn) Read(p []byte) (int, error) {
@@ -559,13 +655,19 @@ func (c *countingConn) recordBytes(n int, up bool) {
 		return
 	}
 	source := Source(c.kind)
-	c.stats.record(domain, source, func(d *domainStat, src *sourceStat) {
+	c.stats.record(domain, source, c.clientIP, func(d *domainStat, src *sourceStat, dc *clientStat) {
 		if up {
 			d.bytesUp += uint64(n)
 			src.bytesUp += uint64(n)
+			if dc != nil {
+				dc.bytesUp += uint64(n)
+			}
 		} else {
 			d.bytesDown += uint64(n)
 			src.bytesDown += uint64(n)
+			if dc != nil {
+				dc.bytesDown += uint64(n)
+			}
 		}
 	})
 }
@@ -575,6 +677,18 @@ func normalizeDomain(domain string) string {
 	domain = strings.TrimSpace(domain)
 	domain = strings.TrimSuffix(domain, ".")
 	return strings.ToLower(domain)
+}
+
+// clientIPOf extracts the host part of a network address, falling back to the
+// full address when it has no port.
+func ClientIPOf(addr net.Addr) string {
+	if addr == nil {
+		return ""
+	}
+	if host, _, err := net.SplitHostPort(addr.String()); err == nil {
+		return host
+	}
+	return addr.String()
 }
 
 // goroutineCount reports the current number of goroutines.

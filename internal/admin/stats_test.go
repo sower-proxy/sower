@@ -26,6 +26,10 @@ func (c *fakeConn) Write(p []byte) (int, error) {
 
 func (c *fakeConn) Close() error { return nil }
 
+func (c *fakeConn) RemoteAddr() net.Addr {
+	return &net.TCPAddr{IP: net.ParseIP("192.0.2.1")}
+}
+
 func TestStatsWrapConnCountsBytesBeforeBind(t *testing.T) {
 	s := newTestStats(t)
 	conn := &fakeConn{readBuf: []byte("GET / HTTP/1.1\r\nHost: example.com\r\n\r\n")}
@@ -40,7 +44,7 @@ func TestStatsWrapConnCountsBytesBeforeBind(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 
-	snap := s.Snapshot(DomainSortBytes, SourceAll)
+	snap := s.Snapshot(DomainSortBytes, SourceAll, "")
 	if snap.Conns.HTTP != 1 {
 		t.Fatalf("expected 1 http conn, got %d", snap.Conns.HTTP)
 	}
@@ -73,7 +77,7 @@ func TestStatsBindConnAttributesBytesToDomain(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 
-	snap := s.Snapshot(DomainSortBytes, SourceAll)
+	snap := s.Snapshot(DomainSortBytes, SourceAll, "")
 	if len(snap.Domains) != 1 {
 		t.Fatalf("expected 1 domain, got %v", snap.Domains)
 	}
@@ -98,17 +102,17 @@ func TestStatsBindConnAttributesBytesToDomain(t *testing.T) {
 func TestStatsBindConnIgnoresUnwrappedConn(t *testing.T) {
 	s := newTestStats(t)
 	s.BindConn(&fakeConn{}, "example.com")
-	if len(s.Snapshot(DomainSortBytes, SourceAll).Domains) != 0 {
+	if len(s.Snapshot(DomainSortBytes, SourceAll, "").Domains) != 0 {
 		t.Fatal("expected unwrapped conn to be ignored")
 	}
 }
 
 func TestStatsRecordDNS(t *testing.T) {
 	s := newTestStats(t)
-	s.RecordDNS("Example.COM.")
-	s.RecordDNS("example.com.")
+	s.RecordDNS("Example.COM.", "")
+	s.RecordDNS("example.com.", "")
 
-	snap := s.Snapshot(DomainSortBytes, SourceAll)
+	snap := s.Snapshot(DomainSortBytes, SourceAll, "")
 	if snap.DNSQueries != 2 {
 		t.Fatalf("expected 2 dns queries, got %d", snap.DNSQueries)
 	}
@@ -127,7 +131,7 @@ func TestStatsSnapshotEvictsStaleDomains(t *testing.T) {
 	s.domains["fresh.example"] = &domainStat{lastSeen: time.Now()}
 	s.mu.Unlock()
 
-	snap := s.Snapshot(DomainSortBytes, SourceAll)
+	snap := s.Snapshot(DomainSortBytes, SourceAll, "")
 	if len(snap.Domains) != 1 || snap.Domains[0].Domain != "fresh.example" {
 		t.Fatalf("expected stale domain evicted, got %v", snap.Domains)
 	}
@@ -136,7 +140,7 @@ func TestStatsSnapshotEvictsStaleDomains(t *testing.T) {
 func TestStatsDomainCapIsEnforced(t *testing.T) {
 	s := newTestStats(t)
 	for i := 0; i < maxDomainEntries+50; i++ {
-		s.record(fmt.Sprintf("host%d.example", i), SourceHTTP, func(d *domainStat, src *sourceStat) {})
+		s.record(fmt.Sprintf("host%d.example", i), SourceHTTP, "", func(d *domainStat, src *sourceStat, dc *clientStat) {})
 	}
 	s.mu.Lock()
 	n := len(s.domains)
@@ -165,11 +169,20 @@ func TestEvictOldestLocked(t *testing.T) {
 
 func TestStatsSnapshotSortsByTotalBytes(t *testing.T) {
 	s := newTestStats(t)
-	s.record("small.example", SourceHTTP, func(d *domainStat, src *sourceStat) { d.bytesUp, d.bytesDown = 1, 1; src.bytesUp, src.bytesDown = 1, 1 })
-	s.record("big.example", SourceHTTP, func(d *domainStat, src *sourceStat) { d.bytesUp, d.bytesDown = 100, 100; src.bytesUp, src.bytesDown = 100, 100 })
-	s.record("mid.example", SourceHTTP, func(d *domainStat, src *sourceStat) { d.bytesUp, d.bytesDown = 10, 10; src.bytesUp, src.bytesDown = 10, 10 })
+	s.record("small.example", SourceHTTP, "", func(d *domainStat, src *sourceStat, dc *clientStat) {
+		d.bytesUp, d.bytesDown = 1, 1
+		src.bytesUp, src.bytesDown = 1, 1
+	})
+	s.record("big.example", SourceHTTP, "", func(d *domainStat, src *sourceStat, dc *clientStat) {
+		d.bytesUp, d.bytesDown = 100, 100
+		src.bytesUp, src.bytesDown = 100, 100
+	})
+	s.record("mid.example", SourceHTTP, "", func(d *domainStat, src *sourceStat, dc *clientStat) {
+		d.bytesUp, d.bytesDown = 10, 10
+		src.bytesUp, src.bytesDown = 10, 10
+	})
 
-	snap := s.Snapshot(DomainSortBytes, SourceAll)
+	snap := s.Snapshot(DomainSortBytes, SourceAll, "")
 	if len(snap.Domains) != 3 {
 		t.Fatalf("unexpected domains: %v", snap.Domains)
 	}
@@ -189,7 +202,7 @@ func newTestStats(t *testing.T) *Stats {
 
 func TestStatsUptimeIsSeconds(t *testing.T) {
 	s := newTestStats(t)
-	snap := s.Snapshot(DomainSortBytes, SourceAll)
+	snap := s.Snapshot(DomainSortBytes, SourceAll, "")
 	// A fresh stats object must report a small number of seconds, not
 	// nanoseconds (a time.Duration would serialize as ~1e9 per second).
 	if snap.Uptime < 0 || snap.Uptime > 60 {
@@ -201,7 +214,7 @@ func TestStatsActiveConnsTrackedAndIdempotentClose(t *testing.T) {
 	s := newTestStats(t)
 	wrapped := s.WrapConn(&fakeConn{}, "http")
 
-	snap := s.Snapshot(DomainSortBytes, SourceAll)
+	snap := s.Snapshot(DomainSortBytes, SourceAll, "")
 	if snap.Active.HTTP != 1 || snap.Conns.HTTP != 1 {
 		t.Fatalf("expected 1 active/1 total http conn, got %+v / %+v", snap.Active, snap.Conns)
 	}
@@ -212,7 +225,7 @@ func TestStatsActiveConnsTrackedAndIdempotentClose(t *testing.T) {
 	if err := wrapped.Close(); err != nil { // idempotent
 		t.Fatalf("second close: %v", err)
 	}
-	snap = s.Snapshot(DomainSortBytes, SourceAll)
+	snap = s.Snapshot(DomainSortBytes, SourceAll, "")
 	if snap.Active.HTTP != 0 {
 		t.Fatalf("expected 0 active after close, got %d", snap.Active.HTTP)
 	}
@@ -227,14 +240,14 @@ func TestStatsActiveConnsPerProtocol(t *testing.T) {
 	https := s.WrapConn(&fakeConn{}, "https")
 	socks := s.WrapConn(&fakeConn{}, "socks5")
 
-	snap := s.Snapshot(DomainSortBytes, SourceAll)
+	snap := s.Snapshot(DomainSortBytes, SourceAll, "")
 	if snap.Active.HTTP != 1 || snap.Active.HTTPS != 1 || snap.Active.Socks5 != 1 {
 		t.Fatalf("unexpected active conns: %+v", snap.Active)
 	}
 	_ = http.Close()
 	_ = https.Close()
 	_ = socks.Close()
-	snap = s.Snapshot(DomainSortBytes, SourceAll)
+	snap = s.Snapshot(DomainSortBytes, SourceAll, "")
 	if snap.Active.HTTP != 0 || snap.Active.HTTPS != 0 || snap.Active.Socks5 != 0 {
 		t.Fatalf("expected all active conns released: %+v", snap.Active)
 	}
@@ -247,7 +260,7 @@ func TestStatsRecordRoute(t *testing.T) {
 	s.RecordRoute("proxy")
 	s.RecordRoute("proxy")
 
-	snap := s.Snapshot(DomainSortBytes, SourceAll)
+	snap := s.Snapshot(DomainSortBytes, SourceAll, "")
 	if snap.RuleHits.Block != 1 || snap.RuleHits.Direct != 1 || snap.RuleHits.Proxy != 2 {
 		t.Fatalf("unexpected rule hits: %+v", snap.RuleHits)
 	}
@@ -297,7 +310,7 @@ func TestStatsHistoryRingBounded(t *testing.T) {
 
 func TestStatsSampleClampsLongGap(t *testing.T) {
 	s := newTestStats(t)
-	s.RecordDNS("example.com")
+	s.RecordDNS("example.com", "")
 	s.RecordRoute("proxy")
 	s.histMu.Lock()
 	s.lastSample = sampleCounters{at: time.Now().Add(-10 * time.Minute)}
@@ -322,22 +335,22 @@ func TestStatsSnapshotDomainSortModes(t *testing.T) {
 	s.domains["busy.example"] = &domainStat{conns: 20, bytesUp: 10, bytesDown: 10, lastSeen: now.Add(-2 * time.Minute)}
 	s.mu.Unlock()
 
-	byBytes := s.Snapshot(DomainSortBytes, SourceAll)
+	byBytes := s.Snapshot(DomainSortBytes, SourceAll, "")
 	if byBytes.Domains[0].Domain != "big.example" {
 		t.Fatalf("expected big.example first by bytes, got %q", byBytes.Domains[0].Domain)
 	}
 
-	byRecent := s.Snapshot(DomainSortRecent, SourceAll)
+	byRecent := s.Snapshot(DomainSortRecent, SourceAll, "")
 	if byRecent.Domains[0].Domain != "hot.example" {
 		t.Fatalf("expected hot.example first by recency, got %q", byRecent.Domains[0].Domain)
 	}
 
-	byConns := s.Snapshot(DomainSortConns, SourceAll)
+	byConns := s.Snapshot(DomainSortConns, SourceAll, "")
 	if byConns.Domains[0].Domain != "busy.example" {
 		t.Fatalf("expected busy.example first by conns, got %q", byConns.Domains[0].Domain)
 	}
 
-	fallback := s.Snapshot(DomainSort("bogus"), SourceAll)
+	fallback := s.Snapshot(DomainSort("bogus"), SourceAll, "")
 	if fallback.Domains[0].Domain != "big.example" {
 		t.Fatalf("expected invalid sort to fall back to bytes, got %q", fallback.Domains[0].Domain)
 	}
@@ -363,12 +376,12 @@ func TestStatsSnapshotSourceFilter(t *testing.T) {
 	}
 	s.mu.Unlock()
 
-	all := s.Snapshot(DomainSortBytes, SourceAll)
+	all := s.Snapshot(DomainSortBytes, SourceAll, "")
 	if len(all.Domains) != 2 {
 		t.Fatalf("expected 2 domains in all view, got %d", len(all.Domains))
 	}
 
-	dns := s.Snapshot(DomainSortBytes, SourceDNS)
+	dns := s.Snapshot(DomainSortBytes, SourceDNS, "")
 	if len(dns.Domains) != 1 || dns.Domains[0].Domain != "queried.example" || dns.Domains[0].Conns != 5 {
 		t.Fatalf("unexpected dns view: %+v", dns.Domains)
 	}
@@ -376,12 +389,12 @@ func TestStatsSnapshotSourceFilter(t *testing.T) {
 		t.Fatalf("dns view should carry no bytes, got %+v", dns.Domains[0])
 	}
 
-	httpView := s.Snapshot(DomainSortBytes, SourceHTTP)
+	httpView := s.Snapshot(DomainSortBytes, SourceHTTP, "")
 	if len(httpView.Domains) != 1 || httpView.Domains[0].Domain != "proxied.example" || httpView.Domains[0].Conns != 2 {
 		t.Fatalf("unexpected http view: %+v", httpView.Domains)
 	}
 
-	socks := s.Snapshot(DomainSortBytes, SourceSocks5)
+	socks := s.Snapshot(DomainSortBytes, SourceSocks5, "")
 	if len(socks.Domains) != 0 {
 		t.Fatalf("expected no socks5 domains, got %+v", socks.Domains)
 	}
@@ -389,15 +402,86 @@ func TestStatsSnapshotSourceFilter(t *testing.T) {
 
 func TestRecordDNSAttributedToDNSSource(t *testing.T) {
 	s := newTestStats(t)
-	s.RecordDNS("example.com.")
+	s.RecordDNS("example.com.", "")
 
-	dns := s.Snapshot(DomainSortBytes, SourceDNS)
+	dns := s.Snapshot(DomainSortBytes, SourceDNS, "")
 	if len(dns.Domains) != 1 || dns.Domains[0].Domain != "example.com" || dns.Domains[0].Conns != 1 {
 		t.Fatalf("unexpected dns view: %+v", dns.Domains)
 	}
 
-	httpView := s.Snapshot(DomainSortBytes, SourceHTTP)
+	httpView := s.Snapshot(DomainSortBytes, SourceHTTP, "")
 	if len(httpView.Domains) != 0 {
 		t.Fatalf("dns query must not appear in http view: %+v", httpView.Domains)
+	}
+}
+
+func TestStatsSnapshotClientFilter(t *testing.T) {
+	s := newTestStats(t)
+	now := time.Now()
+
+	s.mu.Lock()
+	s.domains["a.example"] = &domainStat{
+		conns: 4, bytesUp: 400, bytesDown: 400, lastSeen: now,
+		byClient: map[string]*clientStat{
+			"192.168.1.10": {conns: 3, bytesUp: 300, bytesDown: 300, lastSeen: now},
+			"192.168.1.20": {conns: 1, bytesUp: 100, bytesDown: 100, lastSeen: now},
+		},
+	}
+	s.domains["b.example"] = &domainStat{
+		conns: 2, bytesUp: 200, bytesDown: 200, lastSeen: now,
+		byClient: map[string]*clientStat{
+			"192.168.1.10": {conns: 2, bytesUp: 200, bytesDown: 200, lastSeen: now},
+		},
+	}
+	s.mu.Unlock()
+
+	// filtered by client: only that client's domains, with that client's values
+	view := s.Snapshot(DomainSortBytes, SourceAll, "192.168.1.10")
+	if len(view.Domains) != 2 {
+		t.Fatalf("expected 2 domains for client, got %d", len(view.Domains))
+	}
+	if view.Domains[0].Domain != "a.example" || view.Domains[0].Conns != 3 {
+		t.Fatalf("a.example should show client 10's conns (3), got %+v", view.Domains[0])
+	}
+	if view.Domains[1].Domain != "b.example" || view.Domains[1].Conns != 2 {
+		t.Fatalf("b.example should show client 10's conns (2), got %+v", view.Domains[1])
+	}
+
+	// unknown client yields an empty list
+	empty := s.Snapshot(DomainSortBytes, SourceAll, "203.0.113.9")
+	if len(empty.Domains) != 0 {
+		t.Fatalf("expected no domains for unknown client, got %+v", empty.Domains)
+	}
+}
+
+func TestStatsSnapshotClientsAggregate(t *testing.T) {
+	s := newTestStats(t)
+	now := time.Now()
+
+	s.mu.Lock()
+	s.domains["a.example"] = &domainStat{
+		lastSeen: now,
+		byClient: map[string]*clientStat{
+			"192.168.1.10": {conns: 3, bytesUp: 300, bytesDown: 300, lastSeen: now},
+		},
+	}
+	s.domains["b.example"] = &domainStat{
+		lastSeen: now,
+		byClient: map[string]*clientStat{
+			"192.168.1.10": {conns: 2, bytesUp: 200, bytesDown: 200, lastSeen: now},
+			"192.168.1.20": {conns: 5, bytesUp: 50, bytesDown: 50, lastSeen: now},
+		},
+	}
+	s.mu.Unlock()
+
+	snap := s.Snapshot(DomainSortBytes, SourceAll, "")
+	if len(snap.Clients) != 2 {
+		t.Fatalf("expected 2 clients, got %+v", snap.Clients)
+	}
+	if snap.Clients[0].IP != "192.168.1.10" || snap.Clients[0].Conns != 5 || snap.Clients[0].BytesUp != 500 {
+		t.Fatalf("unexpected top client: %+v", snap.Clients[0])
+	}
+	if snap.Clients[1].IP != "192.168.1.20" {
+		t.Fatalf("unexpected second client: %+v", snap.Clients[1])
 	}
 }
