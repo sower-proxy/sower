@@ -1,106 +1,113 @@
-export type Category = 'block' | 'direct' | 'proxy'
+export type Category = "block" | "direct" | "proxy";
+
+export type DomainSort = "bytes" | "recent" | "conns";
 
 export interface Status {
-  version: string
-  date: string
-  uptime: number
-  rules: Record<Category, number>
+	version: string;
+	date: string;
+	uptime: number;
+	rules: Record<Category, number>;
 }
 
 export interface DomainStat {
-  domain: string
-  conns: number
-  bytesUp: number
-  bytesDown: number
-  lastSeen: string
+	domain: string;
+	conns: number;
+	bytesUp: number;
+	bytesDown: number;
+	lastSeen: string;
 }
 
 export interface TrafficSnapshot {
-  uptime: number
-  dnsQueries: number
-  conns: { http: number; https: number; socks5: number }
-  active: { http: number; https: number; socks5: number }
-  rates: {
-    bytesUpPerSec: number
-    bytesDownPerSec: number
-    dnsPerSec: number
-    connsPerSec: number
-  }
-  ruleHits: { block: number; direct: number; proxy: number }
-  system: { goroutines: number; heapAlloc: number }
-  bytesUp: number
-  bytesDown: number
-  domains: DomainStat[]
+	uptime: number;
+	dnsQueries: number;
+	conns: { http: number; https: number; socks5: number };
+	active: { http: number; https: number; socks5: number };
+	rates: {
+		bytesUpPerSec: number;
+		bytesDownPerSec: number;
+		dnsPerSec: number;
+		connsPerSec: number;
+	};
+	ruleHits: { block: number; direct: number; proxy: number };
+	system: { goroutines: number; heapAlloc: number };
+	bytesUp: number;
+	bytesDown: number;
+	domains: DomainStat[];
 }
 
 export interface HistorySample {
-  at: string
-  bytesUp: number
-  bytesDown: number
-  dns: number
-  conns: number
-  active: number
-  activeHttp: number
-  activeHttps: number
-  activeSocks: number
-  block: number
-  direct: number
-  proxy: number
+	at: string;
+	bytesUp: number;
+	bytesDown: number;
+	dns: number;
+	conns: number;
+	active: number;
+	activeHttp: number;
+	activeHttps: number;
+	activeSocks: number;
+	block: number;
+	direct: number;
+	proxy: number;
 }
 
 export interface History {
-  samples: HistorySample[]
+	samples: HistorySample[];
 }
 
 export interface RulesResponse {
-  category: Category
-  rules: string[]
+	category: Category;
+	rules: string[];
 }
 
 export class ApiError extends Error {
-  constructor(
-    public status: number,
-    message: string,
-  ) {
-    super(message)
-  }
+	constructor(
+		public status: number,
+		message: string,
+	) {
+		super(message);
+	}
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const resp = await fetch(path, {
-    headers: { 'Content-Type': 'application/json' },
-    ...init,
-  })
-  if (!resp.ok) {
-    let message = `HTTP ${resp.status}`
-    try {
-      const body = await resp.json()
-      if (body && typeof body.error === 'string') message = body.error
-    } catch {
-      // keep the generic message
-    }
-    throw new ApiError(resp.status, message)
-  }
-  if (resp.status === 204) return undefined as T
-  return (await resp.json()) as T
+	const resp = await fetch(path, {
+		headers: { "Content-Type": "application/json" },
+		...init,
+	});
+	if (!resp.ok) {
+		let message = `HTTP ${resp.status}`;
+		try {
+			const body = await resp.json();
+			if (body && typeof body.error === "string") message = body.error;
+		} catch {
+			// keep the generic message
+		}
+		throw new ApiError(resp.status, message);
+	}
+	if (resp.status === 204) return undefined as T;
+	return (await resp.json()) as T;
 }
 
 export const api = {
-  login: (password: string) =>
-    request<void>('/api/session', { method: 'POST', body: JSON.stringify({ password }) }),
-  logout: () => request<void>('/api/session', { method: 'DELETE' }),
-  status: () => request<Status>('/api/status'),
-  rules: (category: Category) => request<RulesResponse>(`/api/rules?category=${category}`),
-  addRules: (category: Category, rules: string[]) =>
-    request<RulesResponse>('/api/rules', {
-      method: 'POST',
-      body: JSON.stringify({ category, rules }),
-    }),
-  removeRules: (category: Category, rules: string[]) =>
-    request<RulesResponse>('/api/rules', {
-      method: 'DELETE',
-      body: JSON.stringify({ category, rules }),
-    }),
-  traffic: () => request<TrafficSnapshot>('/api/traffic'),
-  history: () => request<History>('/api/history'),
-}
+	login: (password: string) =>
+		request<void>("/api/session", {
+			method: "POST",
+			body: JSON.stringify({ password }),
+		}),
+	logout: () => request<void>("/api/session", { method: "DELETE" }),
+	status: () => request<Status>("/api/status"),
+	rules: (category: Category) =>
+		request<RulesResponse>(`/api/rules?category=${category}`),
+	addRules: (category: Category, rules: string[]) =>
+		request<RulesResponse>("/api/rules", {
+			method: "POST",
+			body: JSON.stringify({ category, rules }),
+		}),
+	removeRules: (category: Category, rules: string[]) =>
+		request<RulesResponse>("/api/rules", {
+			method: "DELETE",
+			body: JSON.stringify({ category, rules }),
+		}),
+	traffic: (sort?: DomainSort) =>
+		request<TrafficSnapshot>(sort ? `/api/traffic?sort=${sort}` : "/api/traffic"),
+	history: () => request<History>("/api/history"),
+};

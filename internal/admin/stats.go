@@ -31,6 +31,24 @@ const (
 	rateWindow = 60 * time.Second
 )
 
+// DomainSort selects the ordering of the domain stats in a snapshot.
+type DomainSort string
+
+const (
+	DomainSortBytes  DomainSort = "bytes"  // total traffic, high to low
+	DomainSortRecent DomainSort = "recent" // most recently seen first
+	DomainSortConns  DomainSort = "conns"  // most connections first
+)
+
+func (s DomainSort) valid() bool {
+	switch s {
+	case DomainSortBytes, DomainSortRecent, DomainSortConns:
+		return true
+	default:
+		return false
+	}
+}
+
 // DomainStat aggregates traffic for a single domain. Conns counts both proxy
 // connections and DNS queries involving the domain.
 type DomainStat struct {
@@ -230,8 +248,9 @@ func (s *Stats) BindConn(conn net.Conn, domain string) {
 }
 
 // Snapshot returns an immutable view of the current stats, advancing the
-// history ring and evicting stale domains along the way.
-func (s *Stats) Snapshot() TrafficSnapshot {
+// history ring and evicting stale domains along the way. sort selects the
+// domain ordering; an invalid value falls back to DomainSortBytes.
+func (s *Stats) Snapshot(sort DomainSort) TrafficSnapshot {
 	s.sample()
 
 	snap := TrafficSnapshot{
@@ -269,18 +288,42 @@ func (s *Stats) Snapshot() TrafficSnapshot {
 			LastSeen:  d.lastSeen,
 		})
 	}
-	sort.Slice(snap.Domains, func(i, j int) bool {
-		ti := snap.Domains[i].BytesUp + snap.Domains[i].BytesDown
-		tj := snap.Domains[j].BytesUp + snap.Domains[j].BytesDown
-		if ti == tj {
-			return snap.Domains[i].Domain < snap.Domains[j].Domain
-		}
-		return ti > tj
-	})
+	sortDomains(snap.Domains, sort)
 	if len(snap.Domains) > snapshotTopN {
 		snap.Domains = snap.Domains[:snapshotTopN]
 	}
 	return snap
+}
+
+// sortDomains orders domains by the selected mode: total bytes (default),
+// most recently seen, or connection count. Ties break alphabetically.
+func sortDomains(ds []DomainStat, mode DomainSort) {
+	less := func(a, b DomainStat) bool { return a.Domain < b.Domain }
+	switch mode {
+	case DomainSortRecent:
+		less = func(a, b DomainStat) bool {
+			if !a.LastSeen.Equal(b.LastSeen) {
+				return a.LastSeen.After(b.LastSeen)
+			}
+			return a.Domain < b.Domain
+		}
+	case DomainSortConns:
+		less = func(a, b DomainStat) bool {
+			if a.Conns != b.Conns {
+				return a.Conns > b.Conns
+			}
+			return a.Domain < b.Domain
+		}
+	default:
+		less = func(a, b DomainStat) bool {
+			ta, tb := a.BytesUp+a.BytesDown, b.BytesUp+b.BytesDown
+			if ta != tb {
+				return ta > tb
+			}
+			return a.Domain < b.Domain
+		}
+	}
+	sort.Slice(ds, func(i, j int) bool { return less(ds[i], ds[j]) })
 }
 
 // History returns a copy of the in-process history ring.

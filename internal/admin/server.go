@@ -310,7 +310,11 @@ func (s *Server) handleTraffic(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "stats unavailable")
 		return
 	}
-	writeJSON(w, http.StatusOK, s.opts.Stats.Snapshot())
+	sort := DomainSort(r.URL.Query().Get("sort"))
+	if !sort.valid() {
+		sort = DomainSortBytes
+	}
+	writeJSON(w, http.StatusOK, s.opts.Stats.Snapshot(sort))
 }
 
 func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {

@@ -14,10 +14,20 @@
 
   let { onUnauthorized }: { onUnauthorized: () => void } = $props()
 
+  type SortMode = 'bytes' | 'recent' | 'conns'
+  const sortModes: { value: SortMode; label: string }[] = [
+    { value: 'bytes', label: '流量' },
+    { value: 'recent', label: '最近' },
+    { value: 'conns', label: '连接数' },
+  ]
+
   let traffic = $state<TrafficSnapshot | null>(null)
   let error = $state('')
   let paused = $state(false)
   let filter = $state('')
+  let sort: SortMode = $state('bytes')
+
+  const activeSortLabel = $derived(sortModes.find((m) => m.value === sort)?.label ?? '流量')
 
   const visibleDomains = $derived.by(() => {
     const domains = traffic?.domains ?? []
@@ -29,7 +39,7 @@
   async function refresh() {
     if (paused) return
     try {
-      traffic = await api.traffic()
+      traffic = await api.traffic(sort)
       error = ''
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) {
@@ -67,6 +77,27 @@
         aria-label="过滤域名"
         class="pl-8"
       />
+    </div>
+    <div
+      class="flex shrink-0 items-center gap-0.5 rounded-md border bg-muted/50 p-0.5"
+      role="group"
+      aria-label="排序方式"
+    >
+      {#each sortModes as m}
+        <button
+          type="button"
+          class="rounded-sm px-2.5 py-1 text-xs font-medium transition-colors {sort === m.value
+            ? 'bg-card text-foreground shadow-sm'
+            : 'text-muted-foreground hover:text-foreground'}"
+          aria-pressed={sort === m.value}
+          onclick={() => {
+            sort = m.value
+            void refresh()
+          }}
+        >
+          {m.label}
+        </button>
+      {/each}
     </div>
     <Button
       variant="outline"
@@ -129,6 +160,6 @@
     </Table.Table>
   </Card.Card>
   <p class="mt-2 text-xs text-muted-foreground">
-    按流量排序的前 100 个域名{paused ? '，自动刷新已暂停。' : '，每 5 秒刷新。'}
+    按{activeSortLabel}排序的前 100 个域名{paused ? '，自动刷新已暂停。' : '，每 5 秒刷新。'}
   </p>
 {/if}
