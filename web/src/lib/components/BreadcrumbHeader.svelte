@@ -294,7 +294,7 @@
       {statusError ? 'Error' : status ? 'Ready' : 'Loading'}
     </Badge>
 
-    <Button variant="ghost" size="icon-sm" title="退出登录" onclick={onLogout}>
+    <Button variant="ghost" size="icon-sm" title="退出登录" aria-label="退出登录" onclick={onLogout}>
       <LogOut class="size-4" />
     </Button>
   </div>

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { fade } from 'svelte/transition'
   import Login from './views/Login.svelte'
   import Overview from './views/Overview.svelte'
   import Rules from './views/Rules.svelte'
@@ -6,13 +7,14 @@
   import BreadcrumbHeader from './lib/components/BreadcrumbHeader.svelte'
   import { navItems, type BreadcrumbContextSegment, type NavKey } from './lib/navigation'
   import { api, ApiError, type Category, type Status } from './lib/api'
+  import { startPolling } from './lib/poll'
 
   let authed = $state(false)
   let activeNav: NavKey = $state('overview')
   let ruleCategory: Category = $state('proxy')
   let status: Status | null = $state(null)
   let statusError = $state('')
-  let statusTimer: ReturnType<typeof setInterval> | undefined
+  let stopStatusPoll: (() => void) | undefined
 
   async function refreshStatus() {
     if (!authed) return
@@ -65,10 +67,7 @@
     activeNav = 'overview'
     status = null
     statusError = ''
-    void refreshStatus()
-    if (!statusTimer) {
-      statusTimer = setInterval(refreshStatus, 5000)
-    }
+    stopStatusPoll = startPolling(refreshStatus, 5000)
   }
 
   async function handleLogout() {
@@ -85,10 +84,8 @@
     authed = false
     status = null
     statusError = ''
-    if (statusTimer) {
-      clearInterval(statusTimer)
-      statusTimer = undefined
-    }
+    stopStatusPoll?.()
+    stopStatusPoll = undefined
   }
 
   function handleContextSelect(label: string, value: string) {
@@ -111,13 +108,17 @@
     onLogout={handleLogout}
   />
   <main>
-    {#if activeNav === 'overview'}
-      <Overview {onUnauthorized} />
-    {:else if activeNav === 'rules'}
-      <Rules category={ruleCategory} {onUnauthorized} />
-    {:else}
-      <Traffic {onUnauthorized} />
-    {/if}
+    {#key activeNav}
+      <div in:fade={{ duration: 120 }}>
+        {#if activeNav === 'overview'}
+          <Overview {status} {onUnauthorized} />
+        {:else if activeNav === 'rules'}
+          <Rules category={ruleCategory} {onUnauthorized} />
+        {:else}
+          <Traffic {onUnauthorized} />
+        {/if}
+      </div>
+    {/key}
   </main>
 {/if}
 

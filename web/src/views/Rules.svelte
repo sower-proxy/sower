@@ -5,16 +5,26 @@
   import * as Alert from '$lib/components/ui/alert'
   import Badge from '$lib/components/ui/badge/badge.svelte'
   import Button from '$lib/components/ui/button/button.svelte'
+  import Input from '$lib/components/ui/input/input.svelte'
   import Textarea from '$lib/components/ui/textarea/textarea.svelte'
-  import { CircleAlert } from 'lucide-svelte'
+  import Loading from '$lib/components/Loading.svelte'
+  import { CircleAlert, ListX, Search } from 'lucide-svelte'
 
   let { category, onUnauthorized }: { category: Category; onUnauthorized: () => void } = $props()
 
   let rules = $state<string[] | null>(null)
   let draft = $state('')
+  let filter = $state('')
   let error = $state('')
   let busy = $state(false)
   let requestID = 0
+
+  const visibleRules = $derived.by(() => {
+    if (!rules) return []
+    const q = filter.trim().toLowerCase()
+    if (!q) return rules
+    return rules.filter((rule) => rule.toLowerCase().includes(q))
+  })
 
   function requestIsCurrent(id: number, requestedCategory: Category) {
     return id === requestID && requestedCategory === category
@@ -97,6 +107,7 @@
   $effect(() => {
     category
     rules = null
+    filter = ''
     error = ''
     busy = false
     void load()
@@ -125,29 +136,51 @@
 </Card.Card>
 
 {#if rules === null}
-  <p class="py-8 text-center text-sm text-muted-foreground">Loading…</p>
+  <Loading />
 {:else if rules.length === 0}
-  <p class="py-8 text-center text-sm text-muted-foreground">No rules in this category.</p>
-{:else}
-  <div class="mb-2 flex items-center justify-between">
-    <Badge variant="secondary">{formatCount(rules.length)} rules</Badge>
+  <div class="flex flex-col items-center gap-2 py-10 text-sm text-muted-foreground">
+    <ListX class="size-5" aria-hidden="true" />
+    <p>该分类暂无规则。</p>
   </div>
-  <Card.Card>
-    <Card.CardContent class="divide-y p-0">
-      {#each rules as rule (rule)}
-        <div class="flex items-center justify-between gap-3 px-4 py-2.5">
-          <code class="min-w-0 break-all font-mono text-sm">{rule}</code>
-          <Button
-            variant="ghost"
-            size="sm"
-            class="shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
-            onclick={() => removeRule(rule)}
-            disabled={busy}
-          >
-            Remove
-          </Button>
-        </div>
-      {/each}
-    </Card.CardContent>
-  </Card.Card>
+{:else}
+  <div class="mb-3 flex items-center gap-2">
+    <div class="relative min-w-0 flex-1 sm:max-w-xs">
+      <Search class="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+      <Input
+        bind:value={filter}
+        placeholder="过滤规则…"
+        aria-label="过滤规则"
+        class="pl-8"
+      />
+    </div>
+    <Badge variant="secondary" class="ml-auto shrink-0">
+      {#if visibleRules.length === rules.length}
+        {formatCount(rules.length)} rules
+      {:else}
+        {formatCount(visibleRules.length)} / {formatCount(rules.length)} rules
+      {/if}
+    </Badge>
+  </div>
+  {#if visibleRules.length === 0}
+    <p class="py-8 text-center text-sm text-muted-foreground">没有匹配“{filter}”的规则。</p>
+  {:else}
+    <Card.Card>
+      <Card.CardContent class="divide-y p-0">
+        {#each visibleRules as rule (rule)}
+          <div class="flex items-center justify-between gap-3 px-4 py-2.5 transition-colors hover:bg-muted/40">
+            <code class="min-w-0 break-all font-mono text-sm">{rule}</code>
+            <Button
+              variant="ghost"
+              size="sm"
+              class="shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
+              onclick={() => removeRule(rule)}
+              disabled={busy}
+            >
+              Remove
+            </Button>
+          </div>
+        {/each}
+      </Card.CardContent>
+    </Card.Card>
+  {/if}
 {/if}

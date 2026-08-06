@@ -28,8 +28,14 @@ export function formatCount(n: number): string {
   return `${n}`
 }
 
+// formatTime renders a compact timestamp: HH:MM:SS for today, with the date
+// prepended for older entries. Admin tables refresh every few seconds, so the
+// full locale date-time string is mostly noise.
 export function formatTime(iso: string): string {
   const t = new Date(iso)
   if (Number.isNaN(t.getTime())) return '-'
-  return t.toLocaleString()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const hms = `${pad(t.getHours())}:${pad(t.getMinutes())}:${pad(t.getSeconds())}`
+  if (t.toDateString() === new Date().toDateString()) return hms
+  return `${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())} ${hms}`
 }
