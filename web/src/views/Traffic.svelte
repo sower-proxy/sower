@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { api, ApiError, type TrafficSnapshot } from '$lib/api'
+  import { api, ApiError, type Source, type TrafficSnapshot } from '$lib/api'
   import { formatBytes, formatCount, formatTime } from '$lib/format'
   import { startPolling } from '$lib/poll'
   import * as Alert from '$lib/components/ui/alert'
@@ -12,7 +12,7 @@
   import Loading from '$lib/components/Loading.svelte'
   import { CircleAlert, Inbox, Pause, Play, Search } from 'lucide-svelte'
 
-  let { onUnauthorized }: { onUnauthorized: () => void } = $props()
+  let { source = 'all', onUnauthorized }: { source?: Source; onUnauthorized: () => void } = $props()
 
   type SortMode = 'bytes' | 'recent' | 'conns'
   const sortModes: { value: SortMode; label: string }[] = [
@@ -28,6 +28,15 @@
   let sort: SortMode = $state('bytes')
 
   const activeSortLabel = $derived(sortModes.find((m) => m.value === sort)?.label ?? '流量')
+  const sourceLabels: Record<Source, string> = {
+    all: '流量',
+    http: 'HTTP',
+    https: 'HTTPS',
+    socks5: 'SOCKS5',
+    dns: 'DNS',
+  }
+  const sourceLabel = $derived(sourceLabels[source])
+  const isDNSView = $derived(source === 'dns')
 
   const visibleDomains = $derived.by(() => {
     const domains = traffic?.domains ?? []
@@ -36,10 +45,9 @@
     return domains.filter((d) => d.domain.toLowerCase().includes(q))
   })
 
-  async function refresh() {
-    if (paused) return
+  async function reload() {
     try {
-      traffic = await api.traffic(sort)
+      traffic = await api.traffic(sort, source)
       error = ''
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) {
@@ -50,7 +58,19 @@
     }
   }
 
+  async function refresh() {
+    if (paused) return
+    await reload()
+  }
+
   onMount(() => startPolling(refresh, 5000))
+
+  // Breadcrumb-driven source switch always reloads, even while paused.
+  $effect(() => {
+    source
+    traffic = null
+    void reload()
+  })
 
   const headCell = 'sticky top-0 z-10 bg-card'
 </script>
@@ -65,7 +85,7 @@
 {:else if (traffic.domains ?? []).length === 0}
   <div class="flex flex-col items-center gap-2 py-10 text-sm text-muted-foreground">
     <Inbox class="size-5" aria-hidden="true" />
-    <p>暂无流量记录。</p>
+    <p>暂无{sourceLabel}记录。</p>
   </div>
 {:else}
   <div class="mb-3 flex items-center gap-2">
@@ -128,16 +148,18 @@
         <Table.TableRow>
           <Table.TableHead class={headCell}>Domain</Table.TableHead>
           <Table.TableHead class={headCell + ' text-right'}>Requests</Table.TableHead>
-          <Table.TableHead class={headCell + ' text-right'}>Up</Table.TableHead>
-          <Table.TableHead class={headCell + ' text-right'}>Down</Table.TableHead>
-          <Table.TableHead class={headCell + ' text-right'}>Total</Table.TableHead>
+          {#if !isDNSView}
+            <Table.TableHead class={headCell + ' text-right'}>Up</Table.TableHead>
+            <Table.TableHead class={headCell + ' text-right'}>Down</Table.TableHead>
+            <Table.TableHead class={headCell + ' text-right'}>Total</Table.TableHead>
+          {/if}
           <Table.TableHead class={headCell + ' text-right'}>Last seen</Table.TableHead>
         </Table.TableRow>
       </Table.TableHeader>
       <Table.TableBody>
         {#if visibleDomains.length === 0}
           <Table.TableRow>
-            <Table.TableCell colspan={6} class="py-8 text-center text-sm text-muted-foreground">
+            <Table.TableCell colspan={isDNSView ? 3 : 6} class="py-8 text-center text-sm text-muted-foreground">
               没有匹配“{filter}”的域名。
             </Table.TableCell>
           </Table.TableRow>
@@ -146,11 +168,13 @@
           <Table.TableRow>
             <Table.TableCell class="max-w-[20rem] truncate font-mono text-xs">{d.domain}</Table.TableCell>
             <Table.TableCell class="text-right tabular-nums">{formatCount(d.conns)}</Table.TableCell>
-            <Table.TableCell class="text-right tabular-nums">{formatBytes(d.bytesUp)}</Table.TableCell>
-            <Table.TableCell class="text-right tabular-nums">{formatBytes(d.bytesDown)}</Table.TableCell>
-            <Table.TableCell class="text-right font-medium tabular-nums">
-              {formatBytes(d.bytesUp + d.bytesDown)}
-            </Table.TableCell>
+            {#if !isDNSView}
+              <Table.TableCell class="text-right tabular-nums">{formatBytes(d.bytesUp)}</Table.TableCell>
+              <Table.TableCell class="text-right tabular-nums">{formatBytes(d.bytesDown)}</Table.TableCell>
+              <Table.TableCell class="text-right font-medium tabular-nums">
+                {formatBytes(d.bytesUp + d.bytesDown)}
+              </Table.TableCell>
+            {/if}
             <Table.TableCell class="text-right text-muted-foreground tabular-nums">
               {formatTime(d.lastSeen)}
             </Table.TableCell>
@@ -160,6 +184,7 @@
     </Table.Table>
   </Card.Card>
   <p class="mt-2 text-xs text-muted-foreground">
-    按{activeSortLabel}排序的前 100 个域名{paused ? '，自动刷新已暂停。' : '，每 5 秒刷新。'}
+    按{activeSortLabel}排序的前 100 个{isDNSView ? 'DNS 查询域名' : sourceLabel + '域名'}
+    {paused ? '，自动刷新已暂停。' : '，每 5 秒刷新。'}
   </p>
 {/if}

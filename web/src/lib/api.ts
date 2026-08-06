@@ -2,6 +2,8 @@ export type Category = "block" | "direct" | "proxy";
 
 export type DomainSort = "bytes" | "recent" | "conns";
 
+export type Source = "all" | "http" | "https" | "socks5" | "dns";
+
 export interface Status {
 	version: string;
 	date: string;
@@ -121,7 +123,11 @@ export const api = {
 			method: "DELETE",
 			body: JSON.stringify({ category, rules }),
 		}),
-	traffic: (sort?: DomainSort) =>
-		request<TrafficSnapshot>(sort ? `/api/traffic?sort=${sort}` : "/api/traffic"),
+	traffic: (sort?: DomainSort, source?: Source) => {
+		const params: string[] = [];
+		if (sort) params.push(`sort=${sort}`);
+		if (source && source !== "all") params.push(`source=${source}`);
+		return request<TrafficSnapshot>(params.length ? `/api/traffic?${params.join("&")}` : "/api/traffic");
+	},
 	history: () => request<History>("/api/history"),
 };

@@ -6,12 +6,13 @@
   import Traffic from './views/Traffic.svelte'
   import BreadcrumbHeader from './lib/components/BreadcrumbHeader.svelte'
   import { navItems, type BreadcrumbContextSegment, type NavKey } from './lib/navigation'
-  import { api, ApiError, type Category, type Status } from './lib/api'
+  import { api, ApiError, type Category, type Source, type Status } from './lib/api'
   import { startPolling } from './lib/poll'
 
   let authed = $state(false)
   let activeNav: NavKey = $state('overview')
   let ruleCategory: Category = $state('proxy')
+  let trafficSource: Source = $state('all')
   let status: Status | null = $state(null)
   let statusError = $state('')
   let stopStatusPoll: (() => void) | undefined
@@ -58,7 +59,18 @@
           },
         ]
       case 'traffic':
-        return [{ label: 'scope', value: 'top 100', tone: 'strong' }]
+        return [
+          {
+            label: 'source',
+            value: trafficSource,
+            tone: 'strong',
+            options: (['all', 'http', 'https', 'socks5', 'dns'] as Source[]).map((s) => ({
+              label: s,
+              value: s,
+              active: s === trafficSource,
+            })),
+          },
+        ]
     }
   })
 
@@ -91,6 +103,8 @@
   function handleContextSelect(label: string, value: string) {
     if (label === 'category') {
       ruleCategory = value as Category
+    } else if (label === 'source') {
+      trafficSource = value as Source
     }
   }
 </script>
@@ -115,7 +129,7 @@
         {:else if activeNav === 'rules'}
           <Rules category={ruleCategory} {onUnauthorized} />
         {:else}
-          <Traffic {onUnauthorized} />
+          <Traffic source={trafficSource} {onUnauthorized} />
         {/if}
       </div>
     {/key}

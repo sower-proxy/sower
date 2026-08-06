@@ -435,7 +435,11 @@ func (s *Server) handleTraffic(w http.ResponseWriter, r *http.Request) {
 	if !sort.valid() {
 		sort = DomainSortBytes
 	}
-	writeJSON(w, http.StatusOK, s.opts.Stats.Snapshot(sort))
+	source := Source(r.URL.Query().Get("source"))
+	if !source.valid() {
+		source = SourceAll
+	}
+	writeJSON(w, http.StatusOK, s.opts.Stats.Snapshot(sort, source))
 }
 
 func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {

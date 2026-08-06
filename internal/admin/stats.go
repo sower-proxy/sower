@@ -49,6 +49,26 @@ func (s DomainSort) valid() bool {
 	}
 }
 
+// Source identifies the entry point a connection or DNS query came through.
+type Source string
+
+const (
+	SourceAll    Source = "all"
+	SourceHTTP   Source = "http"
+	SourceHTTPS  Source = "https"
+	SourceSocks5 Source = "socks5"
+	SourceDNS    Source = "dns"
+)
+
+func (s Source) valid() bool {
+	switch s {
+	case SourceAll, SourceHTTP, SourceHTTPS, SourceSocks5, SourceDNS:
+		return true
+	default:
+		return false
+	}
+}
+
 // DomainStat aggregates traffic for a single domain. Conns counts both proxy
 // connections and DNS queries involving the domain.
 type DomainStat struct {
@@ -169,6 +189,17 @@ type domainStat struct {
 	bytesUp   uint64
 	bytesDown uint64
 	lastSeen  time.Time
+	bySource  map[Source]*sourceStat
+}
+
+// sourceStat is the per-source breakdown of a domain's traffic. A domain can
+// be reached through several entry points (HTTP/HTTPS/SOCKS5 proxies and DNS
+// queries), so each is tracked separately for the source-filtered views.
+type sourceStat struct {
+	conns     uint64
+	bytesUp   uint64
+	bytesDown uint64
+	lastSeen  time.Time
 }
 
 // NewStats creates the stats registry and its OpenTelemetry instruments.
@@ -195,7 +226,10 @@ func (s *Stats) RecordDNS(qname string) {
 	if domain == "" {
 		return
 	}
-	s.record(domain, func(d *domainStat) { d.conns++ })
+	s.record(domain, SourceDNS, func(d *domainStat, src *sourceStat) {
+		d.conns++
+		src.conns++
+	})
 }
 
 // RecordRoute counts one connection routing decision. It is called exactly
@@ -244,13 +278,18 @@ func (s *Stats) BindConn(conn net.Conn, domain string) {
 		return
 	}
 	cc.bind(domain)
-	s.record(domain, func(d *domainStat) { d.conns++ })
+	source := Source(cc.kind)
+	s.record(domain, source, func(d *domainStat, src *sourceStat) {
+		d.conns++
+		src.conns++
+	})
 }
 
 // Snapshot returns an immutable view of the current stats, advancing the
 // history ring and evicting stale domains along the way. sort selects the
-// domain ordering; an invalid value falls back to DomainSortBytes.
-func (s *Stats) Snapshot(sort DomainSort) TrafficSnapshot {
+// domain ordering and source restricts domains to one entry point; invalid
+// values fall back to DomainSortBytes and SourceAll.
+func (s *Stats) Snapshot(sort DomainSort, source Source) TrafficSnapshot {
 	s.sample()
 
 	snap := TrafficSnapshot{
@@ -280,13 +319,24 @@ func (s *Stats) Snapshot(sort DomainSort) TrafficSnapshot {
 			delete(s.domains, domain)
 			continue
 		}
-		snap.Domains = append(snap.Domains, DomainStat{
+		ds := DomainStat{
 			Domain:    domain,
 			Conns:     d.conns,
 			BytesUp:   d.bytesUp,
 			BytesDown: d.bytesDown,
 			LastSeen:  d.lastSeen,
-		})
+		}
+		if source != SourceAll {
+			src, ok := d.bySource[source] // nil map read is safe
+			if !ok || (src.conns == 0 && src.bytesUp == 0 && src.bytesDown == 0) {
+				continue
+			}
+			ds.Conns = src.conns
+			ds.BytesUp = src.bytesUp
+			ds.BytesDown = src.bytesDown
+			ds.LastSeen = src.lastSeen
+		}
+		snap.Domains = append(snap.Domains, ds)
 	}
 	sortDomains(snap.Domains, sort)
 	if len(snap.Domains) > snapshotTopN {
@@ -411,7 +461,9 @@ func (s *Stats) rates() (up, down, dns, conns float64) {
 	return float64(sumUp) / elapsed, float64(sumDown) / elapsed, float64(sumDNS) / elapsed, float64(sumConns) / elapsed
 }
 
-func (s *Stats) record(domain string, update func(*domainStat)) {
+// record attributes one event to a domain and its source. It must be called
+// with the domain and source both normalized.
+func (s *Stats) record(domain string, source Source, update func(*domainStat, *sourceStat)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	d := s.domains[domain]
@@ -419,11 +471,17 @@ func (s *Stats) record(domain string, update func(*domainStat)) {
 		if len(s.domains) >= maxDomainEntries {
 			s.evictOldestLocked()
 		}
-		d = &domainStat{}
+		d = &domainStat{bySource: make(map[Source]*sourceStat)}
 		s.domains[domain] = d
 	}
-	update(d)
+	src := d.bySource[source]
+	if src == nil {
+		src = &sourceStat{}
+		d.bySource[source] = src
+	}
+	update(d, src)
 	d.lastSeen = time.Now()
+	src.lastSeen = time.Now()
 }
 
 // evictOldestLocked drops the single least-recently-seen entry to keep the
@@ -500,11 +558,14 @@ func (c *countingConn) recordBytes(n int, up bool) {
 	if domain == "" {
 		return
 	}
-	c.stats.record(domain, func(d *domainStat) {
+	source := Source(c.kind)
+	c.stats.record(domain, source, func(d *domainStat, src *sourceStat) {
 		if up {
 			d.bytesUp += uint64(n)
+			src.bytesUp += uint64(n)
 		} else {
 			d.bytesDown += uint64(n)
+			src.bytesDown += uint64(n)
 		}
 	})
 }
