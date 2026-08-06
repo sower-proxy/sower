@@ -85,6 +85,74 @@ func TestSowerConfigValidateRejectsInvalidTLSClientHello(t *testing.T) {
 	}
 }
 
+func TestSowerConfigValidateAdminRequiresPassword(t *testing.T) {
+	t.Parallel()
+
+	cfg := SowerConfig{}
+	cfg.Remote.Type = "sower"
+	cfg.Remote.Addr = "example.com"
+	cfg.DNS.Disable = true
+	cfg.DNS.Fallback = "223.5.5.5"
+	cfg.Socks5.Disable = true
+	cfg.Admin.Disable = false
+	cfg.Admin.Addr = "127.0.0.1:19090"
+
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected validation error for missing admin password")
+	}
+}
+
+func TestSowerConfigValidateAdminRejectsInvalidAddr(t *testing.T) {
+	t.Parallel()
+
+	cfg := SowerConfig{}
+	cfg.Remote.Type = "sower"
+	cfg.Remote.Addr = "example.com"
+	cfg.DNS.Disable = true
+	cfg.DNS.Fallback = "223.5.5.5"
+	cfg.Socks5.Disable = true
+	cfg.Admin.Disable = false
+	cfg.Admin.Addr = "127.0.0.1"
+	cfg.Admin.Password = "secret"
+
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected validation error for invalid admin address")
+	}
+}
+
+func TestSowerConfigValidateAdminAllowsValidConfig(t *testing.T) {
+	t.Parallel()
+
+	cfg := SowerConfig{}
+	cfg.Remote.Type = "sower"
+	cfg.Remote.Addr = "example.com"
+	cfg.DNS.Disable = true
+	cfg.DNS.Fallback = "223.5.5.5"
+	cfg.Socks5.Disable = true
+	cfg.Admin.Disable = false
+	cfg.Admin.Addr = "127.0.0.1:19090"
+	cfg.Admin.Password = "secret"
+
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("validate config: %v", err)
+	}
+}
+
+func TestSowerConfigValidateAdminZeroValueIsIgnored(t *testing.T) {
+	t.Parallel()
+
+	cfg := SowerConfig{}
+	cfg.Remote.Type = "sower"
+	cfg.Remote.Addr = "example.com"
+	cfg.DNS.Disable = true
+	cfg.DNS.Fallback = "223.5.5.5"
+	cfg.Socks5.Disable = true
+
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("validate zero-value admin: %v", err)
+	}
+}
+
 func TestSowerConfigLoadsTOMLFileSkipRules(t *testing.T) {
 	t.Parallel()
 

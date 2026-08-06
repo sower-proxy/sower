@@ -30,6 +30,14 @@ fallback = "223.5.5.5" # Fallback DNS server
 disable = false         # Disable SOCKS5 proxy
 addr = "127.0.0.1:1080" # SOCKS5 listen address
 
+# Admin web server configuration
+# Serves the embedded admin console for runtime rule management and traffic monitoring.
+# Disabled by default; when enabled, a non-empty password is required.
+[admin]
+disable = true           # Disable admin web server
+addr = "127.0.0.1:19090" # Admin web server listen address
+password = ""            # Admin web server password (required when enabled)
+
 # Router configuration
 [router]
 # Block list rules

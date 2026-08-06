@@ -41,6 +41,12 @@ type SowerConfig struct {
 		Addr    string `default:"127.0.0.1:1080" usage:"socks5 listen address"`
 	} `flag:"socks5"`
 
+	Admin struct {
+		Disable  bool   `default:"true" usage:"disable admin web server"`
+		Addr     string `default:"127.0.0.1:19090" usage:"admin web server listen address"`
+		Password string `usage:"admin web server password, required when enabled"`
+	} `flag:"admin"`
+
 	Router struct {
 		Block struct {
 			File          string   `usage:"block list file, local file or remote"`
@@ -134,6 +140,16 @@ func (c *SowerConfig) Validate() error {
 	if !c.Socks5.Disable {
 		if _, _, err := net.SplitHostPort(c.Socks5.Addr); err != nil {
 			return fmt.Errorf("invalid socks5 listen address %q: %w", c.Socks5.Addr, err)
+		}
+	}
+
+	if !c.Admin.Disable && c.Admin.Addr != "" {
+		host, _, err := net.SplitHostPort(c.Admin.Addr)
+		if err != nil || host == "" {
+			return fmt.Errorf("invalid admin listen address %q", c.Admin.Addr)
+		}
+		if c.Admin.Password == "" {
+			return fmt.Errorf("admin password is required when admin is enabled")
 		}
 	}
 
