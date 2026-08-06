@@ -1,0 +1,28 @@
+export type NavKey = 'overview' | 'rules' | 'traffic'
+
+export interface NavItem {
+  key: NavKey
+  label: string
+  description: string
+}
+
+export interface BreadcrumbContextOption {
+  label: string
+  value: string
+  active?: boolean
+  description?: string
+}
+
+export interface BreadcrumbContextSegment {
+  label: string
+  value: string
+  title?: string
+  tone?: 'default' | 'strong' | 'method'
+  options?: BreadcrumbContextOption[]
+}
+
+export const navItems: NavItem[] = [
+  { key: 'overview', label: '概览', description: '运行状态与流量总览' },
+  { key: 'rules', label: '规则', description: '运行期路由规则管理' },
+  { key: 'traffic', label: '流量', description: '按域名聚合的实时流量' },
+]

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sower-proxy/sower/pkg/suffixtree"
+	"github.com/sower-proxy/sower/internal/admin"
 	"github.com/sower-proxy/sower/pkg/upstreamtls"
 	"github.com/sower-proxy/sower/router"
 )
@@ -62,7 +62,7 @@ func TestHandleSocks5ConnReturnsForbiddenForBlockedConnect(t *testing.T) {
 	defer client.Close()
 
 	r := newTestRouter()
-	go handleSocks5Conn(server, r)
+	go handleSocks5Conn(server, r, admin.NewStats())
 
 	client.SetDeadline(time.Now().Add(2 * time.Second))
 	if _, err := io.WriteString(client, "CONNECT example.com:443 HTTP/1.1\r\nHost: example.com:443\r\n\r\n"); err != nil {
@@ -83,7 +83,7 @@ func TestHandleSocks5ConnReturnsSocks5FailureForBlockedRequest(t *testing.T) {
 	defer client.Close()
 
 	r := newTestRouter()
-	go handleSocks5Conn(server, r)
+	go handleSocks5Conn(server, r, admin.NewStats())
 
 	client.SetDeadline(time.Now().Add(2 * time.Second))
 	if _, err := client.Write([]byte{0x05, 0x01, 0x00}); err != nil {
@@ -151,9 +151,9 @@ func TestHandleHTTPConnUsesProxyOnlyEvenWhenBlocked(t *testing.T) {
 		gotPort uint16
 	)
 	r := &router.Router{
-		BlockRule:  suffixtree.NewNodeFromRules("example.com"),
-		DirectRule: suffixtree.NewNodeFromRules(),
-		ProxyRule:  suffixtree.NewNodeFromRules(),
+		BlockRule:  router.NewRuleSet("example.com"),
+		DirectRule: router.NewRuleSet(),
+		ProxyRule:  router.NewRuleSet(),
 		ProxyDial: func(network, host string, port uint16) (net.Conn, error) {
 			gotHost = host
 			gotPort = port
@@ -165,7 +165,7 @@ func TestHandleHTTPConnUsesProxyOnlyEvenWhenBlocked(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		handleHTTPConn(downstreamServer, r)
+		handleHTTPConn(downstreamServer, r, admin.NewStats())
 	}()
 
 	downstreamClient.SetWriteDeadline(time.Now().Add(2 * time.Second))
@@ -207,9 +207,9 @@ func TestHandleHTTPSConnRelaysClientHelloToUpstream(t *testing.T) {
 		gotPort uint16
 	)
 	r := &router.Router{
-		BlockRule:  suffixtree.NewNodeFromRules("github.com"),
-		DirectRule: suffixtree.NewNodeFromRules(),
-		ProxyRule:  suffixtree.NewNodeFromRules(),
+		BlockRule:  router.NewRuleSet("github.com"),
+		DirectRule: router.NewRuleSet(),
+		ProxyRule:  router.NewRuleSet(),
 		ProxyDial: func(network, host string, port uint16) (net.Conn, error) {
 			gotHost = host
 			gotPort = port
@@ -221,7 +221,7 @@ func TestHandleHTTPSConnRelaysClientHelloToUpstream(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		handleHTTPSConn(downstreamServer, r)
+		handleHTTPSConn(downstreamServer, r, admin.NewStats())
 	}()
 
 	writeErrCh := make(chan error, 1)
@@ -300,7 +300,7 @@ func TestHandleHTTPSConnRelaysClientHelloAfterReadingSNI(t *testing.T) {
 		},
 	}
 
-	go handleHTTPSConn(server, r)
+	go handleHTTPSConn(server, r, admin.NewStats())
 
 	tlsClient := tls.Client(client, &tls.Config{
 		ServerName:         "example.com",
@@ -393,9 +393,9 @@ func generateTLSClientHelloRecord(t *testing.T, serverName string) []byte {
 
 func newTestRouter() *router.Router {
 	return &router.Router{
-		BlockRule:  suffixtree.NewNodeFromRules("example.com"),
-		DirectRule: suffixtree.NewNodeFromRules(),
-		ProxyRule:  suffixtree.NewNodeFromRules(),
+		BlockRule:  router.NewRuleSet("example.com"),
+		DirectRule: router.NewRuleSet(),
+		ProxyRule:  router.NewRuleSet(),
 		ProxyDial: func(network, host string, port uint16) (net.Conn, error) {
 			return nil, router.ErrBlocked
 		},

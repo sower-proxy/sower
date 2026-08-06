@@ -31,3 +31,5 @@
 /*.toml
 /*.hcl
 /*.tf
+# frontend
+/web/node_modules

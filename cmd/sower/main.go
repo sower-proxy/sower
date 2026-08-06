@@ -25,6 +25,7 @@ import (
 	"github.com/miekg/dns"
 	"github.com/sower-proxy/deferlog/v2"
 	"github.com/sower-proxy/sower/config"
+	"github.com/sower-proxy/sower/internal/admin"
 	"github.com/sower-proxy/sower/pkg/suffixtree"
 	"github.com/sower-proxy/sower/pkg/upstreamtls"
 	"github.com/sower-proxy/sower/router"
@@ -117,16 +118,20 @@ func run(ctx context.Context, stop context.CancelFunc, cfg config.SowerConfig) e
 		return err
 	}
 
+	stats := admin.NewStats()
 	errCh := make(chan error, 8)
-	if err := startDNSListeners(ctx, cfg, r, errCh); err != nil {
+	if err := startDNSListeners(ctx, cfg, r, stats, errCh); err != nil {
 		return err
 	}
-	if err := startSocks5Listener(ctx, cfg, r, errCh); err != nil {
+	if err := startSocks5Listener(ctx, cfg, r, stats, errCh); err != nil {
+		return err
+	}
+	if err := startAdminListener(ctx, cfg, r, stats, errCh); err != nil {
 		return err
 	}
 
 	slog.Info("loaded rules, proxy started", "took", time.Since(start),
-		"blockRule", r.BlockRule.Count, "directRule", r.DirectRule.Count, "proxyRule", r.ProxyRule.Count)
+		"blockRule", r.BlockRule.Count(), "directRule", r.DirectRule.Count(), "proxyRule", r.ProxyRule.Count())
 	runtime.GC()
 
 	select {
@@ -151,9 +156,9 @@ func newRouter(cfg config.SowerConfig, proxyDial router.ProxyDialFn) (*router.Ro
 	if err != nil {
 		return nil, err
 	}
-	r.BlockRule = suffixtree.NewNodeFromRules(cfg.Router.Block.Rules...)
-	r.DirectRule = suffixtree.NewNodeFromRules(cfg.Router.Direct.Rules...)
-	r.ProxyRule = suffixtree.NewNodeFromRules(cfg.Router.Proxy.Rules...)
+	r.BlockRule.Add(cfg.Router.Block.Rules...)
+	r.DirectRule.Add(cfg.Router.Direct.Rules...)
+	r.ProxyRule.Add(cfg.Router.Proxy.Rules...)
 	if err := r.AddCountryCIDRs(cfg.Router.Country.Rules...); err != nil {
 		_ = r.Close()
 		return nil, err
@@ -181,20 +186,20 @@ func loadRouterRules(ctx context.Context, r *router.Router, proxyDial router.Pro
 	return nil
 }
 
-func startDNSListeners(ctx context.Context, cfg config.SowerConfig, r *router.Router, errCh chan<- error) error {
+func startDNSListeners(ctx context.Context, cfg config.SowerConfig, r *router.Router, stats *admin.Stats, errCh chan<- error) error {
 	if cfg.DNS.Disable {
 		slog.Info("DNS proxy disabled")
 		return nil
 	}
 
 	for _, ip := range dnsListenIPs(cfg) {
-		if err := startHTTPListener(ctx, ip, r, errCh); err != nil {
+		if err := startHTTPListener(ctx, ip, r, stats, errCh); err != nil {
 			return err
 		}
-		if err := startHTTPSListener(ctx, ip, r, errCh); err != nil {
+		if err := startHTTPSListener(ctx, ip, r, stats, errCh); err != nil {
 			return err
 		}
-		if err := startDNSUDPListener(ctx, ip, r, errCh); err != nil {
+		if err := startDNSUDPListener(ctx, ip, r, stats, errCh); err != nil {
 			return err
 		}
 	}
@@ -212,7 +217,7 @@ func dnsListenIPs(cfg config.SowerConfig) []string {
 	return ips
 }
 
-func startHTTPListener(ctx context.Context, ip string, r *router.Router, errCh chan<- error) error {
+func startHTTPListener(ctx context.Context, ip string, r *router.Router, stats *admin.Stats, errCh chan<- error) error {
 	addr := net.JoinHostPort(ip, "80")
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -221,12 +226,12 @@ func startHTTPListener(ctx context.Context, ip string, r *router.Router, errCh c
 	slog.Info("service listening", "service", "http proxy", "network", "tcp", "addr", addr)
 	go closeOnDone(ctx, ln)
 	go serveAndReport(errCh, "http proxy", func() error {
-		return ServeHTTP(ctx, ln, r)
+		return ServeHTTP(ctx, ln, r, stats)
 	})
 	return nil
 }
 
-func startHTTPSListener(ctx context.Context, ip string, r *router.Router, errCh chan<- error) error {
+func startHTTPSListener(ctx context.Context, ip string, r *router.Router, stats *admin.Stats, errCh chan<- error) error {
 	addr := net.JoinHostPort(ip, "443")
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -235,12 +240,12 @@ func startHTTPSListener(ctx context.Context, ip string, r *router.Router, errCh 
 	slog.Info("service listening", "service", "https proxy", "network", "tcp", "addr", addr)
 	go closeOnDone(ctx, ln)
 	go serveAndReport(errCh, "https proxy", func() error {
-		return ServeHTTPS(ctx, ln, r)
+		return ServeHTTPS(ctx, ln, r, stats)
 	})
 	return nil
 }
 
-func startDNSUDPListener(ctx context.Context, ip string, r *router.Router, errCh chan<- error) error {
+func startDNSUDPListener(ctx context.Context, ip string, r *router.Router, stats *admin.Stats, errCh chan<- error) error {
 	addr := net.JoinHostPort(ip, "53")
 	pc, err := net.ListenPacket("udp", addr)
 	if err != nil {
@@ -249,7 +254,7 @@ func startDNSUDPListener(ctx context.Context, ip string, r *router.Router, errCh
 
 	server := &dns.Server{
 		PacketConn: pc,
-		Handler:    r,
+		Handler:    dnsStatsHandler{Handler: r, stats: stats},
 	}
 	slog.Info("service listening", "service", "dns proxy", "network", "udp", "addr", addr)
 	go shutdownDNSServerOnDone(ctx, server)
@@ -261,7 +266,7 @@ func startDNSUDPListener(ctx context.Context, ip string, r *router.Router, errCh
 	return nil
 }
 
-func startSocks5Listener(ctx context.Context, cfg config.SowerConfig, r *router.Router, errCh chan<- error) error {
+func startSocks5Listener(ctx context.Context, cfg config.SowerConfig, r *router.Router, stats *admin.Stats, errCh chan<- error) error {
 	if cfg.Socks5.Disable {
 		slog.Info("SOCKS5 proxy disabled")
 		return nil
@@ -274,12 +279,12 @@ func startSocks5Listener(ctx context.Context, cfg config.SowerConfig, r *router.
 	slog.Info("service listening", "service", "socks5 proxy", "network", "tcp", "addr", cfg.Socks5.Addr)
 	go closeOnDone(ctx, ln)
 	go serveAndReport(errCh, "socks5 proxy", func() error {
-		return ServeSocks5(ctx, ln, r)
+		return ServeSocks5(ctx, ln, r, stats)
 	})
 	return nil
 }
 
-func loadRule(ctx context.Context, rule *suffixtree.Node, proxyDial router.ProxyDialFn, file, linePrefix string, skipRules []string) error {
+func loadRule(ctx context.Context, rule *router.RuleSet, proxyDial router.ProxyDialFn, file, linePrefix string, skipRules []string) error {
 	skipRule := suffixtree.NewNodeFromRules(skipRules...)
 	lines, err := fetchRuleFile(ctx, proxyDial, file)
 	if err != nil {
@@ -292,7 +297,7 @@ func loadRule(ctx context.Context, rule *suffixtree.Node, proxyDial router.Proxy
 		}
 		rule.Add(item)
 	}
-	rule.GC()
+	rule.Compact()
 	return nil
 }
 

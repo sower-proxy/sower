@@ -15,6 +15,7 @@ import (
 	utls "github.com/refraction-networking/utls"
 	"github.com/sower-proxy/conns/relay"
 	"github.com/sower-proxy/conns/reread"
+	"github.com/sower-proxy/sower/internal/admin"
 	"github.com/sower-proxy/sower/pkg/upstreamtls"
 	"github.com/sower-proxy/sower/router"
 	"github.com/sower-proxy/sower/transport"
@@ -125,7 +126,7 @@ func upstreamDialAddr(addr, defaultPort string) (string, error) {
 	return net.JoinHostPort(addr, defaultPort), nil
 }
 
-func ServeHTTP(ctx context.Context, ln net.Listener, r *router.Router) error {
+func ServeHTTP(ctx context.Context, ln net.Listener, r *router.Router, stats *admin.Stats) error {
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
@@ -134,11 +135,11 @@ func ServeHTTP(ctx context.Context, ln net.Listener, r *router.Router) error {
 			}
 			return wrapAcceptErr(ctx, "http", err)
 		}
-		go handleHTTPConn(conn, r)
+		go handleHTTPConn(conn, r, stats)
 	}
 }
 
-func ServeHTTPS(ctx context.Context, ln net.Listener, r *router.Router) error {
+func ServeHTTPS(ctx context.Context, ln net.Listener, r *router.Router, stats *admin.Stats) error {
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
@@ -147,11 +148,11 @@ func ServeHTTPS(ctx context.Context, ln net.Listener, r *router.Router) error {
 			}
 			return wrapAcceptErr(ctx, "https", err)
 		}
-		go handleHTTPSConn(conn, r)
+		go handleHTTPSConn(conn, r, stats)
 	}
 }
 
-func ServeSocks5(ctx context.Context, ln net.Listener, r *router.Router) error {
+func ServeSocks5(ctx context.Context, ln net.Listener, r *router.Router, stats *admin.Stats) error {
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
@@ -160,12 +161,13 @@ func ServeSocks5(ctx context.Context, ln net.Listener, r *router.Router) error {
 			}
 			return wrapAcceptErr(ctx, "socks5", err)
 		}
-		go handleSocks5Conn(conn, r)
+		go handleSocks5Conn(conn, r, stats)
 	}
 }
 
-func handleHTTPConn(conn net.Conn, r *router.Router) {
+func handleHTTPConn(conn net.Conn, r *router.Router, stats *admin.Stats) {
 	start := time.Now()
+	conn = stats.WrapConn(conn, "http")
 	rereadConn := reread.New(conn)
 	defer rereadConn.Close()
 
@@ -177,6 +179,7 @@ func handleHTTPConn(conn net.Conn, r *router.Router) {
 	}
 	_ = rereadConn.SetDeadline(time.Time{})
 
+	stats.BindConn(conn, req.Host)
 	rc, err := r.DialProxyOnly("tcp", req.Host, 80)
 	if err != nil {
 		slog.Error("dial proxy", "error", err, "host", req.Host, "req", req.URL)
@@ -191,8 +194,9 @@ func handleHTTPConn(conn net.Conn, r *router.Router) {
 	}
 }
 
-func handleHTTPSConn(conn net.Conn, r *router.Router) {
+func handleHTTPSConn(conn net.Conn, r *router.Router, stats *admin.Stats) {
 	start := time.Now()
+	conn = stats.WrapConn(conn, "https")
 	rereadConn := reread.New(conn)
 	defer rereadConn.Close()
 
@@ -208,6 +212,7 @@ func handleHTTPSConn(conn net.Conn, r *router.Router) {
 	}
 	_ = rereadConn.SetDeadline(time.Time{})
 
+	stats.BindConn(conn, domain)
 	rc, err := r.DialProxyOnly("tcp", domain, 443)
 	if err != nil {
 		slog.Error("dial proxy", "error", err, "host", domain)
@@ -277,9 +282,10 @@ func readTLSClientHello(conn io.Reader) ([]byte, error) {
 	}
 }
 
-func handleSocks5Conn(conn net.Conn, r *router.Router) {
+func handleSocks5Conn(conn net.Conn, r *router.Router, stats *admin.Stats) {
 	defer conn.Close()
 
+	conn = stats.WrapConn(conn, "socks5")
 	rereadConn := reread.New(conn)
 	_ = rereadConn.SetDeadline(time.Now().Add(proxyReadTimeout))
 
@@ -301,6 +307,7 @@ func handleSocks5Conn(conn net.Conn, r *router.Router) {
 		}
 
 		host, port := addr.(*socks5.AddrHead).Addr()
+		stats.BindConn(conn, host)
 		rc, err := r.DialSmart("tcp", host, port)
 		if err != nil {
 			if replyErr := server.WriteReply(rereadConn, routeSocks5ReplyCode(err)); replyErr != nil {
@@ -330,6 +337,7 @@ func handleSocks5Conn(conn net.Conn, r *router.Router) {
 		return
 	}
 
+	stats.BindConn(conn, host)
 	rc, err := r.DialSmart("tcp", host, port)
 	if err != nil {
 		writeHTTPProxyError(rereadConn.Stop(), err)

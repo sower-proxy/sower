@@ -8,8 +8,12 @@ test:
 	${GO} test ./...
 
 build: sower sowerd
+.PHONY: web
+web:
+	cd web && bun install --frozen-lockfile && bun run build
+
 .PHONY: sower
-sower:
+sower: web
 	${GO} build -ldflags "\
 		-X main.version=$(shell git describe --tags --always) \
 		-X main.date=$(shell date +%Y-%m-%d)" \

@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"github.com/sower-proxy/sower/config"
-	"github.com/sower-proxy/sower/pkg/suffixtree"
+	"github.com/sower-proxy/sower/router"
 )
 
 func TestFetchRuleFileEmptyPathReturnsClosedChannel(t *testing.T) {
@@ -182,7 +182,7 @@ func TestLoadRuleSkipsOnlyFileRules(t *testing.T) {
 	t.Parallel()
 
 	path := writeGzipRuleFile(t, "t.co\nexample.com\n")
-	rule := suffixtree.NewNodeFromRules("manual.example")
+	rule := router.NewRuleSet("manual.example")
 
 	if err := loadRule(context.Background(), rule, nil, path, "**.", []string{"t.co"}); err != nil {
 		t.Fatalf("load rule: %v", err)
@@ -203,7 +203,7 @@ func TestLoadRuleSkipsPrefixedFileRule(t *testing.T) {
 	t.Parallel()
 
 	path := writeGzipRuleFile(t, "t.co\nexample.com\n")
-	rule := suffixtree.NewNodeFromRules()
+	rule := router.NewRuleSet()
 
 	if err := loadRule(context.Background(), rule, nil, path, "blocked.", []string{"blocked.t.co"}); err != nil {
 		t.Fatalf("load rule: %v", err)

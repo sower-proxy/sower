@@ -252,6 +252,24 @@ sudo sowerd -i
 
 安装器可以复制当前二进制到 `/usr/local/bin/sowerd`，写入 `/etc/systemd/system/sowerd.service`，在缺少配置时创建 `/etc/sower/sowerd.toml`，并按提示决定是否立即启动服务。
 
+## 管理控制台（Admin）
+
+`sower` 内置一个本地管理控制台，用于运行期管理路由规则和监控流量：
+
+- **规则管理**：实时查看、添加、删除 block / direct / proxy 三类规则，立即生效，重启后重置（不会改写配置文件）。
+- **流量监控**：DNS 查询数、各入口连接数、上下行字节数，以及按域名聚合的 Top 100 流量。
+
+默认关闭。在 `sower.toml` 中启用：
+
+```toml
+[admin]
+disable  = false               # 默认 true
+addr     = "127.0.0.1:19090"  # 默认仅监听回环
+password = "your_admin_password"  # 启用时必填
+```
+
+启动后打开 `http://127.0.0.1:19090`，输入 admin 密码即可。密码只用于换取会话 cookie，不会保存在浏览器里。
+
 ## 规则和配置补充
 
 `sower.toml` 是默认示例配置。完整示例见 [config/sower.toml](./config/sower.toml)。
