@@ -3,43 +3,58 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* Sower Admin uses a light-only shadcn theme. */
+/*
+ * Sower Admin theme: warm paper + ink with a teal annotation accent,
+ * ported from WingGate's "glass reading room" world (light-only).
+ * Teal is reserved for actions, focus, and selection; surfaces stay warm.
+ */
 :root {
   color-scheme: light;
-  --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  /* Darker than the shadcn default so the focus ring stays visible on white. */
-  --ring: oklch(0.556 0 0);
-  --sidebar-background: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
+  --radius: 0.75rem;
+  --background: hsl(70 13% 91%);
+  --foreground: hsl(60 4% 20%);
+  --card: hsl(51 24% 94%);
+  --card-foreground: hsl(60 4% 20%);
+  --popover: hsl(51 24% 94%);
+  --popover-foreground: hsl(60 4% 20%);
+  --primary: hsl(175 77% 26%);
+  --primary-foreground: hsl(51 24% 96%);
+  --secondary: hsl(52 12% 88%);
+  --secondary-foreground: hsl(60 4% 20%);
+  --muted: hsl(52 12% 88%);
+  --muted-foreground: hsl(50 9% 40%);
+  --accent: hsl(52 12% 88%);
+  --accent-foreground: hsl(60 4% 20%);
+  --destructive: hsl(4 76% 40%);
+  --destructive-foreground: hsl(51 24% 96%);
+  --border: hsl(49 17% 82%);
+  --input: hsl(50 16% 71%);
+  --ring: hsl(175 77% 26%);
+  --sidebar-background: hsl(51 24% 94%);
+  --sidebar-foreground: hsl(60 4% 20%);
+  --sidebar-primary: hsl(175 77% 26%);
+  --sidebar-primary-foreground: hsl(51 24% 96%);
+  --sidebar-accent: hsl(52 12% 88%);
+  --sidebar-accent-foreground: hsl(60 4% 20%);
+  --sidebar-border: hsl(49 17% 82%);
+  --sidebar-ring: hsl(175 77% 26%);
+  --chart-1: hsl(175 77% 26%);
+  --chart-2: hsl(144 72% 29%);
+  --chart-3: hsl(37 92% 33%);
+  --chart-4: hsl(201 96% 32%);
+  --chart-5: hsl(4 76% 40%);
+  /* Paper light falloff on the canvas; no synthetic grain. */
+  --canvas-texture:
+    radial-gradient(
+      1200px 800px at 20% -10%,
+      rgb(255 255 255 / 0.55),
+      transparent 60%
+    ),
+    radial-gradient(
+      1000px 700px at 90% 110%,
+      rgb(196 188 160 / 0.3),
+      transparent 55%
+    );
 }
 
 @theme inline {
@@ -87,5 +102,7 @@
   }
   body {
     @apply bg-background text-foreground;
+    background-image: var(--canvas-texture);
+    background-attachment: fixed;
   }
 }
