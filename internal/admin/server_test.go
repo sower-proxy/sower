@@ -291,7 +291,16 @@ func TestLogoutInvalidatesSession(t *testing.T) {
 	if resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("logout status: %d", resp.StatusCode)
 	}
+	cookieExpired := false
+	for _, c := range resp.Cookies() {
+		if c.Name == sessionCookieName && c.MaxAge < 0 {
+			cookieExpired = true
+		}
+	}
 	resp.Body.Close()
+	if !cookieExpired {
+		t.Fatal("logout did not expire the session cookie")
+	}
 
 	resp = authedRequest(t, ts, http.MethodGet, "/api/status", cookie, "")
 	if resp.StatusCode != http.StatusUnauthorized {
@@ -323,6 +332,22 @@ func TestTrafficEndpoint(t *testing.T) {
 	}
 }
 
+func TestTrafficEndpointRejectsMissingStats(t *testing.T) {
+	s := NewServer(Options{Password: "secret", Rules: newFakeRules()})
+	ts := httptest.NewServer(s.http.Handler)
+	t.Cleanup(ts.Close)
+	cookie := login(t, ts, "secret")
+
+	resp := authedRequest(t, ts, http.MethodGet, "/api/traffic", cookie, "")
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("expected 500 when stats are unavailable, got %d", resp.StatusCode)
+	}
+	body := decodeBody(t, resp)
+	if body["error"] != "stats unavailable" {
+		t.Fatalf("unexpected error: %v", body)
+	}
+}
+
 func TestStaticServesIndexAndSPAFallback(t *testing.T) {
 	ts := newTestServer(t, newFakeRules())
 
@@ -344,6 +369,28 @@ func TestStaticServesIndexAndSPAFallback(t *testing.T) {
 		t.Fatalf("expected 200 for SPA route, got %d", resp.StatusCode)
 	}
 	resp.Body.Close()
+}
+
+func TestUnknownAPIPathReturnsJSONNotFound(t *testing.T) {
+	ts := newTestServer(t, newFakeRules())
+	for _, path := range []string{"/api", "/api/missing"} {
+		resp, err := http.Get(ts.URL + path)
+		if err != nil {
+			t.Fatalf("get %s: %v", path, err)
+		}
+		if resp.StatusCode != http.StatusNotFound {
+			resp.Body.Close()
+			t.Fatalf("expected 404 for %s, got %d", path, resp.StatusCode)
+		}
+		if !strings.HasPrefix(resp.Header.Get("Content-Type"), "application/json") {
+			resp.Body.Close()
+			t.Fatalf("expected JSON response for %s, got %q", path, resp.Header.Get("Content-Type"))
+		}
+		body := decodeBody(t, resp)
+		if body["error"] != "unknown API endpoint" {
+			t.Fatalf("unexpected error for %s: %v", path, body)
+		}
+	}
 }
 
 func TestShutdown(t *testing.T) {

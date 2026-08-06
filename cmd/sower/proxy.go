@@ -106,6 +106,15 @@ func newTLSDialFn(dialer *net.Dialer, proxyHost string, tlsOptions upstreamtls.O
 	}, nil
 }
 
+// hostOnly strips the port from a host:port string, returning the input
+// unchanged when it has no port.
+func hostOnly(addr string) string {
+	if host, _, err := net.SplitHostPort(addr); err == nil {
+		return host
+	}
+	return addr
+}
+
 func upstreamDialAddr(addr, defaultPort string) (string, error) {
 	if host, port, err := net.SplitHostPort(addr); err == nil {
 		if host == "" || port == "" {
@@ -179,7 +188,7 @@ func handleHTTPConn(conn net.Conn, r *router.Router, stats *admin.Stats) {
 	}
 	_ = rereadConn.SetDeadline(time.Time{})
 
-	stats.BindConn(conn, req.Host)
+	stats.BindConn(conn, hostOnly(req.Host))
 	rc, err := r.DialProxyOnly("tcp", req.Host, 80)
 	if err != nil {
 		slog.Error("dial proxy", "error", err, "host", req.Host, "req", req.URL)

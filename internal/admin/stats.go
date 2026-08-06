@@ -106,7 +106,7 @@ func (s *Stats) BindConn(conn net.Conn, domain string) {
 	if domain == "" {
 		return
 	}
-	cc.bind(s, domain)
+	cc.bind(domain)
 	s.record(domain, func(d *domainStat) { d.conns++ })
 }
 
@@ -209,8 +209,7 @@ func (c *countingConn) Write(p []byte) (int, error) {
 	return n, err
 }
 
-func (c *countingConn) bind(stats *Stats, domain string) {
-	c.stats = stats
+func (c *countingConn) bind(domain string) {
 	c.domain.Store(domain)
 }
 

@@ -57,6 +57,25 @@ func TestUpstreamDialAddrPreservesExplicitPort(t *testing.T) {
 	}
 }
 
+func TestHostOnly(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		addr string
+		want string
+	}{
+		{addr: "example.com:8080", want: "example.com"},
+		{addr: "example.com", want: "example.com"},
+		{addr: "[2001:db8::1]:443", want: "2001:db8::1"},
+	} {
+		t.Run(test.addr, func(t *testing.T) {
+			if got := hostOnly(test.addr); got != test.want {
+				t.Fatalf("hostOnly(%q) = %q, want %q", test.addr, got, test.want)
+			}
+		})
+	}
+}
+
 func TestHandleSocks5ConnReturnsForbiddenForBlockedConnect(t *testing.T) {
 	server, client := net.Pipe()
 	defer client.Close()

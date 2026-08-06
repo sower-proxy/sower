@@ -92,7 +92,10 @@ func NewServer(opts Options) *Server {
 	mux.HandleFunc("GET /api/traffic", s.mutateGuard(s.auth(s.handleTraffic)))
 	mux.HandleFunc("/", s.handleStatic)
 
-	s.http = &http.Server{Handler: mux}
+	s.http = &http.Server{
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
 	return s
 }
 
@@ -123,7 +126,9 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "invalid password")
 		return
 	}
-	s.issueSession(w, r)
+	if !s.issueSession(w, r) {
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -152,12 +157,12 @@ func (s *Server) sessionCookie(value string, maxAge int, secure bool) *http.Cook
 	}
 }
 
-func (s *Server) issueSession(w http.ResponseWriter, r *http.Request) {
+func (s *Server) issueSession(w http.ResponseWriter, r *http.Request) bool {
 	var token [32]byte
 	if _, err := rand.Read(token[:]); err != nil {
 		slog.Error("generate session token", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to issue session")
-		return
+		return false
 	}
 	value := hex.EncodeToString(token[:])
 
@@ -169,6 +174,7 @@ func (s *Server) issueSession(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 
 	http.SetCookie(w, s.sessionCookie(value, int(sessionTTL.Seconds()), r.TLS != nil))
+	return true
 }
 
 func (s *Server) purgeExpiredLocked() {
@@ -296,12 +302,22 @@ func (s *Server) handleRulesRemove(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleTraffic(w http.ResponseWriter, r *http.Request) {
+	if s.opts.Stats == nil {
+		writeError(w, http.StatusInternalServerError, "stats unavailable")
+		return
+	}
 	writeJSON(w, http.StatusOK, s.opts.Stats.Snapshot())
 }
 
 // --- static frontend ---
 
 func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
+	// Unknown API paths must not fall through to the SPA shell.
+	if r.URL.Path == "/api" || strings.HasPrefix(r.URL.Path, "/api/") {
+		writeError(w, http.StatusNotFound, "unknown API endpoint")
+		return
+	}
+
 	fsys, err := web.Dist()
 	if err != nil {
 		slog.Error("load embedded web dist", "error", err)
@@ -314,6 +330,10 @@ func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
 	p := strings.TrimPrefix(r.URL.Path, "/")
 	if p == "" {
 		p = "index.html"
+	}
+	if !fs.ValidPath(p) {
+		writeError(w, http.StatusNotFound, "not found")
+		return
 	}
 	if strings.HasPrefix(p, "assets/") {
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
@@ -399,7 +419,9 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		slog.Debug("write JSON response", "error", err)
+	}
 }
 
 func writeError(w http.ResponseWriter, status int, msg string) {

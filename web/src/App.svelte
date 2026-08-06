@@ -71,8 +71,20 @@
     }
   }
 
+  async function handleLogout() {
+    try {
+      await api.logout()
+    } catch {
+      // Local auth state must reset even if the session revoke request fails.
+    } finally {
+      onUnauthorized()
+    }
+  }
+
   function onUnauthorized() {
     authed = false
+    status = null
+    statusError = ''
     if (statusTimer) {
       clearInterval(statusTimer)
       statusTimer = undefined
@@ -96,7 +108,7 @@
     onSelectItem={(key) => (activeNav = key)}
     {status}
     {statusError}
-    onLogout={onUnauthorized}
+    onLogout={handleLogout}
   />
   <main>
     {#if activeNav === 'overview'}

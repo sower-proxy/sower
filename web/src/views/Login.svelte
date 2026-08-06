@@ -5,7 +5,7 @@
   import Input from '$lib/components/ui/input/input.svelte'
   import Label from '$lib/components/ui/label/label.svelte'
   import Button from '$lib/components/ui/button/button.svelte'
-  import { AlertCircle } from 'lucide-svelte'
+  import { CircleAlert } from 'lucide-svelte'
 
   let { onLogin }: { onLogin: () => void } = $props()
 
@@ -49,7 +49,7 @@
         </div>
         {#if error}
           <Alert.Alert variant="destructive">
-            <AlertCircle class="size-4" />
+            <CircleAlert class="size-4" />
             <Alert.AlertDescription>{error}</Alert.AlertDescription>
           </Alert.Alert>
         {/if}

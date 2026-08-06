@@ -6,7 +6,7 @@
   import Badge from '$lib/components/ui/badge/badge.svelte'
   import Button from '$lib/components/ui/button/button.svelte'
   import Textarea from '$lib/components/ui/textarea/textarea.svelte'
-  import { AlertCircle } from 'lucide-svelte'
+  import { CircleAlert } from 'lucide-svelte'
 
   let { category, onUnauthorized }: { category: Category; onUnauthorized: () => void } = $props()
 
@@ -14,13 +14,22 @@
   let draft = $state('')
   let error = $state('')
   let busy = $state(false)
+  let requestID = 0
+
+  function requestIsCurrent(id: number, requestedCategory: Category) {
+    return id === requestID && requestedCategory === category
+  }
 
   async function load() {
+    const id = ++requestID
+    const requestedCategory = category
     try {
-      const resp: RulesResponse = await api.rules(category)
+      const resp: RulesResponse = await api.rules(requestedCategory)
+      if (!requestIsCurrent(id, requestedCategory)) return
       rules = resp.rules
       error = ''
     } catch (e) {
+      if (!requestIsCurrent(id, requestedCategory)) return
       if (e instanceof ApiError && e.status === 401) {
         onUnauthorized()
         return
@@ -35,38 +44,52 @@
       .map((s) => s.trim())
       .filter((s) => s.length > 0)
     if (items.length === 0 || busy) return
+
+    const id = ++requestID
+    const requestedCategory = category
     busy = true
     error = ''
     try {
-      const resp = await api.addRules(category, items)
+      const resp = await api.addRules(requestedCategory, items)
+      if (!requestIsCurrent(id, requestedCategory)) return
       rules = resp.rules
       draft = ''
     } catch (e) {
+      if (!requestIsCurrent(id, requestedCategory)) return
       if (e instanceof ApiError && e.status === 401) {
         onUnauthorized()
         return
       }
       error = e instanceof Error ? e.message : 'add failed'
     } finally {
-      busy = false
+      if (requestIsCurrent(id, requestedCategory)) {
+        busy = false
+      }
     }
   }
 
   async function removeRule(rule: string) {
     if (busy) return
+
+    const id = ++requestID
+    const requestedCategory = category
     busy = true
     error = ''
     try {
-      const resp = await api.removeRules(category, [rule])
+      const resp = await api.removeRules(requestedCategory, [rule])
+      if (!requestIsCurrent(id, requestedCategory)) return
       rules = resp.rules
     } catch (e) {
+      if (!requestIsCurrent(id, requestedCategory)) return
       if (e instanceof ApiError && e.status === 401) {
         onUnauthorized()
         return
       }
       error = e instanceof Error ? e.message : 'remove failed'
     } finally {
-      busy = false
+      if (requestIsCurrent(id, requestedCategory)) {
+        busy = false
+      }
     }
   }
 
@@ -74,13 +97,15 @@
   $effect(() => {
     category
     rules = null
+    error = ''
+    busy = false
     void load()
   })
 </script>
 
 {#if error}
   <Alert.Alert variant="destructive" class="mb-4">
-    <AlertCircle class="size-4" />
+    <CircleAlert class="size-4" />
     <Alert.AlertDescription>{error}</Alert.AlertDescription>
   </Alert.Alert>
 {/if}

@@ -5,7 +5,7 @@
   import * as Card from '$lib/components/ui/card'
   import * as Alert from '$lib/components/ui/alert'
   import Badge from '$lib/components/ui/badge/badge.svelte'
-  import { AlertCircle } from 'lucide-svelte'
+  import { CircleAlert } from 'lucide-svelte'
 
   let { onUnauthorized }: { onUnauthorized: () => void } = $props()
 
@@ -37,7 +37,7 @@
 
 {#if error}
   <Alert.Alert variant="destructive">
-    <AlertCircle class="size-4" />
+    <CircleAlert class="size-4" />
     <Alert.AlertDescription>{error}</Alert.AlertDescription>
   </Alert.Alert>
 {:else if !status || !traffic}

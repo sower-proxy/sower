@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"fmt"
 	"net"
 	"testing"
 	"time"
@@ -130,19 +131,33 @@ func TestStatsSnapshotEvictsStaleDomains(t *testing.T) {
 	}
 }
 
-func TestStatsDomainCapEvictsOldest(t *testing.T) {
+func TestStatsDomainCapIsEnforced(t *testing.T) {
 	s := NewStats()
 	for i := 0; i < maxDomainEntries+50; i++ {
-		s.record("host.example", func(d *domainStat) {
-			d.lastSeen = time.Now().Add(-time.Duration(i) * time.Minute)
-		})
+		s.record(fmt.Sprintf("host%d.example", i), func(d *domainStat) {})
 	}
-	snap := s.Snapshot()
-	if len(snap.Domains) > maxDomainEntries {
-		t.Fatalf("expected domain cap enforced, got %d entries", len(snap.Domains))
+	s.mu.Lock()
+	n := len(s.domains)
+	s.mu.Unlock()
+	if n > maxDomainEntries {
+		t.Fatalf("expected domain cap enforced, got %d entries", n)
 	}
-	if len(snap.Domains) == 0 {
+	if n == 0 {
 		t.Fatal("expected some domains to survive")
+	}
+}
+
+func TestEvictOldestLocked(t *testing.T) {
+	s := NewStats()
+	s.mu.Lock()
+	s.domains["old.example"] = &domainStat{lastSeen: time.Now().Add(-time.Hour)}
+	s.domains["new.example"] = &domainStat{lastSeen: time.Now()}
+	s.evictOldestLocked()
+	_, oldOK := s.domains["old.example"]
+	_, newOK := s.domains["new.example"]
+	s.mu.Unlock()
+	if oldOK || !newOK {
+		t.Fatalf("expected oldest evicted, old=%v new=%v", oldOK, newOK)
 	}
 }
 
