@@ -23,6 +23,11 @@ const (
 	// maxClientsPerDomain guards one domain's per-client breakdown against a
 	// pathological number of source IPs; extra clients are not attributed.
 	maxClientsPerDomain = 64
+	// maxBlockedDomains bounds the per-domain block counter map. Blocked
+	// domains are typically few (bounded by the rule set), but a wildcard
+	// rule can match an unbounded domain space, so the map evicts its
+	// least-recently-seen entry once full.
+	maxBlockedDomains   = 10000
 	staleDomainAge      = time.Hour
 	snapshotTopN        = 100
 	clientsTopN         = 50
@@ -121,7 +126,11 @@ type TrafficSnapshot struct {
 		Direct uint64 `json:"direct"`
 		Proxy  uint64 `json:"proxy"`
 	} `json:"ruleHits"`
-	System struct {
+	// Blocked is the from-start per-domain block counter, ordered by count.
+	// It is independent of the domain map: blocked connections never carry
+	// traffic, so they would otherwise be invisible to the traffic view.
+	Blocked []BlockedStat `json:"blocked"`
+	System  struct {
 		Goroutines uint64 `json:"goroutines"`
 		HeapAlloc  uint64 `json:"heapAlloc"`
 	} `json:"system"`
@@ -129,6 +138,13 @@ type TrafficSnapshot struct {
 	BytesDown uint64       `json:"bytesDown"`
 	Domains   []DomainStat `json:"domains"`
 	Clients   []ClientStat `json:"clients"`
+}
+
+// BlockedStat aggregates block decisions for a single domain.
+type BlockedStat struct {
+	Domain   string    `json:"domain"`
+	Count    uint64    `json:"count"`
+	LastSeen time.Time `json:"lastSeen"`
 }
 
 // ClientStat aggregates traffic for a single client IP. Conns counts both
@@ -194,6 +210,10 @@ type Stats struct {
 	// clients holds the from-start cumulative per-client totals. It is
 	// independent of the domain map so client totals survive domain eviction.
 	clients map[string]*clientStat
+	// blocked holds the from-start per-domain block counts, fed by the router
+	// observer. It is independent of the domain map: blocked connections
+	// never carry traffic, so they would otherwise be invisible.
+	blocked map[string]*blockedStat
 
 	histMu     sync.Mutex
 	history    []HistorySample
@@ -239,6 +259,12 @@ type clientStat struct {
 	lastSeen  time.Time
 }
 
+// blockedStat is the per-domain block counter.
+type blockedStat struct {
+	count    uint64
+	lastSeen time.Time
+}
+
 // NewStats creates the stats registry and its OpenTelemetry instruments.
 func NewStats() (*Stats, error) {
 	m, err := metrics.New()
@@ -250,6 +276,7 @@ func NewStats() (*Stats, error) {
 		metrics: m,
 		domains: make(map[string]*domainStat),
 		clients: make(map[string]*clientStat),
+		blocked: make(map[string]*blockedStat),
 	}, nil
 }
 
@@ -274,17 +301,44 @@ func (s *Stats) RecordDNS(qname string, clientIP string) {
 }
 
 // RecordRoute counts one connection routing decision. It is called exactly
-// once per connection by the router observer.
-func (s *Stats) RecordRoute(route string) {
+// once per connection by the router observer. Block decisions additionally
+// attribute the domain to the per-domain block counter; the domain may be
+// empty for non-block routes or when it cannot be determined.
+func (s *Stats) RecordRoute(route, domain string) {
 	switch route {
 	case "block":
 		s.ruleBlock.Add(1)
+		if domain != "" {
+			s.recordBlock(domain)
+		}
 	case "direct":
 		s.ruleDirect.Add(1)
 	case "proxy":
 		s.ruleProxy.Add(1)
 	}
 	s.metrics.RecordRoute(route)
+}
+
+// recordBlock attributes one block decision to a domain, evicting a batch
+// of least-recently-seen entries when the map is full.
+func (s *Stats) recordBlock(domain string) {
+	domain = normalizeDomain(domain)
+	if domain == "" {
+		return
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	b := s.blocked[domain]
+	if b == nil {
+		if len(s.blocked) >= maxBlockedDomains {
+			s.evictOldestBlockedLocked(blockedEvictionBatch)
+		}
+		b = &blockedStat{}
+		s.blocked[domain] = b
+	}
+	b.count++
+	b.lastSeen = time.Now()
 }
 
 // WrapConn wraps the client connection before protocol parsing so header and

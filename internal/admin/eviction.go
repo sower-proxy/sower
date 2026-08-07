@@ -84,3 +84,23 @@ func (s *Stats) evictOldestClientsLocked(count int) {
 		delete(s.clients, candidate.key)
 	}
 }
+
+// blockedEvictionBatch is the number of least-recently-seen blocked domains
+// freed at once when the map is full.
+const blockedEvictionBatch = 64
+
+// evictOldestBlockedLocked frees a batch of least-recently-seen blocked
+// domains so a pathological wildcard-rule stream amortizes the O(N) scan.
+func (s *Stats) evictOldestBlockedLocked(count int) {
+	count = min(count, len(s.blocked))
+	if count == 0 {
+		return
+	}
+	candidates := make(oldestCandidates, 0, count)
+	for domain, b := range s.blocked {
+		keepOldest(&candidates, evictionCandidate{key: domain, lastSeen: b.lastSeen}, count)
+	}
+	for _, candidate := range candidates {
+		delete(s.blocked, candidate.key)
+	}
+}

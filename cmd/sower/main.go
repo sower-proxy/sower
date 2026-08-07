@@ -163,8 +163,8 @@ func run(ctx context.Context, stop context.CancelFunc, cfg config.SowerConfig) e
 	if err != nil {
 		return fmt.Errorf("init stats: %w", err)
 	}
-	r.SetRouteObserver(func(c router.RouteCategory, _ string) {
-		stats.RecordRoute(string(c))
+	r.SetRouteObserver(func(c router.RouteCategory, domain string) {
+		stats.RecordRoute(string(c), domain)
 	})
 
 	start := time.Now()

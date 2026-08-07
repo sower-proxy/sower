@@ -104,11 +104,33 @@ func (s *Stats) Snapshot(sort DomainSort, source Source, client string) TrafficS
 		}
 		snap.Domains = append(snap.Domains, ds)
 	}
+	// The blocked counter is global: block decisions carry no source or
+	// client dimension, so the list is unaffected by the view filters.
+	blocked := make([]BlockedStat, 0, len(s.blocked))
+	for domain, b := range s.blocked {
+		blocked = append(blocked, BlockedStat{Domain: domain, Count: b.count, LastSeen: b.lastSeen})
+	}
 	s.mu.Unlock()
 
 	snap.Domains = topDomains(snap.Domains, snapshotTopN, sort)
 	snap.Clients = topClients(clientAgg)
+	snap.Blocked = topBlocked(blocked)
 	return snap
+}
+
+// topBlocked orders blocked domains by count (ties break alphabetically) and
+// caps the list at snapshotTopN.
+func topBlocked(blocked []BlockedStat) []BlockedStat {
+	sort.Slice(blocked, func(i, j int) bool {
+		if blocked[i].Count != blocked[j].Count {
+			return blocked[i].Count > blocked[j].Count
+		}
+		return blocked[i].Domain < blocked[j].Domain
+	})
+	if len(blocked) > snapshotTopN {
+		blocked = blocked[:snapshotTopN]
+	}
+	return blocked
 }
 
 // domainLess reports whether a should appear before b in the requested order.
