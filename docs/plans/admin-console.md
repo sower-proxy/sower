@@ -14,7 +14,7 @@ Scope: `cmd/sower`（客户端）管理控制台，前端 embed 进二进制
 ## 范围与边界（MVP 明确不做）
 
 - **只做 `cmd/sower`，不做 `sowerd`**。sowerd 是服务端 TLS 入口，没有规则与流量管理面。
-- **规则变更仅运行期生效，重启后重置**，不改写 TOML、不持久化、不静默暗示持久化。
+- ~~**规则变更仅运行期生效，重启后重置**，不改写 TOML、不持久化、不静默暗示持久化。~~ **已被 [`admin-persistence-config.md`](./admin-persistence-config.md) 取代**：规则变更改为增量持久化到 admin 状态文件，重启后重放；配置页提供全量展示与白名单字段（`log_level`、`dns.upstream`、`dns.fallback`）在线调整。
 - **监控的是代理 payload 字节与请求/连接计数**，不是网卡级网络计量。
 - 不做配置热加载、不做规则文件管理（文件仍走启动时加载路径）。
 
@@ -52,11 +52,12 @@ type RuleSet struct {
 ### 2. `internal/admin/stats.go` — 流量统计
 
 - 聚合原子计数：`dnsQueries`、`httpConns`、`httpsConns`、`socksConns`、`bytesUp`、`bytesDown`
-- 有界 per-domain 表（上限 10000）：`domain → {conns, bytesUp, bytesDown, lastSeen}`；超限淘汰 lastSeen 最旧项
+- 有界 per-domain 表（上限 100000）：`domain → {conns, bytesUp, bytesDown, lastSeen, bySource, byClient}`；超限时按 lastSeen 批量淘汰（域名 1024/次、客户端 64/次），用固定大小堆单次扫描选出最旧批次，避免每插入一个新域名都全表扫描
 - `WrapConn(conn) net.Conn`：**在协议解析前**包装客户端连接，先累计聚合字节（保证 HTTP 头 / TLS ClientHello 不被漏计），解析出域名后 `BindConn(conn, kind, domain)` 归属到域名并自增该域名连接数
 - 方向语义（以客户端连接为参照）：从客户端读到 = 上行（bytesUp），向客户端写入 = 下行（bytesDown）
-- DNS 计数：`RecordDNS(qname)`，由 cmd/sower 的 `dns.Handler` 装饰器调用，**不给 router 加 admin 回调字段**
-- `Snapshot()` 返回不可变快照（含按流量降序的域名 TopN）
+- DNS 计数：`RecordDNS(qname, clientIP)`，由 cmd/sower 的 `dns.Handler` 装饰器调用，**不给 router 加 admin 回调字段**
+- `Snapshot()` 返回不可变快照：锁内仅复制标量与域名/客户端明细，排序与 Top-N 截断在锁外完成（Top-N 用固定大小堆，避免为只展示 100/50 项而全量排序），缩短锁持有时间以降低对流量记账的阻塞
+- 默认视图（bytes + all + 无客户端筛选）的 SSE 快照由 server 缓存一个 tick（TTL 与 5s tick 相等），多个默认流共享一次快照计算与一次 history 采样；筛选视图仍即时计算，避免无界按客户端缓存
 
 ### 3. `internal/admin/server.go` — HTTP 服务
 
