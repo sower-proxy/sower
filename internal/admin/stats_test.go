@@ -435,14 +435,51 @@ func TestStatsActiveConnsPerProtocol(t *testing.T) {
 
 func TestStatsRecordRoute(t *testing.T) {
 	s := newTestStats(t)
-	s.RecordRoute("block")
-	s.RecordRoute("direct")
-	s.RecordRoute("proxy")
-	s.RecordRoute("proxy")
+	s.RecordRoute("block", "ads.example.com")
+	s.RecordRoute("block", "ads.example.com")
+	s.RecordRoute("block", "tracker.example.net")
+	s.RecordRoute("direct", "")
+	s.RecordRoute("proxy", "")
+	s.RecordRoute("proxy", "")
 
 	snap := s.Snapshot(DomainSortBytes, SourceAll, "")
-	if snap.RuleHits.Block != 1 || snap.RuleHits.Direct != 1 || snap.RuleHits.Proxy != 2 {
+	if snap.RuleHits.Block != 3 || snap.RuleHits.Direct != 1 || snap.RuleHits.Proxy != 2 {
 		t.Fatalf("unexpected rule hits: %+v", snap.RuleHits)
+	}
+	if len(snap.Blocked) != 2 {
+		t.Fatalf("expected 2 blocked domains, got %d", len(snap.Blocked))
+	}
+	if snap.Blocked[0].Domain != "ads.example.com" || snap.Blocked[0].Count != 2 {
+		t.Fatalf("unexpected blocked ranking: %+v", snap.Blocked)
+	}
+	if snap.Blocked[1].Domain != "tracker.example.net" || snap.Blocked[1].Count != 1 {
+		t.Fatalf("unexpected blocked ranking: %+v", snap.Blocked)
+	}
+}
+
+func TestStatsBlockedCapIsEnforced(t *testing.T) {
+	s := newTestStats(t)
+	now := time.Now()
+	s.mu.Lock()
+	for i := 0; i < maxBlockedDomains; i++ {
+		s.blocked[fmt.Sprintf("blocked-%d.example", i)] = &blockedStat{lastSeen: now.Add(time.Duration(i) * time.Nanosecond)}
+	}
+	s.mu.Unlock()
+
+	s.RecordRoute("block", "fresh.example")
+
+	s.mu.Lock()
+	n := len(s.blocked)
+	_, oldestPresent := s.blocked["blocked-0.example"]
+	_, newestPresent := s.blocked[fmt.Sprintf("blocked-%d.example", maxBlockedDomains-1)]
+	_, freshPresent := s.blocked["fresh.example"]
+	s.mu.Unlock()
+	want := maxBlockedDomains - blockedEvictionBatch + 1
+	if n != want {
+		t.Fatalf("expected %d blocked domains after batch eviction, got %d", want, n)
+	}
+	if oldestPresent || !newestPresent || !freshPresent {
+		t.Fatalf("unexpected retained blocked domains: oldest=%v newest=%v fresh=%v", oldestPresent, newestPresent, freshPresent)
 	}
 }
 
@@ -491,7 +528,7 @@ func TestStatsHistoryRingBounded(t *testing.T) {
 func TestStatsSampleClampsLongGap(t *testing.T) {
 	s := newTestStats(t)
 	s.RecordDNS("example.com", "")
-	s.RecordRoute("proxy")
+	s.RecordRoute("proxy", "")
 	s.histMu.Lock()
 	s.lastSample = sampleCounters{at: time.Now().Add(-10 * time.Minute)}
 	s.histMu.Unlock()

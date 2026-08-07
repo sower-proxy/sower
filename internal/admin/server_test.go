@@ -755,7 +755,7 @@ func TestMetricsEndpointServesPrometheusFormat(t *testing.T) {
 	defer ts.Close()
 
 	stats.RecordDNS("example.com", "")
-	stats.RecordRoute("proxy")
+	stats.RecordRoute("proxy", "")
 	conn := stats.WrapConn(&fakeConn{}, "https")
 	_ = conn.Close()
 
