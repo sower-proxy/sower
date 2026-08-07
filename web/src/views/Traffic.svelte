@@ -1,7 +1,9 @@
 <script lang="ts">
   import { type Source } from '$lib/api'
   import { formatBytes, formatCount, formatTime } from '$lib/format'
+  import { rateSeries, ts } from '$lib/history'
   import { connectLive, live } from '$lib/live.svelte.ts'
+  import AreaChart from '$lib/components/AreaChart.svelte'
   import * as Card from '$lib/components/ui/card'
   import * as Table from '$lib/components/ui/table'
   import Badge from '$lib/components/ui/badge/badge.svelte'
@@ -34,6 +36,15 @@
   let client = $state('')
 
   const activeSortLabel = $derived(sortModes.find((m) => m.value === sort)?.label ?? '流量')
+
+  // Chart band: the history series is process-global, not affected by the
+  // table's source/client filters — the labels say so explicitly.
+  const history = $derived(live.history)
+  const chartLabels = $derived(history.map((h) => ts(h.at)))
+  const chartTimestamps = $derived(history.map((h) => h.at))
+  const rates = $derived(rateSeries(history, ['bytesUp', 'bytesDown', 'conns', 'dns']))
+  const fmtRate = (v: number) => `${formatBytes(v)}/s`
+  const fmtPerSec = (v: number) => `${v.toFixed(1)}/s`
   const sourceLabels: Record<Source, string> = {
     all: '流量',
     http: 'HTTP',
@@ -74,8 +85,8 @@
       实时连接已断开，正在自动重连…
     </p>
   {/if}
-  <div class="mb-3 flex items-center gap-2">
-    <div class="relative min-w-0 flex-1 sm:max-w-xs">
+  <div class="mb-3 grid gap-2 sm:flex sm:items-center">
+    <div class="relative min-w-0 w-full sm:w-64">
       <Search class="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
       <Input
         bind:value={filter}
@@ -130,7 +141,7 @@
         {/each}
       </div>
     {/if}
-    <Badge variant="secondary" class="ml-auto shrink-0">
+    <Badge variant="secondary" class="justify-self-end shrink-0 sm:ml-auto">
       {#if visibleDomains.length === domains.length}
         {formatCount(visibleDomains.length)} domains
       {:else}
@@ -169,6 +180,34 @@
       {/each}
     </div>
   {/if}
+  <div class="mb-4 grid gap-4 sm:grid-cols-2">
+    <div>
+      <p class="mb-1 text-xs text-muted-foreground">上下行速率 · 全局历史</p>
+      <AreaChart
+        series={[
+          { name: '下行', color: 'var(--chart-1)', values: rates.bytesDown },
+          { name: '上行', color: 'var(--chart-4)', values: rates.bytesUp },
+        ]}
+        labels={chartLabels}
+        timestamps={chartTimestamps}
+        format={fmtRate}
+        height={120}
+      />
+    </div>
+    <div>
+      <p class="mb-1 text-xs text-muted-foreground">连接与查询 · 全局历史</p>
+      <AreaChart
+        series={[
+          { name: '连接', color: 'var(--chart-3)', values: rates.conns },
+          { name: 'DNS', color: 'var(--chart-2)', values: rates.dns },
+        ]}
+        labels={chartLabels}
+        timestamps={chartTimestamps}
+        format={fmtPerSec}
+        height={120}
+      />
+    </div>
+  </div>
   {#if domains.length === 0}
     <div class="flex flex-col items-center gap-2 rounded-lg border border-dashed py-10 text-sm text-muted-foreground">
       <Inbox class="size-5" aria-hidden="true" />

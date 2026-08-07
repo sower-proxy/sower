@@ -1,6 +1,7 @@
 <script lang="ts">
   import { type Status } from '$lib/api'
   import { formatBytes, formatUptime, formatCount } from '$lib/format'
+  import { rateSeries, ts } from '$lib/history'
   import { live } from '$lib/live.svelte.ts'
   import * as Card from '$lib/components/ui/card'
   import * as Alert from '$lib/components/ui/alert'
@@ -28,20 +29,11 @@
   const history = $derived(live.history)
 
   // --- history series helpers ---
-  const ts = (iso: string) => new Date(iso).toTimeString().slice(0, 5)
   const labels = $derived(history.map((h) => ts(h.at)))
-
-  // Delta fields are per-sample; convert to per-second using the actual
-  // sample spacing so the y-axis is meaningful regardless of poll cadence.
-  function perSec(key: 'bytesUp' | 'bytesDown' | 'dns' | 'conns' | 'block' | 'direct' | 'proxy'): number[] {
-    return history.map((h, i) => {
-      if (i === 0) return 0
-      const prev = history[i - 1]
-      if (!prev) return 0
-      const dt = (new Date(h.at).getTime() - new Date(prev.at).getTime()) / 1000
-      return dt > 0 ? h[key] / dt : 0
-    })
-  }
+  const timestamps = $derived(history.map((h) => h.at))
+  const rates = $derived(
+    rateSeries(history, ['bytesUp', 'bytesDown', 'dns', 'conns', 'proxy', 'direct', 'block']),
+  )
 
   const fmtRate = (v: number) => `${formatBytes(v)}/s`
   const fmtPerSec = (v: number) => `${v.toFixed(1)}/s`
@@ -270,10 +262,11 @@
       <Card.CardContent>
         <AreaChart
           series={[
-            { name: '下行', color: 'var(--chart-1)', values: perSec('bytesDown') },
-            { name: '上行', color: 'var(--chart-4)', values: perSec('bytesUp') },
+            { name: '下行', color: 'var(--chart-1)', values: rates.bytesDown },
+            { name: '上行', color: 'var(--chart-4)', values: rates.bytesUp },
           ]}
           labels={labels}
+          {timestamps}
           format={fmtRate}
         />
       </Card.CardContent>
@@ -287,10 +280,11 @@
       <Card.CardContent>
         <AreaChart
           series={[
-            { name: 'DNS', color: 'var(--chart-2)', values: perSec('dns') },
-            { name: '连接', color: 'var(--chart-3)', values: perSec('conns') },
+            { name: 'DNS', color: 'var(--chart-2)', values: rates.dns },
+            { name: '连接', color: 'var(--chart-3)', values: rates.conns },
           ]}
           labels={labels}
+          {timestamps}
           format={fmtPerSec}
         />
       </Card.CardContent>
@@ -309,6 +303,7 @@
             { name: 'SOCKS5', color: 'var(--chart-3)', values: history.map((h) => h.activeSocks) },
           ]}
           labels={labels}
+          {timestamps}
           format={formatCount}
         />
       </Card.CardContent>
@@ -322,11 +317,12 @@
       <Card.CardContent>
         <AreaChart
           series={[
-            { name: 'Proxy', color: 'var(--chart-1)', values: perSec('proxy') },
-            { name: 'Direct', color: 'var(--chart-2)', values: perSec('direct') },
-            { name: 'Block', color: 'var(--chart-5)', values: perSec('block') },
+            { name: 'Proxy', color: 'var(--chart-1)', values: rates.proxy },
+            { name: 'Direct', color: 'var(--chart-2)', values: rates.direct },
+            { name: 'Block', color: 'var(--chart-5)', values: rates.block },
           ]}
           labels={labels}
+          {timestamps}
           format={fmtPerSec}
         />
       </Card.CardContent>

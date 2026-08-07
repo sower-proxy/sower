@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/miekg/dns"
@@ -16,12 +17,37 @@ import (
 
 const adminShutdownTimeout = 5 * time.Second
 
-// adminRules adapts the router's rule sets to the admin RuleManager interface.
+// adminRules adapts the router's rule sets to the admin RuleManager
+// interface. Mutations persist through the StateStore first; the runtime
+// rule set only changes after a successful write, so a persist failure
+// surfaces as an API error without leaving memory and disk out of sync.
 type adminRules struct {
-	r *router.Router
+	// mutationMu covers the persist-then-runtime sequence. StateStore alone
+	// serializes disk candidates, but it cannot keep a later mutation from
+	// overtaking an earlier RuleSet update.
+	mutationMu sync.Mutex
+	r          *router.Router
+	state      *admin.StateStore
+	baseline   map[admin.Category][]string
 }
 
-func (a adminRules) RuleList(category admin.Category) ([]string, error) {
+// newAdminRules builds the adapter. baseline holds the boot rule lists and
+// must already be registered on the StateStore via SetBaseline.
+func newAdminRules(r *router.Router, state *admin.StateStore, baseline map[admin.Category][]string) *adminRules {
+	return &adminRules{r: r, state: state, baseline: baseline}
+}
+
+// snapshotBaseline captures the current rule lists as the boot baseline.
+// Call after config and rule files are loaded, before applying state deltas.
+func snapshotBaseline(r *router.Router) map[admin.Category][]string {
+	return map[admin.Category][]string{
+		admin.CategoryBlock:  r.BlockRule.List(),
+		admin.CategoryDirect: r.DirectRule.List(),
+		admin.CategoryProxy:  r.ProxyRule.List(),
+	}
+}
+
+func (a *adminRules) RuleList(category admin.Category) ([]string, error) {
 	rs, err := a.rules(category)
 	if err != nil {
 		return nil, err
@@ -29,7 +55,7 @@ func (a adminRules) RuleList(category admin.Category) ([]string, error) {
 	return rs.List(), nil
 }
 
-func (a adminRules) RuleSearch(category admin.Category, q string, offset, limit int) ([]string, uint64, error) {
+func (a *adminRules) RuleSearch(category admin.Category, q string, offset, limit int) ([]string, uint64, error) {
 	rs, err := a.rules(category)
 	if err != nil {
 		return nil, 0, err
@@ -38,25 +64,84 @@ func (a adminRules) RuleSearch(category admin.Category, q string, offset, limit 
 	return rules, total, nil
 }
 
-func (a adminRules) RuleAdd(category admin.Category, rules ...string) error {
+func (a *adminRules) RuleAdd(category admin.Category, rules ...string) error {
+	a.mutationMu.Lock()
+	defer a.mutationMu.Unlock()
+
 	rs, err := a.rules(category)
 	if err != nil {
 		return err
 	}
-	rs.Add(rules...)
+	runtimeAdd, err := a.state.RuleAdd(category, rules...)
+	if err != nil {
+		return fmt.Errorf("persist rule additions: %w", err)
+	}
+	if len(runtimeAdd) == 0 {
+		return nil
+	}
+
+	// Reinstating a baseline rule must restore the boot order. MatchRule is
+	// intentionally first-match for diagnostics, so appending a restored
+	// baseline rule would otherwise change its observable result.
+	for _, rule := range runtimeAdd {
+		if a.isBaselineRule(category, rule) {
+			rs.Replace(a.effectiveRules(category)...)
+			return nil
+		}
+	}
+	rs.Add(runtimeAdd...)
 	rs.Compact()
 	return nil
 }
 
-func (a adminRules) RuleRemove(category admin.Category, rule string) (bool, error) {
-	rs, err := a.rules(category)
-	if err != nil {
-		return false, err
+func (a *adminRules) isBaselineRule(category admin.Category, rule string) bool {
+	for _, baselineRule := range a.baseline[category] {
+		if baselineRule == rule {
+			return true
+		}
 	}
-	return rs.Remove(rule), nil
+	return false
 }
 
-func (a adminRules) RuleCount(category admin.Category) uint64 {
+func (a *adminRules) RuleRemove(category admin.Category, rule string) (bool, error) {
+	removed, err := a.RuleRemoveMany(category, rule)
+	return len(removed) > 0, err
+}
+
+// RuleRemoveMany persists the full deletion candidate before touching the
+// runtime RuleSet, so a write failure cannot partially apply a batch.
+func (a *adminRules) RuleRemoveMany(category admin.Category, rules ...string) ([]string, error) {
+	a.mutationMu.Lock()
+	defer a.mutationMu.Unlock()
+
+	rs, err := a.rules(category)
+	if err != nil {
+		return nil, err
+	}
+	removed, err := a.state.RuleRemoveBatch(category, rules...)
+	if err != nil {
+		return nil, fmt.Errorf("persist rule removals: %w", err)
+	}
+	if len(removed) == 0 {
+		return nil, nil
+	}
+
+	removedSet := make(map[string]struct{}, len(removed))
+	for _, rule := range removed {
+		removedSet[rule] = struct{}{}
+	}
+	current := rs.List()
+	kept := current[:0]
+	for _, rule := range current {
+		if _, removed := removedSet[rule]; !removed {
+			kept = append(kept, rule)
+		}
+	}
+	rs.Replace(kept...)
+	return removed, nil
+}
+
+func (a *adminRules) RuleCount(category admin.Category) uint64 {
 	rs, err := a.rules(category)
 	if err != nil {
 		return 0
@@ -64,7 +149,51 @@ func (a adminRules) RuleCount(category admin.Category) uint64 {
 	return rs.Count()
 }
 
-func (a adminRules) rules(category admin.Category) (*router.RuleSet, error) {
+func (a *adminRules) RuleChanges() admin.RuleChangeSet {
+	return a.state.Changes()
+}
+
+// RuleReset clears deltas for one category — or all of them when category
+// is empty — and rebuilds the runtime rule sets from the boot baseline.
+func (a *adminRules) RuleReset(category admin.Category) error {
+	a.mutationMu.Lock()
+	defer a.mutationMu.Unlock()
+
+	cats := []admin.Category{category}
+	if category == "" {
+		cats = []admin.Category{admin.CategoryBlock, admin.CategoryDirect, admin.CategoryProxy}
+	}
+	if err := a.state.RuleReset(cats...); err != nil {
+		return fmt.Errorf("persist rule reset: %w", err)
+	}
+	for _, cat := range cats {
+		rs, err := a.rules(cat)
+		if err != nil {
+			return err
+		}
+		rs.Replace(a.effectiveRules(cat)...)
+	}
+	return nil
+}
+
+// effectiveRules computes the runtime rule list for a category: baseline
+// minus tombstones, plus admin additions.
+func (a *adminRules) effectiveRules(category admin.Category) []string {
+	d := a.state.Delta(category)
+	tombstoned := make(map[string]struct{}, len(d.Remove))
+	for _, rule := range d.Remove {
+		tombstoned[rule] = struct{}{}
+	}
+	out := make([]string, 0, len(a.baseline[category])+len(d.Add))
+	for _, rule := range a.baseline[category] {
+		if _, ok := tombstoned[rule]; !ok {
+			out = append(out, rule)
+		}
+	}
+	return append(out, d.Add...)
+}
+
+func (a *adminRules) rules(category admin.Category) (*router.RuleSet, error) {
 	switch category {
 	case admin.CategoryBlock:
 		return a.r.BlockRule, nil
@@ -81,7 +210,7 @@ func (a adminRules) rules(category admin.Category) (*router.RuleSet, error) {
 // connection to it would take. It mirrors DialSmart's rule priority
 // (block > direct > proxy); when no rule matches it reports "auto" without
 // performing live detection.
-func (a adminRules) TestDomain(domain string) (admin.DomainTest, error) {
+func (a *adminRules) TestDomain(domain string) (admin.DomainTest, error) {
 	domain = strings.ToLower(strings.TrimSpace(strings.TrimSuffix(domain, ".")))
 	if domain == "" {
 		return admin.DomainTest{}, fmt.Errorf("domain is required")
@@ -124,7 +253,7 @@ func (h dnsStatsHandler) ServeDNS(w dns.ResponseWriter, req *dns.Msg) {
 	h.Handler.ServeDNS(w, req)
 }
 
-func startAdminListener(ctx context.Context, cfg config.SowerConfig, r *router.Router, stats *admin.Stats, errCh chan<- error) error {
+func startAdminListener(ctx context.Context, cfg config.SowerConfig, rules admin.RuleManager, configMgr admin.ConfigManager, stats *admin.Stats, errCh chan<- error) error {
 	if cfg.Admin.Disable || cfg.Admin.Addr == "" {
 		return nil
 	}
@@ -133,9 +262,10 @@ func startAdminListener(ctx context.Context, cfg config.SowerConfig, r *router.R
 		Password:    cfg.Admin.Password,
 		Version:     version,
 		Date:        date,
-		Rules:       adminRules{r: r},
+		Rules:       rules,
 		Stats:       stats,
 		SessionFile: cfg.Admin.SessionFile,
+		Config:      configMgr,
 	})
 
 	ln, err := net.Listen("tcp", cfg.Admin.Addr)
@@ -161,7 +291,7 @@ func startAdminListener(ctx context.Context, cfg config.SowerConfig, r *router.R
 // startSharedHTTPListener serves the admin console and the HTTP proxy from
 // one listener on the DNS HTTP address. It is used when admin.addr exactly
 // matches dns.serve:80.
-func startSharedHTTPListener(ctx context.Context, cfg config.SowerConfig, r *router.Router, stats *admin.Stats, errCh chan<- error) error {
+func startSharedHTTPListener(ctx context.Context, cfg config.SowerConfig, r *router.Router, rules admin.RuleManager, configMgr admin.ConfigManager, stats *admin.Stats, errCh chan<- error) error {
 	addr, ok := sharedAdminHTTPAddr(cfg)
 	if !ok {
 		return nil
@@ -176,9 +306,10 @@ func startSharedHTTPListener(ctx context.Context, cfg config.SowerConfig, r *rou
 		Password:    cfg.Admin.Password,
 		Version:     version,
 		Date:        date,
-		Rules:       adminRules{r: r},
+		Rules:       rules,
 		Stats:       stats,
 		SessionFile: cfg.Admin.SessionFile,
+		Config:      configMgr,
 	})
 	go func() {
 		<-ctx.Done()

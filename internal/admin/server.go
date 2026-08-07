@@ -2,22 +2,13 @@ package admin
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
-	"crypto/subtle"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
-	"net/url"
-	"os"
-	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -42,6 +33,10 @@ const (
 
 	defaultPageSize = 200
 	maxPageSize     = 1000
+	// trafficCacheTTL equals the SSE traffic tick period, so the shared
+	// default-view cache still lets one client per window advance the history
+	// ring at the same cadence as a single uncached stream.
+	trafficCacheTTL = 5 * time.Second
 )
 
 // Category identifies a routing rule category managed through the admin API.
@@ -69,7 +64,16 @@ type RuleManager interface {
 	RuleSearch(category Category, q string, offset, limit int) ([]string, uint64, error)
 	RuleAdd(category Category, rules ...string) error
 	RuleRemove(category Category, rule string) (bool, error)
+	// RuleRemoveMany removes a batch atomically from the persisted state and
+	// returns only the effective runtime removals.
+	RuleRemoveMany(category Category, rules ...string) ([]string, error)
 	RuleCount(category Category) uint64
+	// RuleChanges returns the persisted rule deltas relative to the boot
+	// baseline.
+	RuleChanges() RuleChangeSet
+	// RuleReset clears the deltas of one category, or of all categories when
+	// category is empty, rebuilding the runtime rule sets to the baseline.
+	RuleReset(category Category) error
 	TestDomain(domain string) (DomainTest, error)
 }
 
@@ -81,6 +85,8 @@ type Options struct {
 	Rules       RuleManager
 	Stats       *Stats
 	SessionFile string
+	// Config enables the config display/edit endpoints when non-nil.
+	Config ConfigManager
 }
 
 // Server serves the admin API and the embedded frontend on one listener.
@@ -89,7 +95,14 @@ type Server struct {
 	sessions    map[string]time.Time
 	sessionFile string
 	mu          sync.Mutex
+	trafficMu   sync.Mutex
+	traffic     cachedTraffic
 	http        *http.Server
+}
+
+type cachedTraffic struct {
+	at       time.Time
+	snapshot TrafficSnapshot
 }
 
 func NewServer(opts Options) *Server {
@@ -107,11 +120,17 @@ func NewServer(opts Options) *Server {
 	mux.HandleFunc("GET /api/rules", s.mutateGuard(s.auth(s.handleRulesList)))
 	mux.HandleFunc("POST /api/rules", s.mutateGuard(s.auth(s.handleRulesAdd)))
 	mux.HandleFunc("DELETE /api/rules", s.mutateGuard(s.auth(s.handleRulesRemove)))
+	mux.HandleFunc("GET /api/rules/changes", s.mutateGuard(s.auth(s.handleRulesChanges)))
+	mux.HandleFunc("POST /api/rules/reset", s.mutateGuard(s.auth(s.handleRulesReset)))
 	mux.HandleFunc("GET /api/rules/test", s.mutateGuard(s.auth(s.handleRulesTest)))
 	mux.HandleFunc("GET /api/traffic", s.mutateGuard(s.auth(s.handleTraffic)))
 	mux.HandleFunc("GET /api/totals", s.mutateGuard(s.auth(s.handleTotals)))
 	mux.HandleFunc("GET /api/history", s.mutateGuard(s.auth(s.handleHistory)))
 	mux.HandleFunc("GET /api/stream", s.mutateGuard(s.auth(s.handleStream)))
+	if s.opts.Config != nil {
+		mux.HandleFunc("GET /api/config", s.mutateGuard(s.auth(s.handleConfigGet)))
+		mux.HandleFunc("PATCH /api/config", s.mutateGuard(s.auth(s.handleConfigPatch)))
+	}
 	if s.opts.Stats != nil {
 		mux.HandleFunc("GET /metrics", s.handleMetrics)
 	}
@@ -122,81 +141,6 @@ func NewServer(opts Options) *Server {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	return s
-}
-
-// loadSessions restores persisted sessions at startup, dropping any that
-// already expired while the process was down.
-func (s *Server) loadSessions() {
-	if s.sessionFile == "" {
-		return
-	}
-	data, err := os.ReadFile(s.sessionFile)
-	if err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			slog.Warn("read session file", "error", err)
-		}
-		return
-	}
-	var stored map[string]time.Time
-	if err := json.Unmarshal(data, &stored); err != nil {
-		slog.Warn("parse session file", "error", err)
-		return
-	}
-	now := time.Now()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for token, exp := range stored {
-		if now.Before(exp) {
-			s.sessions[token] = exp
-		}
-	}
-	if len(s.sessions) > 0 {
-		slog.Info("restored admin sessions", "count", len(s.sessions), "file", s.sessionFile)
-	}
-}
-
-// persistLocked writes the current sessions to disk atomically with 0600
-// permissions. It must be called with s.mu held. IO errors degrade to an
-// in-memory session store, never to a failed request.
-func (s *Server) persistLocked() {
-	if s.sessionFile == "" {
-		return
-	}
-	data, err := json.Marshal(s.sessions)
-	if err != nil {
-		slog.Warn("marshal sessions", "error", err)
-		return
-	}
-	dir := filepath.Dir(s.sessionFile)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		slog.Warn("create session dir", "error", err)
-		return
-	}
-	tmp, err := os.CreateTemp(dir, ".sessions-*")
-	if err != nil {
-		slog.Warn("create session temp file", "error", err)
-		return
-	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		slog.Warn("write session temp file", "error", err)
-		return
-	}
-	if err := tmp.Chmod(0o600); err != nil {
-		tmp.Close()
-		slog.Warn("chmod session temp file", "error", err)
-		return
-	}
-	if err := tmp.Close(); err != nil {
-		slog.Warn("close session temp file", "error", err)
-		return
-	}
-	if err := os.Rename(tmpName, s.sessionFile); err != nil {
-		slog.Warn("rename session file", "error", err)
-		return
-	}
 }
 
 // Serve accepts connections on ln until Shutdown or a fatal serve error.
@@ -213,141 +157,6 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	return s.http.Shutdown(ctx)
 }
 
-// --- auth ---
-
-func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Password string `json:"password"`
-	}
-	if !decodeJSON(w, r, &body) {
-		return
-	}
-	if !secureEqual(body.Password, s.opts.Password) {
-		writeError(w, http.StatusUnauthorized, "invalid password")
-		return
-	}
-	if !s.issueSession(w, r) {
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
-	if c, err := r.Cookie(sessionCookieName); err == nil {
-		s.mu.Lock()
-		delete(s.sessions, c.Value)
-		s.persistLocked()
-		s.mu.Unlock()
-	}
-	http.SetCookie(w, s.sessionCookie("", -1, r.TLS != nil))
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// sessionCookie builds the session cookie. The Secure flag is only set when
-// the admin server runs over TLS; the default loopback HTTP listener would
-// otherwise never receive the cookie.
-func (s *Server) sessionCookie(value string, maxAge int, secure bool) *http.Cookie {
-	return &http.Cookie{
-		Name:     sessionCookieName,
-		Value:    value,
-		Path:     "/",
-		HttpOnly: true,
-		SameSite: http.SameSiteStrictMode,
-		Secure:   secure,
-		MaxAge:   maxAge,
-	}
-}
-
-func (s *Server) issueSession(w http.ResponseWriter, r *http.Request) bool {
-	var token [32]byte
-	if _, err := rand.Read(token[:]); err != nil {
-		slog.Error("generate session token", "error", err)
-		writeError(w, http.StatusInternalServerError, "failed to issue session")
-		return false
-	}
-	value := hex.EncodeToString(token[:])
-
-	s.mu.Lock()
-	if len(s.sessions) >= maxSessionPurge {
-		s.purgeExpiredLocked()
-	}
-	s.sessions[value] = time.Now().Add(sessionTTL)
-	s.persistLocked()
-	s.mu.Unlock()
-
-	http.SetCookie(w, s.sessionCookie(value, int(sessionCookieMaxAge.Seconds()), r.TLS != nil))
-	return true
-}
-
-func (s *Server) purgeExpiredLocked() {
-	now := time.Now()
-	purged := false
-	for token, exp := range s.sessions {
-		if now.After(exp) {
-			delete(s.sessions, token)
-			purged = true
-		}
-	}
-	if purged {
-		s.persistLocked()
-	}
-}
-
-func (s *Server) validSession(r *http.Request) bool {
-	c, err := r.Cookie(sessionCookieName)
-	if err != nil {
-		return false
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	exp, ok := s.sessions[c.Value]
-	if !ok {
-		return false
-	}
-	now := time.Now()
-	if now.After(exp) {
-		delete(s.sessions, c.Value)
-		s.persistLocked()
-		return false
-	}
-	// Sliding expiry: refresh a session that is more than halfway through
-	// its TTL so an active user is never logged out mid-session, while an
-	// inactive session still lapses. Persisting only on refresh bounds the
-	// disk writes to a couple per session per TTL.
-	if exp.Sub(now) < sessionTTL/2 {
-		s.sessions[c.Value] = now.Add(sessionTTL)
-		s.persistLocked()
-	}
-	return true
-}
-
-// auth rejects requests without a valid session cookie.
-func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if !s.validSession(r) {
-			writeError(w, http.StatusUnauthorized, "unauthorized")
-			return
-		}
-		next(w, r)
-	}
-}
-
-// mutateGuard rejects cross-origin state-changing requests as CSRF defense.
-func (s *Server) mutateGuard(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if origin := r.Header.Get("Origin"); origin != "" {
-			u, err := url.Parse(origin)
-			if err != nil || !strings.EqualFold(u.Host, r.Host) {
-				writeError(w, http.StatusForbidden, "cross-origin request rejected")
-				return
-			}
-		}
-		next(w, r)
-	}
-}
-
-// --- API handlers ---
-
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.statusPayload())
 }
@@ -363,223 +172,6 @@ func (s *Server) statusPayload() map[string]any {
 			string(CategoryDirect): s.opts.Rules.RuleCount(CategoryDirect),
 			string(CategoryProxy):  s.opts.Rules.RuleCount(CategoryProxy),
 		},
-	}
-}
-
-type rulesRequest struct {
-	Category Category `json:"category"`
-	Rules    []string `json:"rules"`
-}
-
-// CategoryTest reports whether one rule category matched a tested domain and
-// which retained rule did so.
-type CategoryTest struct {
-	Category Category `json:"category"`
-	Matched  bool     `json:"matched"`
-	Rule     string   `json:"rule"`
-}
-
-// DomainTest is the result of testing a domain against the rule sets. Route
-// is block, direct, or proxy when a rule decides it, or auto when no rule
-// matched and the connection would fall through to detection / proxy.
-type DomainTest struct {
-	Domain  string         `json:"domain"`
-	Route   string         `json:"route"`
-	Matches []CategoryTest `json:"matches"`
-	Note    string         `json:"note,omitempty"`
-}
-
-// handleRulesTest reports which rules match the queried domain and the
-// resulting route decision, without performing any live detection.
-func (s *Server) handleRulesTest(w http.ResponseWriter, r *http.Request) {
-	domain := strings.TrimSpace(r.URL.Query().Get("domain"))
-	if domain == "" {
-		writeError(w, http.StatusBadRequest, "domain is required")
-		return
-	}
-	res, err := s.opts.Rules.TestDomain(domain)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, res)
-}
-
-func (s *Server) handleRulesList(w http.ResponseWriter, r *http.Request) {
-	category := Category(r.URL.Query().Get("category"))
-	if !category.valid() {
-		writeError(w, http.StatusBadRequest, "invalid category")
-		return
-	}
-	q := r.URL.Query().Get("q")
-	offset, err := strconv.Atoi(r.URL.Query().Get("offset"))
-	if err != nil || offset < 0 {
-		offset = 0
-	}
-	limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
-	if err != nil || limit <= 0 {
-		limit = defaultPageSize
-	}
-	if limit > maxPageSize {
-		limit = maxPageSize
-	}
-	rules, total, err := s.opts.Rules.RuleSearch(category, q, offset, limit)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, rulesResponse{
-		Category: category,
-		Rules:    rules,
-		Total:    total,
-		Offset:   offset,
-		Limit:    limit,
-	})
-}
-
-func (s *Server) handleRulesAdd(w http.ResponseWriter, r *http.Request) {
-	var req rulesRequest
-	if !decodeJSON(w, r, &req) {
-		return
-	}
-	validated, err := validateRules(req)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	req.Rules = validated
-	if err := s.opts.Rules.RuleAdd(req.Category, req.Rules...); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (s *Server) handleRulesRemove(w http.ResponseWriter, r *http.Request) {
-	var req rulesRequest
-	if !decodeJSON(w, r, &req) {
-		return
-	}
-	validated, err := validateRules(req)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	req.Rules = validated
-	for _, rule := range req.Rules {
-		if _, err := s.opts.Rules.RuleRemove(req.Category, rule); err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (s *Server) handleTraffic(w http.ResponseWriter, r *http.Request) {
-	if s.opts.Stats == nil {
-		writeError(w, http.StatusInternalServerError, "stats unavailable")
-		return
-	}
-	sort, source, client := parseTrafficQuery(r)
-	writeJSON(w, http.StatusOK, s.opts.Stats.Snapshot(sort, source, client))
-}
-
-// handleTotals serves the from-start cumulative traffic view. It ignores
-// staleness and query filters: totals are the whole picture, not a window.
-func (s *Server) handleTotals(w http.ResponseWriter, r *http.Request) {
-	if s.opts.Stats == nil {
-		writeError(w, http.StatusInternalServerError, "stats unavailable")
-		return
-	}
-	writeJSON(w, http.StatusOK, s.opts.Stats.Totals())
-}
-
-// parseTrafficQuery extracts the domain sort, source, and client filters
-// shared by /api/traffic and the SSE stream.
-func parseTrafficQuery(r *http.Request) (sort DomainSort, source Source, client string) {
-	sort = DomainSort(r.URL.Query().Get("sort"))
-	if !sort.valid() {
-		sort = DomainSortBytes
-	}
-	source = Source(r.URL.Query().Get("source"))
-	if !source.valid() {
-		source = SourceAll
-	}
-	client = r.URL.Query().Get("client")
-	return
-}
-
-func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
-	if s.opts.Stats == nil {
-		writeError(w, http.StatusInternalServerError, "stats unavailable")
-		return
-	}
-	writeJSON(w, http.StatusOK, s.opts.Stats.History())
-}
-
-// handleStream is the Server-Sent Events endpoint that pushes status, traffic
-// snapshots, and history to the console. The connection carries the same
-// sort/source/client filters as /api/traffic and revalidates the session on
-// each tick, closing with an auth event when it lapses. The initial payload
-// is sent immediately so the page renders without waiting for a tick.
-func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
-	if s.opts.Stats == nil {
-		writeError(w, http.StatusInternalServerError, "stats unavailable")
-		return
-	}
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		writeError(w, http.StatusInternalServerError, "streaming unsupported")
-		return
-	}
-	sort, source, client := parseTrafficQuery(r)
-
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
-	fmt.Fprintln(w, "retry: 5000")
-	fmt.Fprintln(w)
-	flusher.Flush()
-
-	send := func(event string, v any) {
-		data, err := json.Marshal(v)
-		if err != nil {
-			slog.Debug("marshal sse event", "error", err)
-			return
-		}
-		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, data)
-		flusher.Flush()
-	}
-
-	send("status", s.statusPayload())
-	send("traffic", s.opts.Stats.Snapshot(sort, source, client))
-	send("history", s.opts.Stats.History())
-	send("totals", s.opts.Stats.Totals())
-
-	ticker := time.NewTicker(5 * time.Second)
-	defer ticker.Stop()
-	historyTicker := time.NewTicker(10 * time.Second)
-	defer historyTicker.Stop()
-	totalsTicker := time.NewTicker(30 * time.Second)
-	defer totalsTicker.Stop()
-
-	for {
-		select {
-		case <-r.Context().Done():
-			return
-		case <-ticker.C:
-			if !s.validSession(r) {
-				send("auth", map[string]any{"status": http.StatusUnauthorized})
-				return
-			}
-			send("status", s.statusPayload())
-			send("traffic", s.opts.Stats.Snapshot(sort, source, client))
-		case <-historyTicker.C:
-			send("history", s.opts.Stats.History())
-		case <-totalsTicker.C:
-			send("totals", s.opts.Stats.Totals())
-		}
 	}
 }
 
@@ -652,43 +244,6 @@ type rulesResponse struct {
 	Limit    int      `json:"limit"`
 }
 
-func writeRulesResult(w http.ResponseWriter, rm RuleManager, category Category) {
-	rules, err := rm.RuleList(category)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, rulesResponse{Category: category, Rules: rules})
-}
-
-func validateRules(req rulesRequest) ([]string, error) {
-	if !req.Category.valid() {
-		return nil, errors.New("invalid category")
-	}
-	if len(req.Rules) == 0 {
-		return nil, errors.New("no rules provided")
-	}
-	if len(req.Rules) > maxRulesPerBatch {
-		return nil, fmt.Errorf("too many rules, max %d", maxRulesPerBatch)
-	}
-
-	out := make([]string, 0, len(req.Rules))
-	for _, rule := range req.Rules {
-		rule = strings.TrimSpace(rule)
-		if rule == "" {
-			return nil, errors.New("empty rule")
-		}
-		if len(rule) > maxRuleLength {
-			return nil, fmt.Errorf("rule too long, max %d bytes", maxRuleLength)
-		}
-		if strings.ContainsAny(rule, "\r\n") {
-			return nil, errors.New("rule must not contain line breaks")
-		}
-		out = append(out, rule)
-	}
-	return out, nil
-}
-
 func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	dec := json.NewDecoder(r.Body)
@@ -714,11 +269,4 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
-}
-
-// secureEqual compares two secrets in constant time regardless of length.
-func secureEqual(a, b string) bool {
-	ha := sha256.Sum256([]byte(a))
-	hb := sha256.Sum256([]byte(b))
-	return subtle.ConstantTimeCompare(ha[:], hb[:]) == 1
 }

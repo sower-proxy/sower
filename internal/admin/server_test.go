@@ -2,6 +2,7 @@ package admin
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -66,8 +68,46 @@ func (f *fakeRules) RuleRemove(c Category, rule string) (bool, error) {
 	return false, nil
 }
 
+func (f *fakeRules) RuleRemoveMany(c Category, rules ...string) ([]string, error) {
+	removed := make([]string, 0, len(rules))
+	seen := make(map[string]struct{}, len(rules))
+	for _, rule := range rules {
+		if _, ok := seen[rule]; ok {
+			continue
+		}
+		seen[rule] = struct{}{}
+		if found, err := f.RuleRemove(c, rule); err != nil {
+			return nil, err
+		} else if found {
+			removed = append(removed, rule)
+		}
+	}
+	return removed, nil
+}
+
 func (f *fakeRules) RuleCount(c Category) uint64 {
 	return uint64(len(f.lists[c]))
+}
+
+func (f *fakeRules) RuleChanges() RuleChangeSet {
+	return RuleChangeSet{
+		Persistent: true,
+		Rules: map[Category]RuleDelta{
+			CategoryBlock:  {Add: []string{}, Remove: []string{}},
+			CategoryDirect: {Add: []string{}, Remove: []string{}},
+			CategoryProxy:  {Add: []string{}, Remove: []string{}},
+		},
+	}
+}
+
+func (f *fakeRules) RuleReset(c Category) error {
+	if c == "" {
+		return nil
+	}
+	if !c.valid() {
+		return fmt.Errorf("invalid category")
+	}
+	return nil
 }
 
 func (f *fakeRules) TestDomain(domain string) (DomainTest, error) {
@@ -108,6 +148,57 @@ func fakeRuleMatch(rules []string, item string) (string, bool) {
 func newTestServer(t *testing.T, rules RuleManager) *httptest.Server {
 	t.Helper()
 	s := NewServer(Options{Password: "secret", Version: "v1.2.3", Date: "2026-01-01", Rules: rules, Stats: newTestStats(t)})
+	ts := httptest.NewServer(s.http.Handler)
+	t.Cleanup(ts.Close)
+	return ts
+}
+
+// fakeConfig implements ConfigManager backed by a real StateStore, so PATCH
+// revision semantics are exercised end to end.
+type fakeConfig struct {
+	state *StateStore
+}
+
+func newFakeConfig(t *testing.T) *fakeConfig {
+	t.Helper()
+	return &fakeConfig{state: LoadStateStore("")}
+}
+
+func (f *fakeConfig) ConfigView() ConfigView {
+	return ConfigView{
+		Revision: f.state.Revision(),
+		Sections: []ConfigSection{
+			{Name: "运行", Fields: []ConfigField{
+				{Key: "log_level", Value: "info", Editable: true, ApplyMode: ApplyImmediate, Source: SourceConfig},
+				{Key: "remote.password", ApplyMode: ApplyReadonly, Source: SourceConfig, Secret: true, Configured: true},
+			}},
+		},
+	}
+}
+
+func (f *fakeConfig) ApplyConfigChanges(changes ConfigChanges, revision uint64) (ConfigView, error) {
+	overrides := f.state.ConfigOverrides()
+	if changes.LogLevel != nil {
+		overrides.LogLevel = *changes.LogLevel
+	}
+	if changes.DNSUpstream != nil {
+		overrides.DNSUpstream = *changes.DNSUpstream
+	}
+	if changes.DNSFallback != nil {
+		overrides.DNSFallback = *changes.DNSFallback
+	}
+	if _, err := f.state.ApplyConfig(overrides, revision); err != nil {
+		return ConfigView{}, err
+	}
+	return f.ConfigView(), nil
+}
+
+func newTestConfigServer(t *testing.T, cfg ConfigManager) *httptest.Server {
+	t.Helper()
+	s := NewServer(Options{
+		Password: "secret", Version: "v1.2.3", Date: "2026-01-01",
+		Rules: newFakeRules(), Stats: newTestStats(t), Config: cfg,
+	})
 	ts := httptest.NewServer(s.http.Handler)
 	t.Cleanup(ts.Close)
 	return ts
@@ -325,6 +416,47 @@ func TestRulesRejectsInvalidCategory(t *testing.T) {
 		t.Fatalf("expected 400 for add with bad category, got %d", resp.StatusCode)
 	}
 	resp.Body.Close()
+}
+
+func TestRulesChangesAndResetEndpoints(t *testing.T) {
+	ts := newTestServer(t, newFakeRules())
+	cookie := login(t, ts, "secret")
+
+	// changes reports all three categories and the persistence flag
+	resp := authedRequest(t, ts, http.MethodGet, "/api/rules/changes", cookie, "")
+	body := decodeBody(t, resp)
+	if persistent, _ := body["persistent"].(bool); !persistent {
+		t.Fatalf("expected persistent=true, got %v", body["persistent"])
+	}
+	rules, _ := body["rules"].(map[string]any)
+	for _, cat := range []string{"block", "direct", "proxy"} {
+		if _, ok := rules[cat]; !ok {
+			t.Fatalf("changes missing category %s: %v", cat, rules)
+		}
+	}
+
+	// changes requires a session
+	resp = authedRequest(t, ts, http.MethodGet, "/api/rules/changes", "", "")
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401 without session, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	// reset rejects an invalid category
+	resp = authedRequest(t, ts, http.MethodPost, "/api/rules/reset", cookie, `{"category":"bogus"}`)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 for reset with bad category, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	// reset one category, then all
+	for _, payload := range []string{`{"category":"proxy"}`, `{}`} {
+		resp = authedRequest(t, ts, http.MethodPost, "/api/rules/reset", cookie, payload)
+		if resp.StatusCode != http.StatusNoContent {
+			t.Fatalf("expected 204 for reset %s, got %d", payload, resp.StatusCode)
+		}
+		resp.Body.Close()
+	}
 }
 
 func TestRulesRejectsInvalidBody(t *testing.T) {
@@ -650,6 +782,49 @@ func TestMetricsEndpointServesPrometheusFormat(t *testing.T) {
 	}
 }
 
+// TestMetricsBytesCountedOncePerFlush guards the OTel byte counter against
+// double counting: each flush must record the batch exactly once, and bytes
+// read before BindConn (e.g. TLS ClientHello) must still be counted.
+func TestMetricsBytesCountedOncePerFlush(t *testing.T) {
+	stats := newTestStats(t)
+	s := NewServer(Options{Password: "secret", Version: "v1.2.3", Date: "2026-01-01", Rules: newFakeRules(), Stats: stats})
+	ts := httptest.NewServer(s.http.Handler)
+	defer ts.Close()
+
+	conn := stats.WrapConn(&fakeConn{readBuf: bytes.Repeat([]byte("x"), 300)}, "https")
+	pre := make([]byte, 100) // protocol bytes read before the domain is known
+	if _, err := conn.Read(pre); err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	stats.BindConn(conn, "example.com")
+	payload := make([]byte, 200)
+	if _, err := conn.Read(payload); err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if _, err := conn.Write(bytes.Repeat([]byte("y"), 1000)); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	_ = conn.Close() // drains the pending batches
+
+	resp, err := http.Get(ts.URL + "/metrics")
+	if err != nil {
+		t.Fatalf("get metrics: %v", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	for _, want := range []string{
+		`sower_bytes_total{direction="up"} 300`,
+		`sower_bytes_total{direction="down"} 1000`,
+	} {
+		if !strings.Contains(string(body), want) {
+			t.Fatalf("expected %q in metrics, got:\n%s", want, body)
+		}
+	}
+}
+
 func TestSessionSurvivesRestart(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "sessions.json")
@@ -797,5 +972,140 @@ func TestStreamEndpointPushesEvents(t *testing.T) {
 				saw[prefix] = true
 			}
 		}
+	}
+}
+
+func TestStreamDefaultTrafficSnapshotCacheConcurrent(t *testing.T) {
+	stats := newTestStats(t)
+	s := NewServer(Options{Password: "secret", Rules: newFakeRules(), Stats: stats})
+
+	var wg sync.WaitGroup
+	errors := make(chan string, 16)
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < 50; i++ {
+				snap := s.streamTrafficSnapshot(DomainSortBytes, SourceAll, "")
+				if snap.DNSQueries != 0 {
+					errors <- fmt.Sprintf("unexpected DNS queries %d in cached view", snap.DNSQueries)
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	close(errors)
+	for err := range errors {
+		t.Fatal(err)
+	}
+}
+
+func TestStreamDefaultTrafficSnapshotCache(t *testing.T) {
+	stats := newTestStats(t)
+	s := NewServer(Options{Password: "secret", Rules: newFakeRules(), Stats: stats})
+
+	first := s.streamTrafficSnapshot(DomainSortBytes, SourceAll, "")
+	stats.RecordDNS("fresh.example", "")
+	cached := s.streamTrafficSnapshot(DomainSortBytes, SourceAll, "")
+	if cached.DNSQueries != first.DNSQueries {
+		t.Fatalf("expected cached snapshot, got DNS queries %d after %d", cached.DNSQueries, first.DNSQueries)
+	}
+
+	s.trafficMu.Lock()
+	s.traffic.at = time.Now().Add(-trafficCacheTTL)
+	s.trafficMu.Unlock()
+	refreshed := s.streamTrafficSnapshot(DomainSortBytes, SourceAll, "")
+	if refreshed.DNSQueries != first.DNSQueries+1 {
+		t.Fatalf("expected refreshed snapshot with new DNS query, got %d", refreshed.DNSQueries)
+	}
+
+	stats.RecordDNS("filtered.example", "")
+	filtered := s.streamTrafficSnapshot(DomainSortRecent, SourceAll, "")
+	if filtered.DNSQueries != refreshed.DNSQueries+1 {
+		t.Fatalf("expected filtered snapshot to bypass cache, got %d", filtered.DNSQueries)
+	}
+}
+
+func TestConfigGetSanitizesSecrets(t *testing.T) {
+	ts := newTestConfigServer(t, newFakeConfig(t))
+	cookie := login(t, ts, "secret")
+
+	resp := authedRequest(t, ts, http.MethodGet, "/api/config", cookie, "")
+	body := decodeBody(t, resp)
+	raw, _ := json.Marshal(body)
+	if strings.Contains(string(raw), "secret") && strings.Contains(string(raw), "password\":") {
+		t.Fatalf("secret value leaked in config view: %s", raw)
+	}
+	// The password field must surface as metadata, not a value.
+	if !strings.Contains(string(raw), `"secret":true`) || !strings.Contains(string(raw), `"configured":true`) {
+		t.Fatalf("expected secret metadata, got %s", raw)
+	}
+
+	// config requires a session
+	resp = authedRequest(t, ts, http.MethodGet, "/api/config", "", "")
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401 without session, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+}
+
+func TestConfigPatchValidationAndRevision(t *testing.T) {
+	fake := newFakeConfig(t)
+	ts := newTestConfigServer(t, fake)
+	cookie := login(t, ts, "secret")
+
+	// invalid log level
+	resp := authedRequest(t, ts, http.MethodPatch, "/api/config", cookie,
+		`{"revision":0,"changes":{"log_level":"bogus"}}`)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid log_level, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	// invalid DNS IP
+	resp = authedRequest(t, ts, http.MethodPatch, "/api/config", cookie,
+		`{"revision":0,"changes":{"dns_upstream":"not-an-ip"}}`)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid dns_upstream, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	// unknown fields are rejected by the strict decoder
+	resp = authedRequest(t, ts, http.MethodPatch, "/api/config", cookie,
+		`{"revision":0,"changes":{"remote_password":"x"}}`)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 for unknown change field, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	// stale revision
+	resp = authedRequest(t, ts, http.MethodPatch, "/api/config", cookie,
+		`{"revision":7,"changes":{"log_level":"debug"}}`)
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("expected 409 for stale revision, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	// happy path: revision bumps, override persisted
+	resp = authedRequest(t, ts, http.MethodPatch, "/api/config", cookie,
+		`{"revision":0,"changes":{"log_level":"debug","dns_upstream":"1.1.1.1"}}`)
+	body := decodeBody(t, resp)
+	if rev, _ := body["revision"].(float64); rev != 1 {
+		t.Fatalf("expected revision 1 after patch, got %v", body["revision"])
+	}
+	if got := fake.state.ConfigOverrides(); got.LogLevel != "debug" || got.DNSUpstream != "1.1.1.1" {
+		t.Fatalf("overrides not persisted: %+v", got)
+	}
+
+	// clearing an override with an empty string is valid
+	resp = authedRequest(t, ts, http.MethodPatch, "/api/config", cookie,
+		`{"revision":1,"changes":{"dns_upstream":""}}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 for clearing override, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+	if got := fake.state.ConfigOverrides(); got.DNSUpstream != "" {
+		t.Fatalf("override not cleared: %+v", got)
 	}
 }

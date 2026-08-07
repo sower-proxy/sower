@@ -4,6 +4,7 @@
   import Overview from './views/Overview.svelte'
   import Rules from './views/Rules.svelte'
   import Traffic from './views/Traffic.svelte'
+  import Config from './views/Config.svelte'
   import BreadcrumbHeader from './lib/components/BreadcrumbHeader.svelte'
   import { navItems, type BreadcrumbContextSegment, type NavKey } from './lib/navigation'
   import { api, type Category, type Source } from './lib/api'
@@ -35,7 +36,7 @@
       case 'rules':
         return [
           {
-            label: 'category',
+            label: '分类',
             value: ruleCategory,
             tone: 'strong',
             options: (['block', 'direct', 'proxy'] as Category[]).map((c) => ({
@@ -58,6 +59,8 @@
             })),
           },
         ]
+      case 'config':
+        return []
     }
   })
 
@@ -88,7 +91,7 @@
   })
 
   function handleContextSelect(label: string, value: string) {
-    if (label === 'category') {
+    if (label === '分类') {
       ruleCategory = value as Category
     } else if (label === 'source') {
       trafficSource = value as Source
@@ -114,8 +117,10 @@
           <Overview {status} />
         {:else if activeNav === 'rules'}
           <Rules category={ruleCategory} {onUnauthorized} />
-        {:else}
+        {:else if activeNav === 'traffic'}
           <Traffic source={trafficSource} />
+        {:else}
+          <Config {onUnauthorized} />
         {/if}
       </div>
     {/key}

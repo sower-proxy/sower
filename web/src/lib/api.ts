@@ -98,6 +98,48 @@ export interface RulesQuery {
 	limit?: number;
 }
 
+export interface RuleDelta {
+	add: string[];
+	remove: string[];
+}
+
+export interface RuleChangeSet {
+	persistent: boolean;
+	revision: number;
+	rules: Record<Category, RuleDelta>;
+}
+
+export type ConfigApplyMode = "immediate" | "restart" | "readonly";
+
+export interface ConfigField {
+	key: string;
+	value?: string;
+	editable: boolean;
+	applyMode: ConfigApplyMode;
+	source: "config" | "override";
+	constraint?: string;
+	secret?: boolean;
+	configured?: boolean;
+}
+
+export interface ConfigSection {
+	name: string;
+	fields: ConfigField[];
+}
+
+export interface ConfigView {
+	revision: number;
+	sections: ConfigSection[];
+}
+
+// ConfigChanges is the whitelisted PATCH payload: a present key replaces the
+// override (empty string clears it), an absent key leaves it unchanged.
+export interface ConfigChanges {
+	log_level?: string;
+	dns_upstream?: string;
+	dns_fallback?: string;
+}
+
 export class ApiError extends Error {
 	constructor(
 		public status: number,
@@ -153,6 +195,18 @@ export const api = {
 		}),
 	rulesTest: (domain: string) =>
 		request<DomainTest>(`/api/rules/test?domain=${encodeURIComponent(domain)}`),
+	rulesChanges: () => request<RuleChangeSet>("/api/rules/changes"),
+	resetRules: (category?: Category) =>
+		request<void>("/api/rules/reset", {
+			method: "POST",
+			body: JSON.stringify({ category: category ?? "" }),
+		}),
+	config: () => request<ConfigView>("/api/config"),
+	patchConfig: (revision: number, changes: ConfigChanges) =>
+		request<ConfigView>("/api/config", {
+			method: "PATCH",
+			body: JSON.stringify({ revision, changes }),
+		}),
 	traffic: (sort?: DomainSort, source?: Source, client?: string) => {
 		const params: string[] = [];
 		if (sort) params.push(`sort=${sort}`);

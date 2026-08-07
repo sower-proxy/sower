@@ -187,11 +187,15 @@ func TestServeSharedHTTPRoutesAdminAndProxy(t *testing.T) {
 	host, _, _ := net.SplitHostPort(addr)
 
 	stats := newTestStats(t)
+	r := newTestRouter()
+	state := admin.LoadStateStore("")
+	baseline := snapshotBaseline(r)
+	state.SetBaseline(baseline)
 	srv := admin.NewServer(admin.Options{
 		Password: "secret",
 		Version:  "v1.2.3",
 		Date:     "2026-01-01",
-		Rules:    adminRules{r: newTestRouter()},
+		Rules:    newAdminRules(r, state, baseline),
 		Stats:    stats,
 	})
 	ctx, cancel := context.WithCancel(context.Background())

@@ -1,6 +1,8 @@
 export function formatBytes(n: number): string {
 	if (!Number.isFinite(n) || n < 0) return "-";
-	if (n < 1024) return `${n} B`;
+	// Rates arrive as float64 averages; byte totals are integers. Round the
+	// sub-KB branch so a rate like 137.0333 does not render as a long float.
+	if (n < 1024) return `${Math.round(n)} B`;
 	const units = ["KB", "MB", "GB", "TB", "PB"];
 	let v = n;
 	let i = -1;

@@ -1,14 +1,14 @@
 <script lang="ts">
-  import { api, ApiError, type Category, type DomainTest } from '$lib/api'
+  import { fade } from 'svelte/transition'
+  import { api, ApiError, type Category, type DomainTest, type RuleChangeSet } from '$lib/api'
   import { formatCount } from '$lib/format'
   import * as Card from '$lib/components/ui/card'
   import * as Alert from '$lib/components/ui/alert'
   import Badge from '$lib/components/ui/badge/badge.svelte'
   import Button from '$lib/components/ui/button/button.svelte'
   import Input from '$lib/components/ui/input/input.svelte'
-  import Textarea from '$lib/components/ui/textarea/textarea.svelte'
   import Loading from '$lib/components/Loading.svelte'
-  import { CircleAlert, ListX, Search } from 'lucide-svelte'
+  import { Check, CircleAlert, ListX, Plus, RotateCcw, Search, Trash2, Undo2 } from 'lucide-svelte'
 
   let { category, onUnauthorized }: { category: Category; onUnauthorized: () => void } = $props()
 
@@ -17,7 +17,7 @@
   let rules = $state<string[] | null>(null)
   let total = $state(0)
   let offset = $state(0)
-  let draft = $state('')
+  let newRule = $state('')
   let query = $state('')
   let error = $state('')
   let busy = $state(false)
@@ -80,22 +80,22 @@
     }
   }
 
-  async function addRules() {
-    const items = draft
-      .split('\n')
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0)
-    if (items.length === 0 || busy) return
+  async function addRule() {
+    const rule = newRule.trim()
+    if (!rule || busy) return
 
     const id = ++requestID
     const requestedCategory = category
     busy = true
     error = ''
     try {
-      await api.addRules(requestedCategory, items)
+      await api.addRules(requestedCategory, [rule])
       if (!requestIsCurrent(id, requestedCategory)) return
-      draft = ''
+      newRule = ''
       await reloadView()
+      if (category !== requestedCategory) return
+      await refreshChanges()
+      flashSaved()
     } catch (e) {
       if (!requestIsCurrent(id, requestedCategory)) return
       if (e instanceof ApiError && e.status === 401) {
@@ -104,9 +104,7 @@
       }
       error = e instanceof Error ? e.message : 'add failed'
     } finally {
-      if (requestIsCurrent(id, requestedCategory)) {
-        busy = false
-      }
+      busy = false
     }
   }
 
@@ -121,6 +119,12 @@
       await api.removeRules(requestedCategory, [rule])
       if (!requestIsCurrent(id, requestedCategory)) return
       await reloadView()
+      if (category !== requestedCategory) return
+      // The delete is already persisted; offer a short undo window.
+      clearTimeout(undoTimer)
+      lastRemoved = rule
+      undoTimer = setTimeout(() => (lastRemoved = null), 6000)
+      await refreshChanges()
     } catch (e) {
       if (!requestIsCurrent(id, requestedCategory)) return
       if (e instanceof ApiError && e.status === 401) {
@@ -129,10 +133,81 @@
       }
       error = e instanceof Error ? e.message : 'remove failed'
     } finally {
-      if (requestIsCurrent(id, requestedCategory)) {
-        busy = false
-      }
+      // reloadView() advances requestID, so the requestIsCurrent guard can
+      // never clear busy after a successful delete; reset unconditionally —
+      // the category-switch effect resets busy as well.
+      busy = false
     }
+  }
+
+  async function undoRemove() {
+    if (!lastRemoved || busy) return
+    const rule = lastRemoved
+    lastRemoved = null
+    clearTimeout(undoTimer)
+
+    busy = true
+    error = ''
+    try {
+      await api.addRules(category, [rule])
+      await reloadView()
+      await refreshChanges()
+      flashSaved()
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) {
+        onUnauthorized()
+        return
+      }
+      error = e instanceof Error ? e.message : 'undo failed'
+    } finally {
+      busy = false
+    }
+  }
+
+  async function resetCategory() {
+    if (busy) return
+    busy = true
+    error = ''
+    try {
+      await api.resetRules(category)
+      changesOpen = false
+      await reloadView()
+      await refreshChanges()
+      flashSaved()
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) {
+        onUnauthorized()
+        return
+      }
+      error = e instanceof Error ? e.message : 'reset failed'
+    } finally {
+      busy = false
+    }
+  }
+
+  // Customization state: persisted deltas relative to the boot rule files,
+  // plus transient save feedback.
+  let changes = $state<RuleChangeSet | null>(null)
+  let changesOpen = $state(false)
+  let lastRemoved = $state<string | null>(null)
+  let undoTimer: ReturnType<typeof setTimeout> | undefined
+  let savedFlash = $state(false)
+
+  const categoryDelta = $derived(changes?.rules[category])
+  const changeCount = $derived((categoryDelta?.add.length ?? 0) + (categoryDelta?.remove.length ?? 0))
+
+  async function refreshChanges() {
+    try {
+      changes = await api.rulesChanges()
+    } catch (e) {
+      // The badge is auxiliary; only auth expiry is worth acting on.
+      if (e instanceof ApiError && e.status === 401) onUnauthorized()
+    }
+  }
+
+  function flashSaved() {
+    savedFlash = true
+    setTimeout(() => (savedFlash = false), 2500)
   }
 
   // Domain routing test: report which rules match a domain and the route a
@@ -199,13 +274,18 @@
   $effect(() => {
     category
     clearTimeout(searchTimer)
+    clearTimeout(undoTimer)
     rules = null
     total = 0
     offset = 0
+    newRule = ''
     query = ''
     error = ''
     busy = false
+    lastRemoved = null
+    changesOpen = false
     void load(true)
+    void refreshChanges()
   })
 
   function onSearchInput(event: Event) {
@@ -244,20 +324,20 @@
       <p class="text-sm text-destructive">{testError}</p>
     {/if}
     {#if testResult}
-      <div class="grid gap-2">
-        <div class="flex items-center gap-2 text-sm">
-          <span class="text-muted-foreground">路由</span>
+      <div class="grid gap-2 border-t pt-3" in:fade={{ duration: 120 }}>
+        <div class="flex items-center gap-2">
+          <span class="text-sm text-muted-foreground">路由</span>
           <Badge variant={routeVariant(testResult.route)}>{routeLabels[testResult.route]}</Badge>
-          <code class="min-w-0 break-all font-mono">{testResult.domain}</code>
+          <code class="min-w-0 break-all font-mono text-base font-medium">{testResult.domain}</code>
         </div>
         <div class="grid gap-1.5">
           {#each testResult.matches as m}
-            <div class="flex items-center gap-2 text-sm">
+            <div class="flex items-center gap-2 text-sm {m.matched ? '' : 'opacity-60'}">
               <Badge variant={matchVariant(m.category, m.matched)}>
                 {m.category}{m.matched ? '' : ' 未命中'}
               </Badge>
               {#if m.matched}
-                <code class="min-w-0 break-all font-mono text-xs text-muted-foreground">{m.rule}</code>
+                <code class="min-w-0 break-all font-mono text-sm">{m.rule}</code>
               {/if}
             </div>
           {/each}
@@ -272,14 +352,9 @@
 
 {#if rules === null}
   <Loading />
-{:else if total === 0}
-  <div class="flex flex-col items-center gap-2 py-10 text-sm text-muted-foreground">
-    <ListX class="size-5" aria-hidden="true" />
-    <p>{query.trim() ? `没有匹配“${query.trim()}”的规则。` : '该分类暂无规则。'}</p>
-  </div>
 {:else}
-  <div class="mb-3 flex items-center gap-2">
-    <div class="relative min-w-0 flex-1 sm:max-w-xs">
+  <div class="mb-3 grid gap-2 sm:flex sm:items-center">
+    <div class="relative min-w-0 sm:w-56">
       <Search class="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
       <Input
         value={query}
@@ -289,42 +364,129 @@
         class="pl-8"
       />
     </div>
-    <Badge variant="secondary" class="ml-auto shrink-0">
-      {#if rules.length === total}
-        {formatCount(total)} rules
-      {:else}
-        {formatCount(rules.length)} / {formatCount(total)} rules
+    <div class="flex min-w-0 flex-1 items-center gap-1.5 sm:max-w-md">
+      <Input
+        bind:value={newRule}
+        placeholder="添加规则，如 **.example.com"
+        aria-label="添加规则"
+        class="min-w-0 font-mono"
+        onkeydown={(e) => {
+          if (e.key === 'Enter') void addRule()
+        }}
+      />
+      <Button class="shrink-0 gap-1" onclick={addRule} disabled={busy || !newRule.trim()}>
+        <Plus class="size-4" />
+        添加
+      </Button>
+    </div>
+    <div class="flex items-center gap-2 sm:ml-auto">
+      {#if changeCount > 0}
+        <button
+          type="button"
+          class="shrink-0 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary transition-colors hover:bg-primary/20"
+          aria-expanded={changesOpen}
+          onclick={() => (changesOpen = !changesOpen)}
+        >
+          自定义 +{categoryDelta?.add.length ?? 0} / −{categoryDelta?.remove.length ?? 0}
+        </button>
       {/if}
-    </Badge>
+      <Badge variant="secondary" class="ml-auto shrink-0">
+        {#if rules.length === total}
+          {formatCount(total)} 条规则
+        {:else}
+          {formatCount(rules.length)} / {formatCount(total)} 条规则
+        {/if}
+      </Badge>
+    </div>
   </div>
-  <Card.Card>
-    <Card.CardContent class="divide-y p-0">
-      {#each rules as rule (rule)}
-        <div class="flex items-center justify-between gap-3 px-4 py-2.5 transition-colors hover:bg-muted/40">
-          <code class="min-w-0 break-all font-mono text-sm">{rule}</code>
-          <Button
-            variant="ghost"
-            size="sm"
-            class="shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
-            onclick={() => removeRule(rule)}
-            disabled={busy}
-          >
-            Remove
-          </Button>
-        </div>
-      {/each}
-    </Card.CardContent>
-  </Card.Card>
-  {#if rules.length < total}
-    <Button
-      variant="outline"
-      class="mt-3 w-full"
-      onclick={() => load(false)}
-      disabled={loadingMore || busy}
+  {#if changesOpen && categoryDelta}
+    <div class="mb-3 rounded-lg border bg-card px-4 py-3" in:fade={{ duration: 120 }}>
+      <div class="grid gap-1.5">
+        {#each categoryDelta.add as rule (rule)}
+          <div class="flex items-center gap-2 text-sm">
+            <span class="font-mono text-xs font-medium text-primary">+</span>
+            <code class="min-w-0 break-all font-mono text-xs">{rule}</code>
+          </div>
+        {/each}
+        {#each categoryDelta.remove as rule (rule)}
+          <div class="flex items-center gap-2 text-sm">
+            <span class="font-mono text-xs font-medium text-destructive">−</span>
+            <code class="min-w-0 break-all font-mono text-xs line-through opacity-60">{rule}</code>
+          </div>
+        {/each}
+      </div>
+      <div class="mt-2.5 flex items-center gap-2 border-t pt-2.5">
+        <p class="min-w-0 flex-1 text-xs text-muted-foreground">
+          {#if changes?.persistent}
+            自定义变更保存在 admin 状态文件,重启后仍然生效。
+          {:else}
+            变更仅保存在内存中,重启后丢失(未配置 admin.state_file)。
+          {/if}
+        </p>
+        <Button variant="outline" size="sm" class="shrink-0 gap-1" onclick={resetCategory} disabled={busy}>
+          <RotateCcw class="size-3.5" />
+          重置本类
+        </Button>
+      </div>
+    </div>
+  {/if}
+  {#if lastRemoved}
+    <div
+      class="mb-3 flex items-center gap-2 rounded-md border bg-card px-3 py-2 text-sm"
+      in:fade={{ duration: 120 }}
+      role="status"
     >
-      {loadingMore
-        ? '加载中…'
-        : `加载更多（已加载 ${formatCount(rules.length)} / ${formatCount(total)}）`}
-    </Button>
+      <span class="min-w-0 flex-1 truncate">
+        已删除 <code class="font-mono text-xs">{lastRemoved}</code>,已保存。
+      </span>
+      <Button variant="ghost" size="sm" class="shrink-0 gap-1" onclick={undoRemove} disabled={busy}>
+        <Undo2 class="size-3.5" />
+        撤销
+      </Button>
+    </div>
+  {:else if savedFlash}
+    <div class="mb-3 flex items-center gap-1.5 px-1 text-sm text-primary" in:fade={{ duration: 120 }} role="status">
+      <Check class="size-4" />
+      已保存
+    </div>
+  {/if}
+  {#if total === 0}
+    <div class="flex flex-col items-center gap-2 py-10 text-sm text-muted-foreground">
+      <ListX class="size-5" aria-hidden="true" />
+      <p>{query.trim() ? `没有匹配“${query.trim()}”的规则。` : '该分类暂无规则。'}</p>
+    </div>
+  {:else}
+    <Card.Card>
+      <Card.CardContent class="divide-y p-0">
+        {#each rules as rule (rule)}
+          <div class="flex items-center justify-between gap-3 px-4 py-1.5 transition-colors hover:bg-muted/40">
+            <code class="min-w-0 break-all font-mono text-sm">{rule}</code>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              class="size-11 shrink-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive sm:size-8"
+              aria-label={`删除 ${rule}`}
+              title={`删除 ${rule}`}
+              onclick={() => removeRule(rule)}
+              disabled={busy}
+            >
+              <Trash2 class="size-4" />
+            </Button>
+          </div>
+        {/each}
+      </Card.CardContent>
+    </Card.Card>
+    {#if rules.length < total}
+      <Button
+        variant="outline"
+        class="mt-3 w-full"
+        onclick={() => load(false)}
+        disabled={loadingMore || busy}
+      >
+        {loadingMore
+          ? '加载中…'
+          : `加载更多（已加载 ${formatCount(rules.length)} / ${formatCount(total)}）`}
+      </Button>
+    {/if}
   {/if}
 {/if}

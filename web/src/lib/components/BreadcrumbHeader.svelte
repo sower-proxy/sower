@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { Activity, ChevronDown, CircleDot, Gauge, LayoutPanelTop, LogOut, SlidersHorizontal, Star } from 'lucide-svelte'
+  import { Activity, ChevronDown, CircleDot, Gauge, LayoutPanelTop, LogOut, Settings, SlidersHorizontal, Star } from 'lucide-svelte'
   import * as DropdownMenu from '$lib/components/ui/dropdown-menu'
   import Badge from '$lib/components/ui/badge/badge.svelte'
   import Button from '$lib/components/ui/button/button.svelte'
@@ -29,6 +29,7 @@
     overview: Gauge,
     rules: SlidersHorizontal,
     traffic: Activity,
+    config: Settings,
   }
 
   let favoriteKeys: NavKey[] = $state([])

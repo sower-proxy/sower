@@ -26,6 +26,10 @@ type RemoteConfig struct {
 type SowerConfig struct {
 	LogLevel slog.Level `default:"info" usage:"log level: debug, info, warn, error"`
 
+	// IgnoreAdminState skips the admin state file at startup. It is the
+	// escape hatch when a persisted override breaks the service.
+	IgnoreAdminState bool `flag:"ignore-admin-state" usage:"ignore the admin state file at startup"`
+
 	Remote RemoteConfig
 
 	DNS struct {
@@ -46,6 +50,7 @@ type SowerConfig struct {
 		Addr        string `default:"127.0.0.1:19090" usage:"admin web server listen address"`
 		Password    string `usage:"admin web server password, required when enabled"`
 		SessionFile string `default:"/etc/sower/sessions.json" usage:"persist admin sessions to this file, empty disables persistence"`
+		StateFile   string `default:"/etc/sower/admin-state.json" usage:"persist admin rule and config changes to this file, empty disables persistence"`
 	} `flag:"admin"`
 
 	Router struct {
