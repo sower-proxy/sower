@@ -216,7 +216,7 @@ const (
 )
 
 func (r *Router) Exchange(req *dns.Msg) (_ *dns.Msg, err error) {
-	addrs, index, shouldProbe, err := r.currentUpstreamState(time.Now())
+	addrs, index, shouldProbe, gen, err := r.currentUpstreamStateWithGeneration(time.Now())
 	if err != nil {
 		return nil, err
 	}
@@ -224,15 +224,15 @@ func (r *Router) Exchange(req *dns.Msg) (_ *dns.Msg, err error) {
 	if shouldProbe {
 		resp, probeErr := r.exchangeWithRetry(req, addrs[0])
 		if probeErr == nil {
-			r.promoteUpstream()
+			r.promoteUpstream(gen)
 			return resp, nil
 		}
-		r.scheduleRetry(time.Now())
+		r.scheduleRetry(time.Now(), gen)
 	}
 
 	resp, err := r.exchangeWithRetry(req, addrs[index])
 	if err != nil {
-		nextIndex, switched := r.degradeUpstream(index)
+		nextIndex, switched := r.degradeUpstream(index, gen)
 		if switched {
 			slog.Info("use upstream dns", "ip", addrs[nextIndex])
 			resp, err = r.exchangeWithRetry(req, addrs[nextIndex])
@@ -250,23 +250,34 @@ func isRetryableDNSResponseErr(err error) bool {
 	return errors.As(err, &retryableErr)
 }
 
+// currentUpstreamState returns the current upstream selection for callers
+// that do not mutate router state after exchanging with it.
 func (r *Router) currentUpstreamState(now time.Time) ([]string, int, bool, error) {
+	addrs, index, shouldProbe, _, err := r.currentUpstreamStateWithGeneration(now)
+	return addrs, index, shouldProbe, err
+}
+
+// currentUpstreamStateWithGeneration returns the generation belonging to the
+// selected addresses. Exchange passes it back to completion paths so a DNS
+// config change cannot let an old request mutate the new selection state.
+func (r *Router) currentUpstreamStateWithGeneration(now time.Time) ([]string, int, bool, uint64, error) {
 	for {
-		addrs, index, shouldProbe, needRefresh, err := r.prepareUpstreamState(now)
+		addrs, index, shouldProbe, needRefresh, gen, err := r.prepareUpstreamState(now)
 		if !needRefresh || err != nil {
-			return addrs, index, shouldProbe, err
+			return addrs, index, shouldProbe, gen, err
 		}
 
-		refreshedAddrs, refreshErr := r.buildUpstreamAddrs()
-		r.finishUpstreamRefresh(now, refreshedAddrs, refreshErr)
+		upstream, fallback := r.dnsServersSnapshot()
+		refreshedAddrs, refreshErr := r.buildUpstreamAddrs(upstream, fallback)
+		r.finishUpstreamRefresh(now, refreshedAddrs, refreshErr, gen)
 	}
 }
 
-func (r *Router) degradeUpstream(index int) (int, bool) {
+func (r *Router) degradeUpstream(index int, gen uint64) (int, bool) {
 	r.dns.Lock()
 	defer r.dns.Unlock()
 
-	if len(r.dns.upstreamAddrs) == 0 || r.dns.upstreamIndex != index || index >= len(r.dns.upstreamAddrs)-1 {
+	if gen != r.dns.generation || len(r.dns.upstreamAddrs) == 0 || r.dns.upstreamIndex != index || index >= len(r.dns.upstreamAddrs)-1 {
 		return r.dns.upstreamIndex, false
 	}
 
@@ -276,18 +287,24 @@ func (r *Router) degradeUpstream(index int) (int, bool) {
 	return r.dns.upstreamIndex, true
 }
 
-func (r *Router) promoteUpstream() {
+func (r *Router) promoteUpstream(gen uint64) {
 	r.dns.Lock()
 	defer r.dns.Unlock()
+	if gen != r.dns.generation {
+		return
+	}
 
 	r.dns.upstreamIndex = 0
 	r.dns.retryAt = time.Time{}
 	r.dns.probeInFlight = false
 }
 
-func (r *Router) scheduleRetry(now time.Time) {
+func (r *Router) scheduleRetry(now time.Time, gen uint64) {
 	r.dns.Lock()
 	defer r.dns.Unlock()
+	if gen != r.dns.generation {
+		return
+	}
 
 	if r.dns.upstreamIndex > 0 {
 		r.dns.retryAt = now.Add(dnsRetryInterval)
@@ -295,7 +312,7 @@ func (r *Router) scheduleRetry(now time.Time) {
 	}
 }
 
-func (r *Router) prepareUpstreamState(now time.Time) ([]string, int, bool, bool, error) {
+func (r *Router) prepareUpstreamState(now time.Time) ([]string, int, bool, bool, uint64, error) {
 	r.dns.Lock()
 	defer r.dns.Unlock()
 
@@ -304,20 +321,22 @@ func (r *Router) prepareUpstreamState(now time.Time) ([]string, int, bool, bool,
 	case len(r.dns.upstreamAddrs) == 0:
 		if r.dns.refreshInFlight {
 			if fallbackAddrs, ok := r.fallbackOnlyUpstreamsLocked(); ok {
-				return fallbackAddrs, 0, false, false, nil
+				return fallbackAddrs, 0, false, false, r.dns.generation, nil
 			}
-			return nil, 0, false, false, r.upstreamUnavailableErrLocked()
+			return nil, 0, false, false, r.dns.generation, r.upstreamUnavailableErrLocked()
 		}
 		if !r.dns.refreshAt.IsZero() && now.Before(r.dns.refreshAt) {
 			if fallbackAddrs, ok := r.fallbackOnlyUpstreamsLocked(); ok {
-				return fallbackAddrs, 0, false, false, nil
+				return fallbackAddrs, 0, false, false, r.dns.generation, nil
 			}
-			return nil, 0, false, false, r.upstreamUnavailableErrLocked()
+			return nil, 0, false, false, r.dns.generation, r.upstreamUnavailableErrLocked()
 		}
 		r.dns.refreshInFlight = true
+		r.dns.refreshGeneration = r.dns.generation
 		needRefresh = true
 	case r.shouldRefreshUpstreams(now) && !r.dns.refreshInFlight:
 		r.dns.refreshInFlight = true
+		r.dns.refreshGeneration = r.dns.generation
 		needRefresh = true
 	}
 
@@ -333,12 +352,40 @@ func (r *Router) prepareUpstreamState(now time.Time) ([]string, int, bool, bool,
 	}
 
 	addrs := append([]string(nil), r.dns.upstreamAddrs...)
-	return addrs, r.dns.upstreamIndex, shouldProbe, needRefresh, nil
+	return addrs, r.dns.upstreamIndex, shouldProbe, needRefresh, r.dns.generation, nil
 }
 
-func (r *Router) buildUpstreamAddrs() ([]string, error) {
-	dnsIPs := []string{r.dns.upstreamDNS}
-	if r.dns.upstreamDNS == "" {
+// dnsServersSnapshot reads the configured upstream servers under lock so
+// buildUpstreamAddrs can run without racing a concurrent SetDNS.
+func (r *Router) dnsServersSnapshot() (upstream, fallback string) {
+	r.dns.Lock()
+	defer r.dns.Unlock()
+	return r.dns.upstreamDNS, r.dns.fallbackDNS
+}
+
+// SetDNS swaps the upstream and fallback DNS servers at runtime. Cached
+// upstream addresses are dropped so the next query rebuilds them from the
+// new configuration; an in-flight refresh started under the old config is
+// discarded via the generation check in finishUpstreamRefresh.
+func (r *Router) SetDNS(upstream, fallback string) {
+	r.dns.Lock()
+	defer r.dns.Unlock()
+	r.dns.upstreamDNS = upstream
+	r.dns.fallbackDNS = fallback
+	r.dns.generation++
+	r.dns.refreshInFlight = false
+	r.dns.refreshGeneration = 0
+	r.dns.upstreamAddrs = nil
+	r.dns.upstreamIndex = 0
+	r.dns.refreshAt = time.Time{}
+	r.dns.retryAt = time.Time{}
+	r.dns.lastRefreshErr = nil
+	r.dns.probeInFlight = false
+}
+
+func (r *Router) buildUpstreamAddrs(upstream, fallback string) ([]string, error) {
+	dnsIPs := []string{upstream}
+	if upstream == "" {
 		var err error
 		dnsIPs, err = r.dns.getDNSServer()
 		if err != nil {
@@ -363,7 +410,7 @@ func (r *Router) buildUpstreamAddrs() ([]string, error) {
 	for _, ip := range dnsIPs {
 		appendAddr(ip)
 	}
-	appendAddr(r.dns.fallbackDNS)
+	appendAddr(fallback)
 	if len(addrs) == 0 {
 		return nil, fmt.Errorf("no available upstream dns")
 	}
@@ -405,17 +452,25 @@ func (r *Router) applyUpstreamAddrsLocked(addrs []string, now time.Time) {
 	}
 	r.dns.lastRefreshErr = nil
 	r.dns.refreshInFlight = false
+	r.dns.refreshGeneration = 0
 	r.dns.probeInFlight = false
 	r.scheduleRefreshLocked(now)
 	slog.Info("use upstream dns", "ips", addrs)
 }
 
-func (r *Router) finishUpstreamRefresh(now time.Time, addrs []string, err error) {
+func (r *Router) finishUpstreamRefresh(now time.Time, addrs []string, err error, gen uint64) {
 	r.dns.Lock()
 	defer r.dns.Unlock()
 
+	if gen != r.dns.generation || !r.dns.refreshInFlight || r.dns.refreshGeneration != gen {
+		// The refresh was invalidated by SetDNS or superseded by a newer one.
+		// It no longer owns refreshInFlight and must not alter current state.
+		return
+	}
+
 	if err != nil {
 		r.dns.refreshInFlight = false
+		r.dns.refreshGeneration = 0
 		r.dns.lastRefreshErr = err
 		r.scheduleRefreshLocked(now)
 		if len(r.dns.upstreamAddrs) > 0 {

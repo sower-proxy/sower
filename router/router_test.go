@@ -195,7 +195,7 @@ func TestExchangeSkipsServeIPInUpstreamList(t *testing.T) {
 	t.Parallel()
 
 	r := newTestRouter(t, []string{"127.0.0.1"}, "127.0.0.1", "127.0.0.2", "", nil)
-	addrs, err := r.buildUpstreamAddrs()
+	addrs, err := r.buildUpstreamAddrs("127.0.0.1", "127.0.0.2")
 	if err != nil {
 		t.Fatalf("buildUpstreamAddrs failed: %v", err)
 	}
@@ -212,7 +212,7 @@ func TestBuildUpstreamAddrsPrefersConfiguredDNSBeforeFallback(t *testing.T) {
 	t.Parallel()
 
 	r := newTestRouter(t, []string{"127.0.0.1"}, "1.1.1.1", "9.9.9.9", "", nil)
-	addrs, err := r.buildUpstreamAddrs()
+	addrs, err := r.buildUpstreamAddrs("1.1.1.1", "9.9.9.9")
 	if err != nil {
 		t.Fatalf("buildUpstreamAddrs failed: %v", err)
 	}
@@ -670,11 +670,11 @@ func TestBuildUpstreamAddrsIsPerRouter(t *testing.T) {
 	r1 := newTestRouter(t, []string{"127.0.0.1"}, "1.1.1.1", "9.9.9.9", "", nil)
 	r2 := newTestRouter(t, []string{"127.0.0.2"}, "8.8.8.8", "4.4.4.4", "", nil)
 
-	addrs1, err := r1.buildUpstreamAddrs()
+	addrs1, err := r1.buildUpstreamAddrs("1.1.1.1", "9.9.9.9")
 	if err != nil {
 		t.Fatalf("buildUpstreamAddrs r1 failed: %v", err)
 	}
-	addrs2, err := r2.buildUpstreamAddrs()
+	addrs2, err := r2.buildUpstreamAddrs("8.8.8.8", "4.4.4.4")
 	if err != nil {
 		t.Fatalf("buildUpstreamAddrs r2 failed: %v", err)
 	}
@@ -737,7 +737,7 @@ func TestDegradeUpstreamMovesTowardFallback(t *testing.T) {
 	r.dns.upstreamAddrs = []string{"1.1.1.1:53", "9.9.9.9:53"}
 	r.dns.upstreamIndex = 0
 
-	index, switched := r.degradeUpstream(0)
+	index, switched := r.degradeUpstream(0, r.dns.generation)
 	if !switched {
 		t.Fatal("expected upstream switch")
 	}
@@ -757,13 +757,53 @@ func TestPromoteUpstreamRestoresPreferredAndClearsRetry(t *testing.T) {
 	r.dns.upstreamIndex = 1
 	r.dns.retryAt = time.Now().Add(time.Minute)
 
-	r.promoteUpstream()
+	r.promoteUpstream(r.dns.generation)
 
 	if r.dns.upstreamIndex != 0 {
 		t.Fatalf("expected preferred index 0, got %d", r.dns.upstreamIndex)
 	}
 	if !r.dns.retryAt.IsZero() {
 		t.Fatal("expected retry deadline to be cleared")
+	}
+}
+
+func TestSetDNSDiscardsStaleProbeCompletion(t *testing.T) {
+	t.Parallel()
+
+	r := newTestRouter(t, []string{"127.0.0.1"}, "1.1.1.1", "9.9.9.9", "", nil)
+	r.dns.upstreamAddrs = []string{"1.1.1.1:53", "9.9.9.9:53"}
+	r.dns.upstreamIndex = 1
+	r.dns.retryAt = time.Now().Add(-time.Second)
+
+	_, _, shouldProbe, generation, err := r.currentUpstreamStateWithGeneration(time.Now())
+	if err != nil || !shouldProbe {
+		t.Fatalf("expected probe under old generation: probe=%v err=%v", shouldProbe, err)
+	}
+
+	// Simulate a new configuration that has already selected its fallback
+	// while the old preferred-upstream probe is still exchanging.
+	r.SetDNS("8.8.8.8", "4.4.4.4")
+	r.dns.Lock()
+	r.dns.upstreamAddrs = []string{"8.8.8.8:53", "4.4.4.4:53"}
+	r.dns.upstreamIndex = 1
+	retryAt := time.Now().Add(time.Minute)
+	r.dns.retryAt = retryAt
+	r.dns.probeInFlight = true
+	r.dns.Unlock()
+
+	r.promoteUpstream(generation)
+	r.scheduleRetry(time.Now(), generation)
+
+	r.dns.Lock()
+	defer r.dns.Unlock()
+	if r.dns.upstreamIndex != 1 {
+		t.Fatalf("stale probe changed new upstream index to %d", r.dns.upstreamIndex)
+	}
+	if !r.dns.retryAt.Equal(retryAt) {
+		t.Fatalf("stale probe changed new retry deadline: got %v want %v", r.dns.retryAt, retryAt)
+	}
+	if !r.dns.probeInFlight {
+		t.Fatal("stale probe cleared new probe ownership")
 	}
 }
 
@@ -1154,5 +1194,76 @@ func TestRouteObserverFiresOncePerConnection(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("observation %d: expected %q, got %q", i, want[i], got[i])
 		}
+	}
+}
+
+func TestSetDNSSwapsUpstreamsAtRuntime(t *testing.T) {
+	t.Parallel()
+
+	r := newTestRouter(t, []string{"127.0.0.1"}, "1.1.1.1", "9.9.9.9", "", nil)
+	r.dns.upstreamAddrs = []string{"1.1.1.1:53", "9.9.9.9:53"}
+	r.dns.refreshAt = time.Now().Add(time.Hour)
+
+	r.SetDNS("8.8.8.8", "4.4.4.4")
+
+	r.dns.Lock()
+	if r.dns.upstreamDNS != "8.8.8.8" || r.dns.fallbackDNS != "4.4.4.4" {
+		t.Fatalf("dns config not swapped: %v %v", r.dns.upstreamDNS, r.dns.fallbackDNS)
+	}
+	if len(r.dns.upstreamAddrs) != 0 {
+		t.Fatalf("cached upstreams not invalidated: %v", r.dns.upstreamAddrs)
+	}
+	if !r.dns.refreshAt.IsZero() {
+		t.Fatalf("refresh schedule not cleared: %v", r.dns.refreshAt)
+	}
+	r.dns.Unlock()
+
+	// The next query rebuilds upstreams from the new configuration.
+	addrs, _, _, err := r.currentUpstreamState(time.Now())
+	if err != nil {
+		t.Fatalf("currentUpstreamState after SetDNS: %v", err)
+	}
+	if strings.Join(addrs, ",") != "8.8.8.8:53,4.4.4.4:53" {
+		t.Fatalf("expected rebuilt upstreams from new config, got %v", addrs)
+	}
+}
+
+func TestSetDNSDiscardsStaleRefresh(t *testing.T) {
+	t.Parallel()
+
+	r := newTestRouter(t, []string{"127.0.0.1"}, "1.1.1.1", "9.9.9.9", "", nil)
+
+	// A refresh starts under the current configuration.
+	now := time.Now()
+	_, _, _, needRefresh, oldGeneration, err := r.prepareUpstreamState(now)
+	if err != nil || !needRefresh {
+		t.Fatalf("expected old refresh to start, needRefresh=%v err=%v", needRefresh, err)
+	}
+
+	// SetDNS invalidates the old owner and permits an immediate new refresh.
+	r.SetDNS("8.8.8.8", "4.4.4.4")
+	_, _, _, needRefresh, newGeneration, err := r.prepareUpstreamState(now)
+	if err != nil || !needRefresh || newGeneration == oldGeneration {
+		t.Fatalf("expected new-generation refresh, refresh=%v old=%d new=%d err=%v", needRefresh, oldGeneration, newGeneration, err)
+	}
+
+	// The old completion must not clear ownership of the newer refresh.
+	r.finishUpstreamRefresh(now, []string{"1.1.1.1:53", "9.9.9.9:53"}, nil, oldGeneration)
+	r.dns.Lock()
+	if !r.dns.refreshInFlight || r.dns.refreshGeneration != newGeneration {
+		t.Fatalf("stale completion changed new refresh owner: inFlight=%v owner=%d", r.dns.refreshInFlight, r.dns.refreshGeneration)
+	}
+	if len(r.dns.upstreamAddrs) != 0 {
+		t.Fatalf("stale refresh result applied: %v", r.dns.upstreamAddrs)
+	}
+	r.dns.Unlock()
+
+	r.finishUpstreamRefresh(now, []string{"8.8.8.8:53", "4.4.4.4:53"}, nil, newGeneration)
+	addrs, _, _, err := r.currentUpstreamState(now)
+	if err != nil {
+		t.Fatalf("currentUpstreamState after new refresh: %v", err)
+	}
+	if strings.Join(addrs, ",") != "8.8.8.8:53,4.4.4.4:53" {
+		t.Fatalf("expected upstreams from new config, got %v", addrs)
 	}
 }

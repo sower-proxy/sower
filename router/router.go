@@ -35,13 +35,17 @@ type (
 			getDNSServer func() ([]string, error)
 
 			sync.Mutex
-			upstreamAddrs   []string
-			upstreamIndex   int
-			refreshAt       time.Time
-			refreshInFlight bool
-			lastRefreshErr  error
-			retryAt         time.Time
-			probeInFlight   bool
+			upstreamAddrs     []string
+			upstreamIndex     int
+			refreshAt         time.Time
+			refreshInFlight   bool
+			refreshGeneration uint64
+			lastRefreshErr    error
+			retryAt           time.Time
+			probeInFlight     bool
+			// generation invalidates in-flight refreshes after SetDNS: a refresh
+			// started under the previous upstream config is discarded on finish.
+			generation uint64
 		}
 
 		country struct {
