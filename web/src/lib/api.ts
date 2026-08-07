@@ -28,6 +28,12 @@ export interface ClientStat {
 	lastSeen: string;
 }
 
+export interface BlockedStat {
+	domain: string;
+	count: number;
+	lastSeen: string;
+}
+
 export interface TrafficSnapshot {
 	uptime: number;
 	dnsQueries: number;
@@ -40,6 +46,7 @@ export interface TrafficSnapshot {
 		connsPerSec: number;
 	};
 	ruleHits: { block: number; direct: number; proxy: number };
+	blocked: BlockedStat[];
 	system: { goroutines: number; heapAlloc: number };
 	bytesUp: number;
 	bytesDown: number;

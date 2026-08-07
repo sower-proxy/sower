@@ -20,7 +20,7 @@
     { value: 'conns', label: '连接数' },
   ]
 
-  type View = 'live' | 'totals'
+  type View = 'live' | 'totals' | 'blocked'
   let view = $state<View>('live')
 
   // Live view is fed by the SSE traffic events; totals are the cumulative
@@ -34,6 +34,15 @@
   let filter = $state('')
   let sort: SortMode = $state('bytes')
   let client = $state('')
+
+  // Blocked domains are global: block decisions carry no source or client
+  // dimension, so the list ignores the page's traffic filters.
+  const blocked = $derived(live.traffic?.blocked ?? [])
+  const visibleBlocked = $derived.by(() => {
+    const q = filter.trim().toLowerCase()
+    if (!q) return blocked
+    return blocked.filter((b) => b.domain.toLowerCase().includes(q))
+  })
 
   const activeSortLabel = $derived(sortModes.find((m) => m.value === sort)?.label ?? '流量')
 
@@ -120,6 +129,16 @@
       >
         总计
       </button>
+      <button
+        type="button"
+        class="rounded-sm px-2.5 py-1 text-xs font-medium transition-colors {view === 'blocked'
+          ? 'bg-card text-foreground shadow-sm'
+          : 'text-muted-foreground hover:text-foreground'}"
+        aria-pressed={view === 'blocked'}
+        onclick={() => (view = 'blocked')}
+      >
+        拦截
+      </button>
     </div>
     {#if view === 'live'}
       <div
@@ -142,14 +161,16 @@
       </div>
     {/if}
     <Badge variant="secondary" class="justify-self-end shrink-0 sm:ml-auto">
-      {#if visibleDomains.length === domains.length}
+      {#if view === 'blocked'}
+        {formatCount(visibleBlocked.length)} blocked
+      {:else if visibleDomains.length === domains.length}
         {formatCount(visibleDomains.length)} domains
       {:else}
         {formatCount(visibleDomains.length)} / {formatCount(domains.length)} domains
       {/if}
     </Badge>
   </div>
-  {#if clients.length > 0}
+  {#if view !== 'blocked' && clients.length > 0}
     <div class="mb-3 flex flex-wrap items-center gap-1.5" role="group" aria-label="客户端过滤">
       <button
         type="button"
@@ -208,6 +229,44 @@
       />
     </div>
   </div>
+  {#if view === 'blocked'}
+    {#if blocked.length === 0}
+      <div class="flex flex-col items-center gap-2 rounded-lg border border-dashed py-10 text-sm text-muted-foreground">
+        <Inbox class="size-5" aria-hidden="true" />
+        <p>暂无拦截记录。</p>
+      </div>
+    {:else}
+      <Card.Card class="max-h-[70vh] overflow-auto">
+      <Table.Table>
+        <Table.TableHeader>
+          <Table.TableRow>
+            <Table.TableHead class={headCell}>Domain</Table.TableHead>
+            <Table.TableHead class={headCell + ' text-right'}>Blocked</Table.TableHead>
+            <Table.TableHead class={headCell + ' text-right'}>Last seen</Table.TableHead>
+          </Table.TableRow>
+        </Table.TableHeader>
+        <Table.TableBody>
+          {#if visibleBlocked.length === 0}
+            <Table.TableRow>
+              <Table.TableCell colspan={3} class="py-8 text-center text-sm text-muted-foreground">
+                没有匹配“{filter}”的域名。
+              </Table.TableCell>
+            </Table.TableRow>
+          {/if}
+          {#each visibleBlocked as b (b.domain)}
+            <Table.TableRow>
+              <Table.TableCell class="max-w-[20rem] truncate font-mono text-xs">{b.domain}</Table.TableCell>
+              <Table.TableCell class="text-right tabular-nums">{formatCount(b.count)}</Table.TableCell>
+              <Table.TableCell class="text-right text-muted-foreground tabular-nums">
+                {formatTime(b.lastSeen)}
+              </Table.TableCell>
+            </Table.TableRow>
+          {/each}
+        </Table.TableBody>
+      </Table.Table>
+      </Card.Card>
+    {/if}
+  {:else}
   {#if domains.length === 0}
     <div class="flex flex-col items-center gap-2 rounded-lg border border-dashed py-10 text-sm text-muted-foreground">
       <Inbox class="size-5" aria-hidden="true" />
@@ -260,7 +319,12 @@
     </Table.Table>
     </Card.Card>
   {/if}
-  {#if view === 'totals'}
+  {/if}
+  {#if view === 'blocked'}
+    <p class="mt-2 text-xs text-muted-foreground">
+      自启动以来被拦截的域名，按拦截次数排序，实时推送。
+    </p>
+  {:else if view === 'totals'}
     <p class="mt-2 text-xs text-muted-foreground">
       自启动以来按流量排序的前 {formatCount(domains.length)} 个域名与客户端，每 30 秒更新。
     </p>
