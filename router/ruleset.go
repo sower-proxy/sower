@@ -10,6 +10,8 @@ import (
 // RuleSet is a thread-safe rule container. It retains the raw rule list so
 // rules can be listed and removed at runtime; the suffixtree is derived
 // state and is rebuilt from the retained list whenever a rule is removed.
+// Membership for Add/Remove uses the raw rule strings (set), so case and
+// trailing-dot variants stay distinct entries in the configuration.
 type RuleSet struct {
 	mu    sync.RWMutex
 	rules []string
@@ -25,7 +27,8 @@ func NewRuleSet(rules ...string) *RuleSet {
 	return rs
 }
 
-// Add appends rules that are not already present. Duplicates are ignored.
+// Add appends rules that are not already present, using the raw rule string
+// as the membership key. Duplicates are ignored.
 func (rs *RuleSet) Add(rules ...string) {
 	if len(rules) == 0 {
 		return
@@ -44,6 +47,32 @@ func (rs *RuleSet) Add(rules ...string) {
 		}
 		rs.tree.Add(rule)
 	}
+}
+
+// Replace swaps the entire rule list atomically, rebuilding the suffix
+// tree. Literal duplicates in the input are dropped. It is used to rebuild
+// a rule set from the boot baseline after a delta reset.
+func (rs *RuleSet) Replace(rules ...string) {
+	// Construct the full immutable candidate before taking the match lock.
+	// The field swap below is the operation's linearization point.
+	nextRules := make([]string, 0, len(rules))
+	nextSet := make(map[string]struct{}, len(rules))
+	nextTree := suffixtree.NewNodeFromRules()
+	for _, rule := range rules {
+		if _, ok := nextSet[rule]; ok {
+			continue
+		}
+		nextSet[rule] = struct{}{}
+		nextRules = append(nextRules, rule)
+		nextTree.Add(rule)
+	}
+	nextTree.GC()
+
+	rs.mu.Lock()
+	rs.rules = nextRules
+	rs.set = nextSet
+	rs.tree = nextTree
+	rs.mu.Unlock()
 }
 
 // Compact runs garbage collection on the underlying tree. Call it after a

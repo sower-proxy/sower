@@ -3,6 +3,7 @@ package router
 import (
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 )
 
@@ -146,6 +147,32 @@ func TestRuleSetConcurrentAccess(t *testing.T) {
 
 	if !rs.Match("seed.example.com") {
 		t.Fatal("expected seed rule to survive concurrent access")
+	}
+}
+
+func TestRuleSetReplaceConcurrentWithMatch(t *testing.T) {
+	rs := NewRuleSet("seed.example.com")
+	var stop atomic.Bool
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for !stop.Load() {
+				_ = rs.Match("seed.example.com")
+				_ = rs.Match("replacement.example.com")
+			}
+		}()
+	}
+
+	for i := 0; i < 100; i++ {
+		rs.Replace(fmt.Sprintf("replacement%d.example.com", i), "replacement.example.com")
+	}
+	stop.Store(true)
+	wg.Wait()
+
+	if !rs.Match("replacement.example.com") || rs.Match("seed.example.com") {
+		t.Fatalf("unexpected final rules: %v", rs.List())
 	}
 }
 

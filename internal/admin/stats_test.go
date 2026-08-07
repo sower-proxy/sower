@@ -1,8 +1,12 @@
 package admin
 
 import (
+	"bytes"
 	"fmt"
 	"net"
+	"slices"
+	"sort"
+	"sync"
 	"testing"
 	"time"
 )
@@ -77,6 +81,13 @@ func TestStatsBindConnAttributesBytesToDomain(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 
+	// Byte attribution is batched per connection: the pending batches are
+	// drained on Close (or when a threshold/interval is crossed), so close
+	// before asserting the per-domain totals.
+	if err := wrapped.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
 	snap := s.Snapshot(DomainSortBytes, SourceAll, "")
 	if len(snap.Domains) != 1 {
 		t.Fatalf("expected 1 domain, got %v", snap.Domains)
@@ -104,6 +115,161 @@ func TestStatsBindConnIgnoresUnwrappedConn(t *testing.T) {
 	s.BindConn(&fakeConn{}, "example.com")
 	if len(s.Snapshot(DomainSortBytes, SourceAll, "").Domains) != 0 {
 		t.Fatal("expected unwrapped conn to be ignored")
+	}
+}
+
+// TestCountingConnBatchWindow: bytes within the flush window stay pending;
+// Close drains them so attribution is exact in the end.
+func TestCountingConnBatchWindow(t *testing.T) {
+	s := newTestStats(t)
+	wrapped := s.WrapConn(&fakeConn{readBuf: bytes.Repeat([]byte("x"), 64)}, "http")
+	s.BindConn(wrapped, "example.com")
+
+	buf := make([]byte, 1)
+	// First I/O flushes immediately (nextFlush starts zero): attributed now.
+	if _, err := wrapped.Read(buf); err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	// Second I/O falls inside the flush window: kept pending.
+	if _, err := wrapped.Read(buf); err != nil {
+		t.Fatalf("read: %v", err)
+	}
+
+	snap := s.Snapshot(DomainSortBytes, SourceAll, "")
+	if len(snap.Domains) != 1 || snap.Domains[0].BytesUp != 1 {
+		t.Fatalf("expected 1 pending byte unflushed, got %+v", snap.Domains)
+	}
+
+	if err := wrapped.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	snap = s.Snapshot(DomainSortBytes, SourceAll, "")
+	if len(snap.Domains) != 1 || snap.Domains[0].BytesUp != 2 {
+		t.Fatalf("expected both bytes after close, got %+v", snap.Domains)
+	}
+}
+
+// TestCountingConnBatchThreshold: sustained traffic flushes at the byte
+// threshold without waiting for Close.
+func TestCountingConnBatchThreshold(t *testing.T) {
+	s := newTestStats(t)
+	wrapped := s.WrapConn(&fakeConn{readBuf: bytes.Repeat([]byte("x"), 9*flushBytes)}, "https")
+	s.BindConn(wrapped, "example.com")
+
+	chunk := make([]byte, 4096)
+	total := 0
+	for total < 9*4096 {
+		n, err := wrapped.Read(chunk)
+		if err != nil {
+			t.Fatalf("read: %v", err)
+		}
+		total += n
+	}
+	if total != 9*4096 {
+		t.Fatalf("read %d bytes, want %d", total, 9*4096)
+	}
+
+	// 9×4KiB crosses the 32KiB threshold (first chunk flushes immediately,
+	// the next eight accumulate to exactly the threshold), so the domain
+	// total is visible without Close.
+	snap := s.Snapshot(DomainSortBytes, SourceAll, "")
+	if len(snap.Domains) != 1 || snap.Domains[0].BytesUp != uint64(total) {
+		t.Fatalf("expected threshold flush of %d bytes, got %+v", total, snap.Domains)
+	}
+}
+
+// TestCountingConnBatchConcurrent exercises the relay layout: Read and Write
+// run on different goroutines, each direction's pending batch is owned by
+// its goroutine, and Close drains both directions under concurrent I/O.
+func TestCountingConnBatchConcurrent(t *testing.T) {
+	s := newTestStats(t)
+	wrapped := s.WrapConn(&fakeConn{readBuf: bytes.Repeat([]byte("y"), 64<<10)}, "socks5")
+	s.BindConn(wrapped, "example.com")
+
+	const iters = 8
+	readChunk, writeChunk := make([]byte, 4096), make([]byte, 4096)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for range iters {
+			if _, err := wrapped.Read(readChunk); err != nil {
+				t.Errorf("read: %v", err)
+				return
+			}
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for range iters {
+			if _, err := wrapped.Write(writeChunk); err != nil {
+				t.Errorf("write: %v", err)
+				return
+			}
+		}
+	}()
+	wg.Wait()
+
+	if err := wrapped.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	snap := s.Snapshot(DomainSortBytes, SourceAll, "")
+	if len(snap.Domains) != 1 {
+		t.Fatalf("expected 1 domain, got %v", snap.Domains)
+	}
+	d := snap.Domains[0]
+	want := uint64(iters * len(readChunk))
+	if d.BytesUp != want || d.BytesDown != want {
+		t.Fatalf("expected %d up/%d down after concurrent relay, got %d/%d",
+			want, want, d.BytesUp, d.BytesDown)
+	}
+}
+
+// TestCountingConnCloseConcurrent races Close against active relay I/O: the
+// closed latch must force a final drain of bytes that land after Close's
+// own swap, so no byte is left permanently pending.
+func TestCountingConnCloseConcurrent(t *testing.T) {
+	s := newTestStats(t)
+	wrapped := s.WrapConn(&fakeConn{readBuf: bytes.Repeat([]byte("z"), 1<<20)}, "http")
+	s.BindConn(wrapped, "example.com")
+
+	const iters = 500
+	readChunk, writeChunk := make([]byte, 4096), make([]byte, 4096)
+	var wg sync.WaitGroup
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iters; i++ {
+			if _, err := wrapped.Read(readChunk); err != nil {
+				t.Errorf("read: %v", err)
+				return
+			}
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iters; i++ {
+			if _, err := wrapped.Write(writeChunk); err != nil {
+				t.Errorf("write: %v", err)
+				return
+			}
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		if err := wrapped.Close(); err != nil {
+			t.Errorf("close: %v", err)
+		}
+	}()
+	wg.Wait()
+
+	// After Close, any byte that raced in must still be drained by the
+	// closed-latch flush; totals therefore equal the writes that reported
+	// success, regardless of interleaving.
+	want := uint64(iters * len(readChunk))
+	if got := s.bytesDown.Load(); got != want {
+		t.Fatalf("expected %d total bytes down, got %d", want, got)
 	}
 }
 
@@ -139,31 +305,45 @@ func TestStatsSnapshotEvictsStaleDomains(t *testing.T) {
 
 func TestStatsDomainCapIsEnforced(t *testing.T) {
 	s := newTestStats(t)
-	for i := 0; i < maxTotalDomains+50; i++ {
-		s.record(fmt.Sprintf("host%d.example", i), SourceHTTP, "", 1, 0, 0, func(d *domainStat, src *sourceStat, dc *clientStat) {})
+	now := time.Now()
+	s.mu.Lock()
+	for i := 0; i < maxTotalDomains; i++ {
+		s.domains[fmt.Sprintf("host%d.example", i)] = &domainStat{lastSeen: now.Add(time.Duration(i) * time.Nanosecond)}
 	}
+	s.mu.Unlock()
+
+	s.record("fresh.example", SourceHTTP, "", 1, 0, 0, func(d *domainStat, src *sourceStat, dc *clientStat) {})
+
 	s.mu.Lock()
 	n := len(s.domains)
+	_, oldestPresent := s.domains["host0.example"]
+	_, newestPresent := s.domains[fmt.Sprintf("host%d.example", maxTotalDomains-1)]
+	_, freshPresent := s.domains["fresh.example"]
 	s.mu.Unlock()
-	if n > maxTotalDomains {
-		t.Fatalf("expected domain cap enforced, got %d entries", n)
+	want := maxTotalDomains - domainEvictionBatch + 1
+	if n != want {
+		t.Fatalf("expected %d domains after batch eviction, got %d", want, n)
 	}
-	if n == 0 {
-		t.Fatal("expected some domains to survive")
+	if oldestPresent || !newestPresent || !freshPresent {
+		t.Fatalf("unexpected retained domains: oldest=%v newest=%v fresh=%v", oldestPresent, newestPresent, freshPresent)
 	}
 }
 
-func TestEvictOldestLocked(t *testing.T) {
+func TestEvictOldestDomainsLocked(t *testing.T) {
 	s := newTestStats(t)
+	now := time.Now()
 	s.mu.Lock()
-	s.domains["old.example"] = &domainStat{lastSeen: time.Now().Add(-time.Hour)}
-	s.domains["new.example"] = &domainStat{lastSeen: time.Now()}
-	s.evictOldestLocked()
-	_, oldOK := s.domains["old.example"]
-	_, newOK := s.domains["new.example"]
+	for i := 0; i < 4; i++ {
+		s.domains[fmt.Sprintf("host%d.example", i)] = &domainStat{lastSeen: now.Add(time.Duration(i) * time.Second)}
+	}
+	s.evictOldestDomainsLocked(2)
+	_, firstPresent := s.domains["host0.example"]
+	_, secondPresent := s.domains["host1.example"]
+	_, thirdPresent := s.domains["host2.example"]
+	_, fourthPresent := s.domains["host3.example"]
 	s.mu.Unlock()
-	if oldOK || !newOK {
-		t.Fatalf("expected oldest evicted, old=%v new=%v", oldOK, newOK)
+	if firstPresent || secondPresent || !thirdPresent || !fourthPresent {
+		t.Fatalf("unexpected eviction: first=%v second=%v third=%v fourth=%v", firstPresent, secondPresent, thirdPresent, fourthPresent)
 	}
 }
 
@@ -577,17 +757,28 @@ func TestStatsTotalsClientsSurviveDomainEviction(t *testing.T) {
 
 func TestStatsClientCapIsEnforced(t *testing.T) {
 	s := newTestStats(t)
-	for i := 0; i < maxTotalClients+10; i++ {
-		s.record(fmt.Sprintf("host%d.example", i), SourceHTTP, fmt.Sprintf("192.168.%d.%d", i/256, i%256), 1, 0, 0, func(d *domainStat, src *sourceStat, dc *clientStat) {})
+	now := time.Now()
+	s.mu.Lock()
+	for i := 0; i < maxTotalClients; i++ {
+		s.clients[fmt.Sprintf("192.168.%d.%d", i/256, i%256)] = &clientStat{lastSeen: now.Add(time.Duration(i) * time.Nanosecond)}
 	}
+	s.domains["existing.example"] = &domainStat{bySource: make(map[Source]*sourceStat), lastSeen: now}
+	s.mu.Unlock()
+
+	s.record("existing.example", SourceHTTP, "203.0.113.1", 1, 0, 0, func(d *domainStat, src *sourceStat, dc *clientStat) {})
+
 	s.mu.Lock()
 	n := len(s.clients)
+	_, oldestPresent := s.clients["192.168.0.0"]
+	_, newestPresent := s.clients[fmt.Sprintf("192.168.%d.%d", (maxTotalClients-1)/256, (maxTotalClients-1)%256)]
+	_, freshPresent := s.clients["203.0.113.1"]
 	s.mu.Unlock()
-	if n > maxTotalClients {
-		t.Fatalf("expected client cap enforced, got %d entries", n)
+	want := maxTotalClients - clientEvictionBatch + 1
+	if n != want {
+		t.Fatalf("expected %d clients after batch eviction, got %d", want, n)
 	}
-	if n == 0 {
-		t.Fatal("expected some clients to survive")
+	if oldestPresent || !newestPresent || !freshPresent {
+		t.Fatalf("unexpected retained clients: oldest=%v newest=%v fresh=%v", oldestPresent, newestPresent, freshPresent)
 	}
 }
 
@@ -601,5 +792,64 @@ func TestStatsClientsPerDomainCap(t *testing.T) {
 	s.mu.Unlock()
 	if n > maxClientsPerDomain {
 		t.Fatalf("expected per-domain client cap, got %d entries", n)
+	}
+}
+
+func TestTopDomainsMatchesFullSort(t *testing.T) {
+	now := time.Now()
+	input := make([]DomainStat, 0, snapshotTopN+37)
+	for i := 0; i < snapshotTopN+37; i++ {
+		input = append(input, DomainStat{
+			Domain:    fmt.Sprintf("host%03d.example", i),
+			Conns:     uint64((i * 7) % 31),
+			BytesUp:   uint64((i * 13) % 101),
+			BytesDown: uint64((i * 17) % 97),
+			LastSeen:  now.Add(time.Duration((i*19)%71) * time.Second),
+		})
+	}
+
+	for _, mode := range []DomainSort{DomainSortBytes, DomainSortRecent, DomainSortConns} {
+		want := slices.Clone(input)
+		sortDomains(want, mode)
+		want = want[:snapshotTopN]
+		got := topDomains(slices.Clone(input), snapshotTopN, mode)
+		if !slices.Equal(got, want) {
+			t.Fatalf("top domains differ for %s:\n got %v\nwant %v", mode, got, want)
+		}
+	}
+
+	tied := topDomains([]DomainStat{
+		{Domain: "z.example", BytesUp: 1},
+		{Domain: "a.example", BytesUp: 1},
+	}, 2, DomainSortBytes)
+	if tied[0].Domain != "a.example" || tied[1].Domain != "z.example" {
+		t.Fatalf("expected domain tie break by name, got %v", tied)
+	}
+}
+
+func TestTopClientsMatchesFullSort(t *testing.T) {
+	agg := make(map[string]*ClientStat, clientsTopN+17)
+	for i := 0; i < clientsTopN+17; i++ {
+		ip := fmt.Sprintf("192.0.2.%03d", i)
+		agg[ip] = &ClientStat{IP: ip, BytesUp: uint64((i * 11) % 113), BytesDown: uint64((i * 23) % 109)}
+	}
+
+	want := make([]ClientStat, 0, len(agg))
+	for _, client := range agg {
+		want = append(want, *client)
+	}
+	sort.Slice(want, func(i, j int) bool { return clientLess(want[i], want[j]) })
+	want = want[:clientsTopN]
+	got := topClients(agg)
+	if !slices.Equal(got, want) {
+		t.Fatalf("top clients differ:\n got %v\nwant %v", got, want)
+	}
+
+	tied := topClients(map[string]*ClientStat{
+		"192.0.2.2": {IP: "192.0.2.2", BytesUp: 1},
+		"192.0.2.1": {IP: "192.0.2.1", BytesUp: 1},
+	})
+	if tied[0].IP != "192.0.2.1" || tied[1].IP != "192.0.2.2" {
+		t.Fatalf("expected IP tie break, got %v", tied)
 	}
 }

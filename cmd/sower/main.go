@@ -8,11 +8,13 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"runtime"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"syscall"
@@ -34,13 +36,24 @@ import (
 var (
 	version, date string
 	conf          config.SowerConfig
+	// logLevel backs the tint handler so the admin console can adjust the
+	// log level at runtime; it defaults to INFO until the config is loaded.
+	logLevel slog.LevelVar
 )
+
+// defaultMemoryLimitMiB bounds the Go heap unless GOMEMLIMIT or
+// SOWER_MEMORY_LIMIT_MB overrides it; see init for the rationale.
+const defaultMemoryLimitMiB = 128
+
+// maxMemoryLimitMiB caps the SOWER_MEMORY_LIMIT_MB override so the MiB
+// shift cannot overflow int64.
+const maxMemoryLimitMiB int64 = 1 << 20 // 1 TiB
 
 func init() {
 	fi, _ := os.Stdout.Stat()
 	noColor := (fi.Mode() & os.ModeCharDevice) == 0
 	deferlog.SetDefault(slog.New(tint.NewHandler(os.Stdout,
-		&tint.Options{AddSource: true, NoColor: noColor})))
+		&tint.Options{AddSource: true, NoColor: noColor, Level: &logLevel})))
 	if strings.HasSuffix(os.Args[0], ".test") {
 		return
 	}
@@ -70,6 +83,35 @@ func init() {
 		slog.Error("validate config", "error", err)
 		os.Exit(1)
 	}
+
+	// Bound the Go heap with a soft memory limit. The default rule sets
+	// (adlist/chinalist/gfwlist) build ~40MB of suffix trees, and GOGC's
+	// 2x target on top of that pushes resident memory toward 250MB on a
+	// gateway that mostly idles. The soft limit makes GC reclaim eagerly
+	// and return memory to the OS.
+	//
+	// Precedence: an explicit standard GOMEMLIMIT wins; otherwise the
+	// default 128MiB applies unless SOWER_MEMORY_LIMIT_MB overrides it
+	// (a positive MiB value, or 0 to disable the soft limit). Malformed or
+	// negative values leave the default in place.
+	if os.Getenv("GOMEMLIMIT") == "" {
+		var limit int64 = defaultMemoryLimitMiB
+		if v := os.Getenv("SOWER_MEMORY_LIMIT_MB"); v != "" {
+			if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+				switch {
+				case n == 0:
+					debug.SetMemoryLimit(math.MaxInt64) // disable
+				case n > 0 && n <= maxMemoryLimitMiB:
+					limit = n
+				}
+			}
+		}
+		if limit > 0 {
+			debug.SetMemoryLimit(limit << 20)
+		}
+	}
+
+	logLevel.Set(conf.LogLevel)
 	slog.Info("starting sower",
 		"version", version,
 		"date", date,
@@ -94,6 +136,10 @@ func main() {
 }
 
 func run(ctx context.Context, stop context.CancelFunc, cfg config.SowerConfig) error {
+	stateStore := loadAdminState(cfg)
+	baseCfg := cfg
+	applyConfigOverrides(&cfg, stateStore.ConfigOverrides())
+
 	upstreamDNS := effectiveUpstreamDNS(cfg)
 	proxyDial, err := GenProxyDial(cfg.Remote.Type, cfg.Remote.Addr, cfg.Remote.Password, upstreamDNS, upstreamtls.Options{
 		ServerName:         cfg.Remote.TLS.ServerName,
@@ -126,6 +172,12 @@ func run(ctx context.Context, stop context.CancelFunc, cfg config.SowerConfig) e
 		return err
 	}
 
+	baseline := snapshotBaseline(r)
+	stateStore.SetBaseline(baseline)
+	applyRuleDeltas(r, stateStore)
+	rulesMgr := newAdminRules(r, stateStore, baseline)
+	configMgr := newAdminConfig(baseCfg, stateStore, r)
+
 	errCh := make(chan error, 8)
 	if err := startDNSListeners(ctx, cfg, r, stats, errCh); err != nil {
 		return err
@@ -134,10 +186,10 @@ func run(ctx context.Context, stop context.CancelFunc, cfg config.SowerConfig) e
 		return err
 	}
 	if _, shared := sharedAdminHTTPAddr(cfg); shared {
-		if err := startSharedHTTPListener(ctx, cfg, r, stats, errCh); err != nil {
+		if err := startSharedHTTPListener(ctx, cfg, r, rulesMgr, configMgr, stats, errCh); err != nil {
 			return err
 		}
-	} else if err := startAdminListener(ctx, cfg, r, stats, errCh); err != nil {
+	} else if err := startAdminListener(ctx, cfg, rulesMgr, configMgr, stats, errCh); err != nil {
 		return err
 	}
 
@@ -160,6 +212,82 @@ func effectiveUpstreamDNS(cfg config.SowerConfig) string {
 		return cfg.DNS.Upstream
 	}
 	return cfg.DNS.Fallback
+}
+
+// loadAdminState opens the admin state store. An empty state file path or
+// the --ignore-admin-state escape hatch yields an in-memory store, so the
+// rest of the code never has to nil-check persistence.
+func loadAdminState(cfg config.SowerConfig) *admin.StateStore {
+	switch {
+	case cfg.Admin.StateFile == "":
+		return admin.LoadStateStore("")
+	case cfg.IgnoreAdminState:
+		slog.Warn("ignoring admin state file", "file", cfg.Admin.StateFile)
+		return admin.LoadStateStore("")
+	default:
+		return admin.LoadStateStore(cfg.Admin.StateFile)
+	}
+}
+
+// applyConfigOverrides applies the whitelisted admin-state config overrides
+// to cfg before the router and dialer are built. Invalid values are dropped
+// with a warning so a bad override never blocks startup; the
+// --ignore-admin-state flag skips the file entirely.
+func applyConfigOverrides(cfg *config.SowerConfig, o admin.ConfigOverrides) {
+	if o.LogLevel != "" {
+		var lv slog.Level
+		if err := lv.UnmarshalText([]byte(strings.ToUpper(o.LogLevel))); err != nil {
+			slog.Warn("ignore invalid admin state override", "field", "log_level", "error", err)
+		} else {
+			cfg.LogLevel = lv
+		}
+	}
+	if o.DNSUpstream != "" {
+		if net.ParseIP(o.DNSUpstream) == nil {
+			slog.Warn("ignore invalid admin state override", "field", "dns_upstream")
+		} else {
+			cfg.DNS.Upstream = o.DNSUpstream
+		}
+	}
+	if o.DNSFallback != "" {
+		if net.ParseIP(o.DNSFallback) == nil {
+			slog.Warn("ignore invalid admin state override", "field", "dns_fallback")
+		} else {
+			cfg.DNS.Fallback = o.DNSFallback
+		}
+	}
+	logLevel.Set(cfg.LogLevel)
+}
+
+// applyRuleDeltas replays persisted admin rule changes onto the freshly
+// loaded rule sets: tombstoned baseline rules leave, admin additions enter.
+// The rule set is rebuilt via Replace because RuleSet.Remove rebuilds the
+// suffix tree per call, which is expensive beyond a handful of tombstones.
+func applyRuleDeltas(r *router.Router, state *admin.StateStore) {
+	sets := map[admin.Category]*router.RuleSet{
+		admin.CategoryBlock:  r.BlockRule,
+		admin.CategoryDirect: r.DirectRule,
+		admin.CategoryProxy:  r.ProxyRule,
+	}
+	for cat, rs := range sets {
+		d := state.Delta(cat)
+		if len(d.Add) == 0 && len(d.Remove) == 0 {
+			continue
+		}
+		tombstoned := make(map[string]struct{}, len(d.Remove))
+		for _, rule := range d.Remove {
+			tombstoned[rule] = struct{}{}
+		}
+		rules := rs.List()
+		effective := make([]string, 0, len(rules)+len(d.Add))
+		for _, rule := range rules {
+			if _, ok := tombstoned[rule]; !ok {
+				effective = append(effective, rule)
+			}
+		}
+		rs.Replace(append(effective, d.Add...)...)
+		slog.Info("applied admin rule deltas", "category", cat, "added", len(d.Add), "removed", len(d.Remove))
+	}
 }
 
 func newRouter(cfg config.SowerConfig, proxyDial router.ProxyDialFn) (*router.Router, error) {

@@ -6,7 +6,9 @@ import (
 
 type Node struct {
 	*node
-	sep   string
+	sep string
+	// Deprecated: unused. Retained to avoid breaking the package API; new
+	// code should not depend on it.
 	Count uint64
 }
 type node struct {
@@ -131,7 +133,13 @@ func (n *node) matchSecs(secs []string) bool {
 	return n.index("**") >= 0
 }
 
-// index return the sec index in node, or -1 if not found
+// indexMapThreshold: below this many children a node keeps a plain slice
+// scan and no map, saving ~50+ bytes of map header and entries per small
+// node; suffix trees are dominated by shallow fan-out nodes.
+const indexMapThreshold = 8
+
+// index return the sec index in node, or -1 if not found. Read-only: Match
+// runs concurrently on a shared tree, so no map is built on this path.
 func (n *node) index(sec string) int {
 	if n == nil {
 		return -1
@@ -146,8 +154,6 @@ func (n *node) index(sec string) int {
 
 	for i := range n.secs {
 		if n.secs[i] == sec {
-			n.ensureIndexMap()
-			n.indexMap[sec] = i
 			return i
 		}
 	}
@@ -160,7 +166,9 @@ func (n *node) append(sec string, child *node) int {
 	n.subNodes = append(n.subNodes, child)
 	n.ensureIndexMap()
 	idx := len(n.secs) - 1
-	n.indexMap[sec] = idx
+	if n.indexMap != nil {
+		n.indexMap[sec] = idx
+	}
 	return idx
 }
 
@@ -173,7 +181,7 @@ func (n *node) prepend(sec string, child *node) int {
 }
 
 func (n *node) ensureIndexMap() {
-	if n.indexMap != nil {
+	if n.indexMap != nil || len(n.secs) < indexMapThreshold {
 		return
 	}
 

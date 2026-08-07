@@ -92,15 +92,21 @@ func New() (*Metrics, error) {
 	return m, nil
 }
 
+// Precomputed AddOptions avoid an attribute-slice allocation on every
+// RecordBytes call, which runs on the per-I/O relay hot path.
+var (
+	bytesAttrUp   = metric.WithAttributes(attribute.String("direction", "up"))
+	bytesAttrDown = metric.WithAttributes(attribute.String("direction", "down"))
+)
+
 // RecordBytes counts proxied payload bytes. up is relative to the client:
 // reads from the client are uploads, writes to the client downloads.
 func (m *Metrics) RecordBytes(up bool, n int) {
-	dir := "down"
 	if up {
-		dir = "up"
+		m.bytes.Add(context.Background(), int64(n), bytesAttrUp)
+	} else {
+		m.bytes.Add(context.Background(), int64(n), bytesAttrDown)
 	}
-	m.bytes.Add(context.Background(), int64(n),
-		metric.WithAttributes(attribute.String("direction", dir)))
 }
 
 // RecordDNS counts one DNS query.
