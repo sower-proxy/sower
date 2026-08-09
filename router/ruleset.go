@@ -28,7 +28,9 @@ func NewRuleSet(rules ...string) *RuleSet {
 }
 
 // Add appends rules that are not already present, using the raw rule string
-// as the membership key. Duplicates are ignored.
+// as the membership key. Duplicates are ignored. Empty rules are dropped:
+// aconfig parses an empty TOML array as [""], which would otherwise surface
+// as a rule that can never match a real domain.
 func (rs *RuleSet) Add(rules ...string) {
 	if len(rules) == 0 {
 		return
@@ -37,6 +39,9 @@ func (rs *RuleSet) Add(rules ...string) {
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
 	for _, rule := range rules {
+		if rule == "" {
+			continue
+		}
 		if _, ok := rs.set[rule]; ok {
 			continue
 		}
@@ -59,6 +64,9 @@ func (rs *RuleSet) Replace(rules ...string) {
 	nextSet := make(map[string]struct{}, len(rules))
 	nextTree := suffixtree.NewNodeFromRules()
 	for _, rule := range rules {
+		if rule == "" {
+			continue
+		}
 		if _, ok := nextSet[rule]; ok {
 			continue
 		}

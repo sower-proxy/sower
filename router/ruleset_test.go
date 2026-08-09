@@ -210,3 +210,23 @@ func TestListFilteredPaginationAndSearch(t *testing.T) {
 		t.Fatalf("expected empty page with total 5, got %v (total %d)", rules, total)
 	}
 }
+
+func TestRuleSetDropsEmptyRules(t *testing.T) {
+	rs := NewRuleSet("a.com", "", "b.com")
+	list := rs.List()
+	if len(list) != 2 || list[0] != "a.com" || list[1] != "b.com" {
+		t.Fatalf("Add should drop empty rules: %q", list)
+	}
+
+	rs.Add("", "c.com")
+	list = rs.List()
+	if len(list) != 3 || list[2] != "c.com" {
+		t.Fatalf("Add should drop empty rules: %q", list)
+	}
+
+	rs.Replace("", "d.com")
+	list = rs.List()
+	if len(list) != 1 || list[0] != "d.com" {
+		t.Fatalf("Replace should drop empty rules: %q", list)
+	}
+}
