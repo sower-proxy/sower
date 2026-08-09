@@ -15,6 +15,10 @@ type node struct {
 	secs     []string
 	subNodes []*node
 	indexMap map[string]int
+	// rule is the full rule text when this node terminates a rule (a
+	// single-label rule, a "" marker child, or a "**" wildcard child);
+	// empty for intermediate nodes. It backs MatchRule's fast path.
+	rule string
 }
 
 func NewNodeFromRules(rules ...string) *Node {
@@ -58,9 +62,9 @@ func (n *Node) trim(item string) string {
 
 func (n *Node) Add(item string) {
 	n.Count++
-	n.add(strings.Split(n.trim(item), n.sep))
+	n.add(strings.Split(n.trim(item), n.sep), item)
 }
-func (n *node) add(secs []string) {
+func (n *node) add(secs []string, rule string) {
 	length := len(secs)
 	switch length {
 	case 0:
@@ -68,16 +72,16 @@ func (n *node) add(secs []string) {
 		sec := secs[length-1]
 		if idx := n.index(sec); idx >= 0 {
 			if n.subNodes[idx] != nil {
-				n.subNodes[idx].add([]string{""})
+				n.subNodes[idx].add([]string{""}, rule)
 			}
 			return
 		}
 
 		switch sec {
 		case "", "*", "**":
-			n.prepend(sec, nil)
+			n.prepend(sec, &node{rule: rule})
 		default:
-			n.append(sec, nil)
+			n.append(sec, &node{rule: rule})
 		}
 	default:
 		sec := secs[length-1]
@@ -96,10 +100,10 @@ func (n *node) add(secs []string) {
 
 		} else if n.subNodes[idx] == nil {
 			n.subNodes[idx] = &node{}
-			n.subNodes[idx].add([]string{""})
+			n.subNodes[idx].add([]string{""}, rule)
 		}
 
-		n.subNodes[idx].add(secs[:length-1])
+		n.subNodes[idx].add(secs[:length-1], rule)
 	}
 }
 
@@ -111,13 +115,67 @@ func (n *Node) Match(item string) bool {
 	return n.matchSecs(strings.Split(n.trim(item), n.sep))
 }
 
+// MatchRule reports one rule that matches item, or "", false when none
+// does. Unlike a linear scan it resolves the match in tree depth: exact
+// labels win over "*", which wins over a trailing "**", so the reported
+// rule is the most specific one matching item rather than the first in
+// insertion order. Match stays the bool fast path; MatchRule is for the
+// rare paths that need the matched rule text.
+func (n *Node) MatchRule(item string) (string, bool) {
+	if n == nil {
+		return "", false
+	}
+
+	return n.matchRuleSecs(strings.Split(n.trim(item), n.sep))
+}
+
+func (n *node) matchRuleSecs(secs []string) (string, bool) {
+	length := len(secs)
+	if length == 0 {
+		if n == nil {
+			// Unreachable from MatchRule (nil root is rejected there); keep
+			// the semantics explicit so a nil node never reports a match.
+			return "", false
+		}
+		if n.rule != "" {
+			return n.rule, true
+		}
+		if idx := n.index(""); idx >= 0 {
+			if r := n.subNodes[idx].rule; r != "" {
+				return r, true
+			}
+		}
+		if idx := n.index("**"); idx >= 0 {
+			if r := n.subNodes[idx].rule; r != "" {
+				return r, true
+			}
+		}
+		return "", false
+	}
+
+	if idx := n.index(secs[length-1]); idx >= 0 {
+		if r, ok := n.subNodes[idx].matchRuleSecs(secs[:length-1]); ok {
+			return r, true
+		}
+	}
+	if idx := n.index("*"); idx >= 0 {
+		if r, ok := n.subNodes[idx].matchRuleSecs(secs[:length-1]); ok {
+			return r, true
+		}
+	}
+	if idx := n.index("**"); idx >= 0 {
+		return n.subNodes[idx].rule, true
+	}
+	return "", false
+}
+
 func (n *node) matchSecs(secs []string) bool {
 	length := len(secs)
 	if length == 0 {
 		if n == nil {
 			return true
 		}
-		return n.index("") != -1 || n.index("**") != -1
+		return n.rule != "" || n.index("") != -1 || n.index("**") != -1
 	}
 
 	if idx := n.index(secs[length-1]); idx >= 0 {

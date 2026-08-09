@@ -146,6 +146,23 @@ func (rs *RuleSet) MatchRule(item string) (string, bool) {
 	return "", false
 }
 
+// MatchRuleFast reports a rule that matches item in tree depth instead of a
+// linear scan, for hot paths that need the matched rule text (hit tracking).
+// The reported rule is the most specific match — exact labels beat "*",
+// which beats a trailing "**" — rather than the first in insertion order.
+func (rs *RuleSet) MatchRuleFast(item string) (string, bool) {
+	if rs == nil {
+		return "", false
+	}
+
+	rs.mu.RLock()
+	defer rs.mu.RUnlock()
+	if rs.tree == nil {
+		return "", false
+	}
+	return rs.tree.MatchRule(item)
+}
+
 // matchRule reports whether one rule pattern matches item. A "**" in the
 // last label position matches any remaining labels (including none); in the
 // middle it behaves like "*" (one label), matching the suffix-tree builder.

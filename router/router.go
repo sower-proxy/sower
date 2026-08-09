@@ -25,8 +25,10 @@ type (
 		ProxyRule  *RuleSet
 		ProxyDial  ProxyDialFn
 
-		routeObserver RouteObserver
-		accessCache   *accessProbeCache
+		routeObserver    RouteObserver
+		ruleHitObserver  RuleHitObserver
+		ruleMissObserver RuleMissObserver
+		accessCache      *accessProbeCache
 
 		dns struct {
 			upstreamDNS  string
@@ -78,9 +80,44 @@ func (r *Router) SetRouteObserver(fn RouteObserver) {
 	r.routeObserver = fn
 }
 
+// RuleHitObserver receives every rule-based routing decision — a domain
+// matched by a block, direct, or proxy rule — exactly once per connection.
+// Detection-based and fallback decisions are not reported: they are not
+// attributable to a rule.
+type RuleHitObserver func(category RouteCategory, domain string)
+
+// SetRuleHitObserver installs the rule-hit observer, or clears it with a nil
+// argument.
+func (r *Router) SetRuleHitObserver(fn RuleHitObserver) {
+	r.ruleHitObserver = fn
+}
+
+// RuleMissObserver receives every routing decision that matched no block,
+// direct, or proxy rule — detection-based direct and fallback proxy — once
+// per connection. Rule-hit decisions are not reported here.
+type RuleMissObserver func(domain string)
+
+// SetRuleMissObserver installs the rule-miss observer, or clears it with a
+// nil argument.
+func (r *Router) SetRuleMissObserver(fn RuleMissObserver) {
+	r.ruleMissObserver = fn
+}
+
 func (r *Router) observe(category RouteCategory, domain string) {
 	if r.routeObserver != nil {
 		r.routeObserver(category, domain)
+	}
+}
+
+func (r *Router) observeRuleHit(category RouteCategory, domain string) {
+	if r.ruleHitObserver != nil {
+		r.ruleHitObserver(category, domain)
+	}
+}
+
+func (r *Router) observeRuleMiss(domain string) {
+	if r.ruleMissObserver != nil {
+		r.ruleMissObserver(domain)
 	}
 }
 
@@ -176,16 +213,21 @@ func (r *Router) DialSmart(network, domain string, port uint16) (net.Conn, error
 	switch {
 	case r.BlockRule.Match(domain):
 		r.observe(RouteBlock, domain)
+		r.observeRuleHit(RouteBlock, domain)
 		return nil, ErrBlocked
 	case r.DirectRule.Match(domain):
 		r.observe(RouteDirect, domain)
+		r.observeRuleHit(RouteDirect, domain)
 		return r.directDial(ctx, network, addr)
 	case r.ProxyRule.Match(domain):
+		r.observeRuleHit(RouteProxy, domain)
 		return r.DialProxyOnly(network, domain, port)
 	case r.localSite(ctx, domain), r.isAccess(domain, port):
 		r.observe(RouteDirect, domain)
+		r.observeRuleMiss(domain)
 		return r.directDial(ctx, network, addr)
 	default:
+		r.observeRuleMiss(domain)
 		return r.DialProxyOnly(network, domain, port)
 	}
 }
