@@ -258,7 +258,17 @@ sudo sowerd -i
 
 - **规则管理**：实时查看、添加、删除 block / direct / proxy 三类规则，立即生效；变更以增量形式持久化到 `admin.state_file`，重启后自动重放（不会改写配置文件）。
 - **流量监控**：DNS 查询数、各入口连接数、上下行字节数、按域名聚合的流量，以及每条规则的命中统计和未命中规则的域名访问统计。
-- **配置页**：展示生效配置，可在线调整白名单字段（`log_level`、DNS 上游立即生效；远程代理、监听地址、规则来源等重启后生效），并支持一键重启服务。
+- **配置页**：展示生效配置（并按来源标注为配置文件值或「覆盖」值），可在线调整白名单字段。覆盖以增量持久化到 `admin.state_file`，重启后自动重放；把某字段清空会恢复配置文件里的值。
+
+  可编辑字段按生效方式分为三类：
+
+  - **立即生效**（无需重启）：`log_level`、`dns.upstream`、`dns.fallback`。
+  - **重启后生效**：远程代理（`remote.type/addr`、`remote.tls.*`）、监听地址（`dns.serve/serve6`、`socks5.addr`）、admin 自身（`admin.session_file`、`admin.disable_session_persistence`、`admin.cookie_secure`、`admin.state_file`）、规则来源（各 `router.*.file/prefix/skip_rules/rules`、`router.country.*`）。
+  - **只读**：版本、构建时间，以及 `remote.password`、`admin.password` 等密钥字段（只显示「是否已配置」，绝不回显值）。
+
+  规则类列表字段（如内联规则、`file_skip_rules`）在控制台内按每行一条编辑，展示时折叠为数量。
+
+- **重启服务**：一键触发就地重启——先关闭所有监听（释放 80/443/53 等端口），再 `exec` 替换当前进程，PID 保持不变，因此 systemd 服务的 `Restart=on-failure` 不会被误触发。
 
 默认关闭。在 `sower.toml` 中启用：
 
