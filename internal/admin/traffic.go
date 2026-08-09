@@ -70,9 +70,11 @@ func (s *Server) streamTrafficSnapshot(sort DomainSort, source Source, client st
 
 // handleStream pushes status, traffic snapshots, and history to the console.
 // The connection carries the same sort/source/client filters as /api/traffic
-// and revalidates the session on each tick, closing with an auth event when
-// it lapses. The initial payload is sent immediately so the page renders
-// without waiting for a tick.
+// and revalidates the session on each tick. When a sliding renewal is due it
+// asks the browser to refresh the cookie through /api/session, then closes so
+// EventSource reconnects with the renewed cookie. Expiry sends an auth event.
+// The initial payload is sent immediately so the page renders without waiting
+// for a tick.
 func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	if s.opts.Stats == nil {
 		writeError(w, http.StatusInternalServerError, "stats unavailable")
@@ -120,8 +122,13 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 		case <-r.Context().Done():
 			return
 		case <-ticker.C:
-			if !s.validSession(r) {
+			_, valid, renewed := s.validSession(r)
+			if !valid {
 				send("auth", map[string]any{"status": http.StatusUnauthorized})
+				return
+			}
+			if renewed {
+				send("renew", map[string]any{})
 				return
 			}
 			send("status", s.statusPayload())

@@ -43,7 +43,10 @@ addr = "127.0.0.1:1080" # SOCKS5 listen address
 disable = true           # Disable admin web server
 addr = "127.0.0.1:19090" # Admin web server listen address
 password = ""            # Admin web server password (required when enabled)
-state_file = "/etc/sower/admin-state.json" # Persist admin rule/config changes; empty disables persistence
+session_file = "/etc/sower/sessions.json" # Persist admin sessions for one sower process only
+disable_session_persistence = false # Set true to disable session persistence
+cookie_secure = false
+state_file = "/etc/sower/admin-state.json" # Persist admin rule/config changes
 
 # Router configuration
 [router]

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -47,47 +48,56 @@ func (s *Server) loadSessions() {
 	}
 }
 
-// persistLocked writes the current sessions to disk atomically with 0600
-// permissions. It must be called with s.mu held. IO errors degrade to an
-// in-memory session store, never to a failed request.
-func (s *Server) persistLocked() {
+// persistLocked writes the supplied session snapshot to disk atomically with
+// 0600 permissions. It must be called with s.mu held. IO errors are returned
+// so callers can keep memory and durable state consistent.
+func (s *Server) persistLocked(sessions map[string]time.Time) error {
 	if s.sessionFile == "" {
-		return
+		return nil
 	}
-	data, err := json.Marshal(s.sessions)
+	data, err := json.Marshal(sessions)
 	if err != nil {
-		slog.Warn("marshal sessions", "error", err)
-		return
+		return fmt.Errorf("marshal sessions for %s: %w", s.sessionFile, err)
 	}
 	dir := filepath.Dir(s.sessionFile)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		slog.Warn("create session dir", "error", err)
-		return
+		return fmt.Errorf("create session directory %s: %w", dir, err)
 	}
-	tmp, err := os.CreateTemp(dir, ".sessions-*")
+	tmp, err := os.CreateTemp(dir, ".sessions-*.tmp")
 	if err != nil {
-		slog.Warn("create session temp file", "error", err)
-		return
+		return fmt.Errorf("create session temp file in %s: %w", dir, err)
 	}
 	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
+	defer func() { _ = os.Remove(tmpName) }()
 	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		slog.Warn("write session temp file", "error", err)
-		return
+		_ = tmp.Close()
+		return fmt.Errorf("write session temp file %s: %w", tmpName, err)
 	}
-	if err := tmp.Chmod(0o600); err != nil {
-		tmp.Close()
-		slog.Warn("chmod session temp file", "error", err)
-		return
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("fsync session temp file %s: %w", tmpName, err)
 	}
 	if err := tmp.Close(); err != nil {
-		slog.Warn("close session temp file", "error", err)
-		return
+		return fmt.Errorf("close session temp file %s: %w", tmpName, err)
+	}
+	if err := os.Chmod(tmpName, 0o600); err != nil {
+		return fmt.Errorf("chmod session temp file %s: %w", tmpName, err)
 	}
 	if err := os.Rename(tmpName, s.sessionFile); err != nil {
-		slog.Warn("rename session file", "error", err)
-		return
+		return fmt.Errorf("rename session file %s: %w", s.sessionFile, err)
+	}
+	if d, err := os.Open(dir); err == nil {
+		_ = d.Sync()
+		_ = d.Close()
+	}
+	return nil
+}
+
+func purgeExpired(sessions map[string]time.Time, now time.Time) {
+	for token, exp := range sessions {
+		if now.After(exp) {
+			delete(sessions, token)
+		}
 	}
 }
 
@@ -108,20 +118,28 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (s *Server) handleSession(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie(sessionCookieName); err == nil {
 		s.mu.Lock()
 		delete(s.sessions, c.Value)
-		s.persistLocked()
+		if err := s.persistLocked(s.sessions); err != nil {
+			slog.Error("persist admin logout session", "error", err)
+		}
 		s.mu.Unlock()
 	}
-	http.SetCookie(w, s.sessionCookie("", -1, r.TLS != nil))
+
+	http.SetCookie(w, s.sessionCookie("", -1, s.cookieSecure(r)))
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// sessionCookie builds the session cookie. The Secure flag is only set when
-// the admin server runs over TLS; the default loopback HTTP listener would
-// otherwise never receive the cookie.
+// sessionCookie builds the session cookie. The Secure flag is set when the
+// listener uses TLS or when an explicitly configured TLS-terminating proxy
+// protects the admin origin.
 func (s *Server) sessionCookie(value string, maxAge int, secure bool) *http.Cookie {
 	return &http.Cookie{
 		Name:     sessionCookieName,
@@ -132,6 +150,10 @@ func (s *Server) sessionCookie(value string, maxAge int, secure bool) *http.Cook
 		Secure:   secure,
 		MaxAge:   maxAge,
 	}
+}
+
+func (s *Server) cookieSecure(r *http.Request) bool {
+	return r.TLS != nil || s.opts.CookieSecure
 }
 
 func (s *Server) issueSession(w http.ResponseWriter, r *http.Request) bool {
@@ -145,65 +167,60 @@ func (s *Server) issueSession(w http.ResponseWriter, r *http.Request) bool {
 
 	s.mu.Lock()
 	if len(s.sessions) >= maxSessionPurge {
-		s.purgeExpiredLocked()
+		purgeExpired(s.sessions, time.Now())
 	}
 	s.sessions[value] = time.Now().Add(sessionTTL)
-	s.persistLocked()
+	if err := s.persistLocked(s.sessions); err != nil {
+		slog.Error("persist admin login session", "error", err)
+	}
 	s.mu.Unlock()
 
-	http.SetCookie(w, s.sessionCookie(value, int(sessionCookieMaxAge.Seconds()), r.TLS != nil))
+	http.SetCookie(w, s.sessionCookie(value, int(sessionCookieMaxAge.Seconds()), s.cookieSecure(r)))
 	return true
 }
 
-func (s *Server) purgeExpiredLocked() {
-	now := time.Now()
-	purged := false
-	for token, exp := range s.sessions {
-		if now.After(exp) {
-			delete(s.sessions, token)
-			purged = true
-		}
-	}
-	if purged {
-		s.persistLocked()
-	}
-}
-
-func (s *Server) validSession(r *http.Request) bool {
+// validSession returns the token, whether it is valid, and whether its
+// server-side expiration was renewed. Persistence failures retain the prior
+// expiry so a later request can retry the renewal.
+func (s *Server) validSession(r *http.Request) (string, bool, bool) {
 	c, err := r.Cookie(sessionCookieName)
 	if err != nil {
-		return false
+		return "", false, false
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	exp, ok := s.sessions[c.Value]
 	if !ok {
-		return false
+		return "", false, false
 	}
 	now := time.Now()
 	if now.After(exp) {
 		delete(s.sessions, c.Value)
-		s.persistLocked()
-		return false
+		if err := s.persistLocked(s.sessions); err != nil {
+			slog.Warn("persist expired admin session cleanup", "error", err)
+		}
+		return "", false, false
 	}
-	// Sliding expiry: refresh a session that is more than halfway through
-	// its TTL so an active user is never logged out mid-session, while an
-	// inactive session still lapses. Persisting only on refresh bounds the
-	// disk writes to a couple per session per TTL.
 	if exp.Sub(now) < sessionTTL/2 {
 		s.sessions[c.Value] = now.Add(sessionTTL)
-		s.persistLocked()
+		if err := s.persistLocked(s.sessions); err != nil {
+			slog.Warn("renew admin session", "error", err)
+		}
+		return c.Value, true, true
 	}
-	return true
+	return c.Value, true, false
 }
 
-// auth rejects requests without a valid session cookie.
+// auth rejects requests without a valid session cookie and renews the
+// browser's Max-Age for every authenticated HTTP response.
 func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !s.validSession(r) {
+		token, valid, _ := s.validSession(r)
+		if !valid {
 			writeError(w, http.StatusUnauthorized, "unauthorized")
 			return
 		}
+		http.SetCookie(w, s.sessionCookie(token, int(sessionCookieMaxAge.Seconds()), s.cookieSecure(r)))
 		next(w, r)
 	}
 }

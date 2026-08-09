@@ -195,7 +195,7 @@ func TestServeSharedHTTPRoutesAdminAndProxy(t *testing.T) {
 		Password: "secret",
 		Version:  "v1.2.3",
 		Date:     "2026-01-01",
-		Rules:    newAdminRules(r, state, baseline),
+		Rules:    newAdminRules(r, state, baseline, newRuleHitTracker(r.BlockRule, maxRuleHits), newRuleHitTracker(r.DirectRule, maxRuleHitsWide), newRuleHitTracker(r.ProxyRule, maxRuleHitsWide), newRuleMissTracker()),
 		Stats:    stats,
 	})
 	ctx, cancel := context.WithCancel(context.Background())

@@ -7,6 +7,7 @@ import (
 	"slices"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/sower-proxy/sower/config"
 	"github.com/sower-proxy/sower/internal/admin"
@@ -22,7 +23,134 @@ func bootAdapter(t *testing.T, statePath string) (*adminRules, *admin.StateStore
 	baseline := snapshotBaseline(r)
 	state.SetBaseline(baseline)
 	applyRuleDeltas(r, state)
-	return newAdminRules(r, state, baseline), state
+	return newAdminRules(r, state, baseline, newRuleHitTracker(r.BlockRule, maxRuleHits), newRuleHitTracker(r.DirectRule, maxRuleHitsWide), newRuleHitTracker(r.ProxyRule, maxRuleHitsWide), newRuleMissTracker()), state
+}
+
+func TestRuleSearchSortsAndStats(t *testing.T) {
+	t.Parallel()
+	a, _ := bootAdapter(t, filepath.Join(t.TempDir(), "admin-state.json"))
+	for _, rule := range []string{"b.com", "a.com", "c.com"} {
+		if err := a.RuleAdd(admin.CategoryBlock, rule); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Hit three of the four block rules with distinct counts and times;
+	// c.com stays untouched to exercise the no-stat partition.
+	a.blockHits.OnHit("example.com")
+	time.Sleep(2 * time.Millisecond)
+	for range 3 {
+		a.blockHits.OnHit("b.com")
+	}
+	time.Sleep(2 * time.Millisecond)
+	for range 2 {
+		a.blockHits.OnHit("a.com")
+	}
+
+	names := func(entries []admin.RuleEntry) []string {
+		out := make([]string, len(entries))
+		for i, e := range entries {
+			out[i] = e.Rule
+		}
+		return out
+	}
+	search := func(sortBy admin.RuleSort, dir admin.SortDir) []admin.RuleEntry {
+		t.Helper()
+		entries, total, err := a.RuleSearch(admin.CategoryBlock, "", 0, 100, sortBy, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if total != 4 {
+			t.Fatalf("expected total 4, got %d", total)
+		}
+		return entries
+	}
+
+	// Default file order carries stats on every row.
+	entries := search(admin.RuleSortDefault, admin.SortDirDesc)
+	if got := names(entries); !slices.Equal(got, []string{"example.com", "b.com", "a.com", "c.com"}) {
+		t.Fatalf("default order: %v", got)
+	}
+	if entries[0].Count != 1 || entries[0].LastSeen == nil {
+		t.Fatalf("default row missing stats: %+v", entries[0])
+	}
+	if entries[3].Count != 0 || entries[3].LastSeen != nil {
+		t.Fatalf("untouched rule should have no stats: %+v", entries[3])
+	}
+
+	if got := names(search(admin.RuleSortRule, admin.SortDirAsc)); !slices.Equal(got, []string{"a.com", "b.com", "c.com", "example.com"}) {
+		t.Fatalf("rule asc: %v", got)
+	}
+	if got := names(search(admin.RuleSortRule, admin.SortDirDesc)); !slices.Equal(got, []string{"example.com", "c.com", "b.com", "a.com"}) {
+		t.Fatalf("rule desc: %v", got)
+	}
+	if got := names(search(admin.RuleSortHits, admin.SortDirDesc)); !slices.Equal(got, []string{"b.com", "a.com", "example.com", "c.com"}) {
+		t.Fatalf("hits desc: %v", got)
+	}
+	if got := names(search(admin.RuleSortHits, admin.SortDirAsc)); !slices.Equal(got, []string{"c.com", "example.com", "a.com", "b.com"}) {
+		t.Fatalf("hits asc: %v", got)
+	}
+	if got := names(search(admin.RuleSortLastSeen, admin.SortDirDesc)); !slices.Equal(got, []string{"a.com", "b.com", "example.com", "c.com"}) {
+		t.Fatalf("last_seen desc: %v", got)
+	}
+}
+
+func TestRuleSearchDirectProxyStats(t *testing.T) {
+	t.Parallel()
+	a, _ := bootAdapter(t, filepath.Join(t.TempDir(), "admin-state.json"))
+	for _, rule := range []string{"b.example", "a.example"} {
+		if err := a.RuleAdd(admin.CategoryDirect, rule); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := a.RuleAdd(admin.CategoryProxy, "p.example"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Direct hits land in the direct tracker only; proxy stays untouched.
+	a.directHits.OnHit("b.example")
+	a.directHits.OnHit("b.example")
+	a.directHits.OnHit("a.example")
+
+	names := func(entries []admin.RuleEntry) []string {
+		out := make([]string, len(entries))
+		for i, e := range entries {
+			out[i] = e.Rule
+		}
+		return out
+	}
+
+	entries, total, err := a.RuleSearch(admin.CategoryDirect, "", 0, 100, admin.RuleSortDefault, admin.SortDirDesc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 2 {
+		t.Fatalf("expected total 2, got %d", total)
+	}
+	if entries[0].Rule != "b.example" || entries[0].Count != 2 || entries[0].LastSeen == nil {
+		t.Fatalf("direct row missing stats: %+v", entries[0])
+	}
+	if entries[1].Rule != "a.example" || entries[1].Count != 1 || entries[1].LastSeen == nil {
+		t.Fatalf("direct row missing stats: %+v", entries[1])
+	}
+
+	// Hits sort works for direct; zero-hit rules partition to the bottom.
+	hits, _, err := a.RuleSearch(admin.CategoryDirect, "", 0, 100, admin.RuleSortHits, admin.SortDirDesc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := names(hits); !slices.Equal(got, []string{"b.example", "a.example"}) {
+		t.Fatalf("direct hits desc: %v", got)
+	}
+
+	// Proxy rows carry zero stats and sort by rule text.
+	proxy, _, err := a.RuleSearch(admin.CategoryProxy, "", 0, 100, admin.RuleSortRule, admin.SortDirAsc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(proxy) != 1 || proxy[0].Rule != "p.example" || proxy[0].Count != 0 || proxy[0].LastSeen != nil {
+		t.Fatalf("proxy row should have no stats: %+v", proxy)
+	}
 }
 
 func TestAdminRulesSurviveRestart(t *testing.T) {
@@ -86,15 +214,16 @@ func TestAdminRulesResetRestoresBaseline(t *testing.T) {
 }
 
 func TestApplyConfigOverrides(t *testing.T) {
+	strPtr := func(s string) *string { return &s }
 
 	cfg := config.SowerConfig{LogLevel: slog.LevelInfo}
 	cfg.DNS.Upstream = "8.8.8.8"
 	cfg.DNS.Fallback = "223.5.5.5"
 
 	applyConfigOverrides(&cfg, admin.ConfigOverrides{
-		LogLevel:    "debug",
-		DNSUpstream: "1.1.1.1",
-		DNSFallback: "9.9.9.9",
+		LogLevel:    strPtr("debug"),
+		DNSUpstream: strPtr("1.1.1.1"),
+		DNSFallback: strPtr("9.9.9.9"),
 	})
 	if cfg.LogLevel != slog.LevelDebug {
 		t.Fatalf("log level not overridden: %v", cfg.LogLevel)
@@ -108,8 +237,8 @@ func TestApplyConfigOverrides(t *testing.T) {
 
 	// Invalid values are dropped, keeping the previous config.
 	applyConfigOverrides(&cfg, admin.ConfigOverrides{
-		LogLevel:    "bogus",
-		DNSUpstream: "not-an-ip",
+		LogLevel:    strPtr("bogus"),
+		DNSUpstream: strPtr("not-an-ip"),
 	})
 	if cfg.LogLevel != slog.LevelDebug {
 		t.Fatalf("invalid log level must be ignored: %v", cfg.LogLevel)
@@ -148,6 +277,28 @@ func TestAdminConfigViewAndApply(t *testing.T) {
 			}
 			if f.Key == "remote.password" && (!f.Secret || !f.Configured) {
 				t.Fatalf("remote.password must be secret+configured: %+v", f)
+			}
+		}
+	}
+
+	// The log level field carries enum metadata for the console's select.
+	var logField *admin.ConfigField
+	for _, sec := range view.Sections {
+		for i := range sec.Fields {
+			if sec.Fields[i].Key == "log_level" {
+				logField = &sec.Fields[i]
+			}
+		}
+	}
+	if logField == nil || logField.Type != "enum" || len(logField.Options) != 4 {
+		t.Fatalf("log_level must be an enum with 4 options: %+v", logField)
+	}
+
+	// Boolean fields carry type metadata so the console renders 是/否 badges.
+	for _, sec := range view.Sections {
+		for _, f := range sec.Fields {
+			if f.Key == "admin.cookie_secure" && f.Type != "bool" {
+				t.Fatalf("admin.cookie_secure must be typed bool: %+v", f)
 			}
 		}
 	}
@@ -200,7 +351,7 @@ func TestAdminRulesRestoresBaselineOrder(t *testing.T) {
 	state := admin.LoadStateStore(statePath)
 	baseline := snapshotBaseline(r)
 	state.SetBaseline(baseline)
-	rules := newAdminRules(r, state, baseline)
+	rules := newAdminRules(r, state, baseline, newRuleHitTracker(r.BlockRule, maxRuleHits), newRuleHitTracker(r.DirectRule, maxRuleHitsWide), newRuleHitTracker(r.ProxyRule, maxRuleHitsWide), newRuleMissTracker())
 
 	if _, err := rules.RuleRemove(admin.CategoryProxy, "**.example.com"); err != nil {
 		t.Fatal(err)
@@ -224,7 +375,7 @@ func TestAdminRulesBatchRemovePersistFailureLeavesRuntimeUntouched(t *testing.T)
 	state := admin.LoadStateStore(filepath.Join(blocker, "admin-state.json"))
 	baseline := snapshotBaseline(r)
 	state.SetBaseline(baseline)
-	rules := newAdminRules(r, state, baseline)
+	rules := newAdminRules(r, state, baseline, newRuleHitTracker(r.BlockRule, maxRuleHits), newRuleHitTracker(r.DirectRule, maxRuleHitsWide), newRuleHitTracker(r.ProxyRule, maxRuleHitsWide), newRuleMissTracker())
 
 	removed, err := rules.RuleRemoveMany(admin.CategoryProxy, "one.example", "two.example")
 	if err == nil {
@@ -248,7 +399,7 @@ func TestAdminRulesBatchRemoveRebuildsOnceInOrder(t *testing.T) {
 	state := admin.LoadStateStore(statePath)
 	baseline := snapshotBaseline(r)
 	state.SetBaseline(baseline)
-	rules := newAdminRules(r, state, baseline)
+	rules := newAdminRules(r, state, baseline, newRuleHitTracker(r.BlockRule, maxRuleHits), newRuleHitTracker(r.DirectRule, maxRuleHitsWide), newRuleHitTracker(r.ProxyRule, maxRuleHitsWide), newRuleMissTracker())
 	if err := rules.RuleAdd(admin.CategoryProxy, "four.example"); err != nil {
 		t.Fatal(err)
 	}
@@ -269,7 +420,7 @@ func TestAdminRulesConcurrentMutationsRemainConsistent(t *testing.T) {
 	state := admin.LoadStateStore(statePath)
 	baseline := snapshotBaseline(r)
 	state.SetBaseline(baseline)
-	rules := newAdminRules(r, state, baseline)
+	rules := newAdminRules(r, state, baseline, newRuleHitTracker(r.BlockRule, maxRuleHits), newRuleHitTracker(r.DirectRule, maxRuleHitsWide), newRuleHitTracker(r.ProxyRule, maxRuleHitsWide), newRuleMissTracker())
 
 	var wg sync.WaitGroup
 	errs := make(chan error, 48)
@@ -313,5 +464,39 @@ func runAdminRulesMutation(i int, rules *adminRules, errs chan<- error, wg *sync
 	}
 	if err != nil {
 		errs <- err
+	}
+}
+
+func TestRestartFn(t *testing.T) {
+	ch := make(chan struct{}, 1)
+	fn := restartFn(ch)
+
+	if !restartSupported() {
+		if err := fn(); err == nil {
+			t.Fatal("expected error on unsupported platform")
+		}
+		select {
+		case <-ch:
+			t.Fatal("unsupported platform must not enqueue a restart")
+		default:
+		}
+		return
+	}
+
+	// Supported: multiple calls coalesce into a single enqueue.
+	for range 3 {
+		if err := fn(); err != nil {
+			t.Fatalf("restartFn: %v", err)
+		}
+	}
+	select {
+	case <-ch:
+	default:
+		t.Fatal("expected one restart request")
+	}
+	select {
+	case <-ch:
+		t.Fatal("expected restart requests to coalesce")
+	default:
 	}
 }

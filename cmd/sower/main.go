@@ -15,8 +15,10 @@ import (
 	"os/signal"
 	"runtime"
 	"runtime/debug"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -163,8 +165,25 @@ func run(ctx context.Context, stop context.CancelFunc, cfg config.SowerConfig) e
 	if err != nil {
 		return fmt.Errorf("init stats: %w", err)
 	}
+	blockHits := newRuleHitTracker(r.BlockRule, maxRuleHits)
+	directHits := newRuleHitTracker(r.DirectRule, maxRuleHitsWide)
+	proxyHits := newRuleHitTracker(r.ProxyRule, maxRuleHitsWide)
+	missHits := newRuleMissTracker()
 	r.SetRouteObserver(func(c router.RouteCategory, domain string) {
 		stats.RecordRoute(string(c), domain)
+	})
+	r.SetRuleHitObserver(func(c router.RouteCategory, domain string) {
+		switch c {
+		case router.RouteBlock:
+			blockHits.OnHit(domain)
+		case router.RouteDirect:
+			directHits.OnHit(domain)
+		case router.RouteProxy:
+			proxyHits.OnHit(domain)
+		}
+	})
+	r.SetRuleMissObserver(func(domain string) {
+		missHits.OnMiss(domain)
 	})
 
 	start := time.Now()
@@ -175,21 +194,25 @@ func run(ctx context.Context, stop context.CancelFunc, cfg config.SowerConfig) e
 	baseline := snapshotBaseline(r)
 	stateStore.SetBaseline(baseline)
 	applyRuleDeltas(r, stateStore)
-	rulesMgr := newAdminRules(r, stateStore, baseline)
+	rulesMgr := newAdminRules(r, stateStore, baseline, blockHits, directHits, proxyHits, missHits)
 	configMgr := newAdminConfig(baseCfg, stateStore, r)
 
 	errCh := make(chan error, 8)
-	if err := startDNSListeners(ctx, cfg, r, stats, errCh); err != nil {
+	// restartCh coalesces restart requests from the admin API; the process
+	// replaces itself in place (same PID) so systemd stays unaware.
+	restartCh := make(chan struct{}, 1)
+	var wg sync.WaitGroup
+	if err := startDNSListeners(ctx, &wg, cfg, r, stats, errCh); err != nil {
 		return err
 	}
-	if err := startSocks5Listener(ctx, cfg, r, stats, errCh); err != nil {
+	if err := startSocks5Listener(ctx, &wg, cfg, r, stats, errCh); err != nil {
 		return err
 	}
 	if _, shared := sharedAdminHTTPAddr(cfg); shared {
-		if err := startSharedHTTPListener(ctx, cfg, r, rulesMgr, configMgr, stats, errCh); err != nil {
+		if err := startSharedHTTPListener(ctx, &wg, cfg, r, rulesMgr, configMgr, stats, errCh, restartCh); err != nil {
 			return err
 		}
-	} else if err := startAdminListener(ctx, cfg, rulesMgr, configMgr, stats, errCh); err != nil {
+	} else if err := startAdminListener(ctx, &wg, cfg, rulesMgr, configMgr, stats, errCh, restartCh); err != nil {
 		return err
 	}
 
@@ -200,6 +223,25 @@ func run(ctx context.Context, stop context.CancelFunc, cfg config.SowerConfig) e
 	select {
 	case <-ctx.Done():
 		slog.Info("shutting down sower", "reason", ctx.Err())
+	case <-restartCh:
+		slog.Info("restarting sower")
+		stop()
+		// Wait for every listener to close so the replacement process can
+		// bind the same addresses (exec keeps the old file descriptors).
+		// Bound the wait: a stuck close must not leave a half-alive process.
+		done := make(chan struct{})
+		go func() {
+			wg.Wait()
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+			slog.Warn("listener shutdown timed out, restarting anyway")
+		}
+		if err := restartCurrentProcess(); err != nil {
+			return fmt.Errorf("restart current process: %w", err)
+		}
 	case err := <-errCh:
 		slog.Error("serve failed", "error", err)
 		stop()
@@ -234,28 +276,82 @@ func loadAdminState(cfg config.SowerConfig) *admin.StateStore {
 // with a warning so a bad override never blocks startup; the
 // --ignore-admin-state flag skips the file entirely.
 func applyConfigOverrides(cfg *config.SowerConfig, o admin.ConfigOverrides) {
-	if o.LogLevel != "" {
+	// An empty override (nil or empty value) is skipped so the file/flag
+	// configuration wins; a non-empty value overrides it. Clearing an
+	// override in the admin console therefore reverts to the file/flag
+	// configuration on the next restart.
+	applyStr := func(dst *string, v *string) {
+		if v != nil && *v != "" {
+			*dst = *v
+		}
+	}
+	applyList := func(dst *[]string, v *[]string) {
+		if v != nil && len(*v) > 0 {
+			*dst = slices.Clone(*v)
+		}
+	}
+	applyBool := func(dst *bool, v *string, field string) {
+		if v == nil || *v == "" {
+			return
+		}
+		b, err := strconv.ParseBool(*v)
+		if err != nil {
+			slog.Warn("ignore invalid admin state override", "field", field, "error", err)
+			return
+		}
+		*dst = b
+	}
+
+	if o.LogLevel != nil && *o.LogLevel != "" {
 		var lv slog.Level
-		if err := lv.UnmarshalText([]byte(strings.ToUpper(o.LogLevel))); err != nil {
+		if err := lv.UnmarshalText([]byte(strings.ToUpper(*o.LogLevel))); err != nil {
 			slog.Warn("ignore invalid admin state override", "field", "log_level", "error", err)
 		} else {
 			cfg.LogLevel = lv
 		}
 	}
-	if o.DNSUpstream != "" {
-		if net.ParseIP(o.DNSUpstream) == nil {
+	if o.DNSUpstream != nil && *o.DNSUpstream != "" {
+		if net.ParseIP(*o.DNSUpstream) == nil {
 			slog.Warn("ignore invalid admin state override", "field", "dns_upstream")
 		} else {
-			cfg.DNS.Upstream = o.DNSUpstream
+			cfg.DNS.Upstream = *o.DNSUpstream
 		}
 	}
-	if o.DNSFallback != "" {
-		if net.ParseIP(o.DNSFallback) == nil {
+	if o.DNSFallback != nil && *o.DNSFallback != "" {
+		if net.ParseIP(*o.DNSFallback) == nil {
 			slog.Warn("ignore invalid admin state override", "field", "dns_fallback")
 		} else {
-			cfg.DNS.Fallback = o.DNSFallback
+			cfg.DNS.Fallback = *o.DNSFallback
 		}
 	}
+	applyStr(&cfg.Remote.Type, o.RemoteType)
+	applyStr(&cfg.Remote.Addr, o.RemoteAddr)
+	applyStr(&cfg.Remote.TLS.ServerName, o.RemoteTLSServerName)
+	applyStr(&cfg.Remote.TLS.ClientHello, o.RemoteTLSClientHello)
+	applyBool(&cfg.Remote.TLS.InsecureSkipVerify, o.RemoteTLSInsecureSkipVerify, "remote_tls_insecure_skip_verify")
+	applyStr(&cfg.DNS.Serve, o.DNSServe)
+	applyStr(&cfg.DNS.Serve6, o.DNSServe6)
+	applyStr(&cfg.Socks5.Addr, o.Socks5Addr)
+	applyStr(&cfg.Admin.SessionFile, o.AdminSessionFile)
+	applyBool(&cfg.Admin.DisableSessionPersistence, o.AdminDisableSessionPersistence, "admin_disable_session_persistence")
+	applyBool(&cfg.Admin.CookieSecure, o.AdminCookieSecure, "admin_cookie_secure")
+	applyStr(&cfg.Admin.StateFile, o.AdminStateFile)
+	applyStr(&cfg.Router.Block.File, o.RouterBlockFile)
+	applyStr(&cfg.Router.Block.FilePrefix, o.RouterBlockFilePrefix)
+	applyList(&cfg.Router.Block.FileSkipRules, o.RouterBlockFileSkipRules)
+	applyList(&cfg.Router.Block.Rules, o.RouterBlockRules)
+	applyStr(&cfg.Router.Direct.File, o.RouterDirectFile)
+	applyStr(&cfg.Router.Direct.FilePrefix, o.RouterDirectFilePrefix)
+	applyList(&cfg.Router.Direct.FileSkipRules, o.RouterDirectFileSkipRules)
+	applyList(&cfg.Router.Direct.Rules, o.RouterDirectRules)
+	applyStr(&cfg.Router.Proxy.File, o.RouterProxyFile)
+	applyStr(&cfg.Router.Proxy.FilePrefix, o.RouterProxyFilePrefix)
+	applyList(&cfg.Router.Proxy.FileSkipRules, o.RouterProxyFileSkipRules)
+	applyList(&cfg.Router.Proxy.Rules, o.RouterProxyRules)
+	applyStr(&cfg.Router.Country.MMDB, o.RouterCountryMMDB)
+	applyStr(&cfg.Router.Country.File, o.RouterCountryFile)
+	applyList(&cfg.Router.Country.Rules, o.RouterCountryRules)
+
 	logLevel.Set(cfg.LogLevel)
 }
 
@@ -325,7 +421,7 @@ func loadRouterRules(ctx context.Context, r *router.Router, proxyDial router.Pro
 	return nil
 }
 
-func startDNSListeners(ctx context.Context, cfg config.SowerConfig, r *router.Router, stats *admin.Stats, errCh chan<- error) error {
+func startDNSListeners(ctx context.Context, wg *sync.WaitGroup, cfg config.SowerConfig, r *router.Router, stats *admin.Stats, errCh chan<- error) error {
 	if cfg.DNS.Disable {
 		slog.Info("DNS proxy disabled")
 		return nil
@@ -336,14 +432,14 @@ func startDNSListeners(ctx context.Context, cfg config.SowerConfig, r *router.Ro
 		// In shared mode the admin console takes over the primary HTTP
 		// listener; the HTTPS and DNS listeners still start normally.
 		if !(shared && ip == cfg.DNS.Serve) {
-			if err := startHTTPListener(ctx, ip, r, stats, errCh); err != nil {
+			if err := startHTTPListener(ctx, wg, ip, r, stats, errCh); err != nil {
 				return err
 			}
 		}
-		if err := startHTTPSListener(ctx, ip, r, stats, errCh); err != nil {
+		if err := startHTTPSListener(ctx, wg, ip, r, stats, errCh); err != nil {
 			return err
 		}
-		if err := startDNSUDPListener(ctx, ip, r, stats, errCh); err != nil {
+		if err := startDNSUDPListener(ctx, wg, ip, r, stats, errCh); err != nil {
 			return err
 		}
 	}
@@ -361,35 +457,37 @@ func dnsListenIPs(cfg config.SowerConfig) []string {
 	return ips
 }
 
-func startHTTPListener(ctx context.Context, ip string, r *router.Router, stats *admin.Stats, errCh chan<- error) error {
+func startHTTPListener(ctx context.Context, wg *sync.WaitGroup, ip string, r *router.Router, stats *admin.Stats, errCh chan<- error) error {
 	addr := net.JoinHostPort(ip, "80")
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("listen http proxy on %s: %w", addr, err)
 	}
 	slog.Info("service listening", "service", "http proxy", "network", "tcp", "addr", addr)
-	go closeOnDone(ctx, ln)
+	wg.Add(1)
+	go closeOnDone(ctx, wg, ln)
 	go serveAndReport(errCh, "http proxy", func() error {
 		return ServeHTTP(ctx, ln, r, stats)
 	})
 	return nil
 }
 
-func startHTTPSListener(ctx context.Context, ip string, r *router.Router, stats *admin.Stats, errCh chan<- error) error {
+func startHTTPSListener(ctx context.Context, wg *sync.WaitGroup, ip string, r *router.Router, stats *admin.Stats, errCh chan<- error) error {
 	addr := net.JoinHostPort(ip, "443")
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("listen https proxy on %s: %w", addr, err)
 	}
 	slog.Info("service listening", "service", "https proxy", "network", "tcp", "addr", addr)
-	go closeOnDone(ctx, ln)
+	wg.Add(1)
+	go closeOnDone(ctx, wg, ln)
 	go serveAndReport(errCh, "https proxy", func() error {
 		return ServeHTTPS(ctx, ln, r, stats)
 	})
 	return nil
 }
 
-func startDNSUDPListener(ctx context.Context, ip string, r *router.Router, stats *admin.Stats, errCh chan<- error) error {
+func startDNSUDPListener(ctx context.Context, wg *sync.WaitGroup, ip string, r *router.Router, stats *admin.Stats, errCh chan<- error) error {
 	addr := net.JoinHostPort(ip, "53")
 	pc, err := net.ListenPacket("udp", addr)
 	if err != nil {
@@ -401,7 +499,8 @@ func startDNSUDPListener(ctx context.Context, ip string, r *router.Router, stats
 		Handler:    dnsStatsHandler{Handler: r, stats: stats},
 	}
 	slog.Info("service listening", "service", "dns proxy", "network", "udp", "addr", addr)
-	go shutdownDNSServerOnDone(ctx, server)
+	wg.Add(1)
+	go shutdownDNSServerOnDone(ctx, wg, server)
 	go func() {
 		if err := server.ActivateAndServe(); err != nil && !errors.Is(err, net.ErrClosed) {
 			reportServeError(errCh, "dns proxy", fmt.Errorf("serve on %s: %w", addr, err))
@@ -410,7 +509,7 @@ func startDNSUDPListener(ctx context.Context, ip string, r *router.Router, stats
 	return nil
 }
 
-func startSocks5Listener(ctx context.Context, cfg config.SowerConfig, r *router.Router, stats *admin.Stats, errCh chan<- error) error {
+func startSocks5Listener(ctx context.Context, wg *sync.WaitGroup, cfg config.SowerConfig, r *router.Router, stats *admin.Stats, errCh chan<- error) error {
 	if cfg.Socks5.Disable {
 		slog.Info("SOCKS5 proxy disabled")
 		return nil
@@ -421,7 +520,8 @@ func startSocks5Listener(ctx context.Context, cfg config.SowerConfig, r *router.
 		return fmt.Errorf("listen socks5 proxy on %s: %w", cfg.Socks5.Addr, err)
 	}
 	slog.Info("service listening", "service", "socks5 proxy", "network", "tcp", "addr", cfg.Socks5.Addr)
-	go closeOnDone(ctx, ln)
+	wg.Add(1)
+	go closeOnDone(ctx, wg, ln)
 	go serveAndReport(errCh, "socks5 proxy", func() error {
 		return ServeSocks5(ctx, ln, r, stats)
 	})
@@ -564,12 +664,14 @@ func readRuleLines(rc io.ReadCloser) ([]string, error) {
 	}
 }
 
-func closeOnDone(ctx context.Context, closer io.Closer) {
+func closeOnDone(ctx context.Context, wg *sync.WaitGroup, closer io.Closer) {
+	defer wg.Done()
 	<-ctx.Done()
 	_ = closer.Close()
 }
 
-func shutdownDNSServerOnDone(ctx context.Context, server *dns.Server) {
+func shutdownDNSServerOnDone(ctx context.Context, wg *sync.WaitGroup, server *dns.Server) {
+	defer wg.Done()
 	<-ctx.Done()
 	_ = server.ShutdownContext(ctx)
 }

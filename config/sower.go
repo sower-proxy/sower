@@ -46,11 +46,13 @@ type SowerConfig struct {
 	} `flag:"socks5"`
 
 	Admin struct {
-		Disable     bool   `default:"true" usage:"disable admin web server"`
-		Addr        string `default:"127.0.0.1:19090" usage:"admin web server listen address"`
-		Password    string `usage:"admin web server password, required when enabled"`
-		SessionFile string `default:"/etc/sower/sessions.json" usage:"persist admin sessions to this file, empty disables persistence"`
-		StateFile   string `default:"/etc/sower/admin-state.json" usage:"persist admin rule and config changes to this file, empty disables persistence"`
+		Disable                   bool   `default:"true" usage:"disable admin web server"`
+		Addr                      string `default:"127.0.0.1:19090" usage:"admin web server listen address"`
+		Password                  string `usage:"admin web server password, required when enabled"`
+		SessionFile               string `default:"/etc/sower/sessions.json" usage:"persist admin sessions to this file; one sower process only"`
+		DisableSessionPersistence bool   `default:"false" usage:"disable admin session persistence"`
+		CookieSecure              bool   `default:"false" usage:"set Secure on admin session cookies behind a TLS-terminating proxy"`
+		StateFile                 string `default:"/etc/sower/admin-state.json" usage:"persist admin rule and config changes to this file, empty disables persistence"`
 	} `flag:"admin"`
 
 	Router struct {
@@ -80,6 +82,15 @@ type SowerConfig struct {
 			Rules      []string `usage:"CIDR list rules"`
 		}
 	}
+}
+
+// AdminSessionFile returns an empty path only when persistence is explicitly
+// disabled. The session file is not safe to share across multiple processes.
+func (c SowerConfig) AdminSessionFile() string {
+	if c.Admin.DisableSessionPersistence {
+		return ""
+	}
+	return c.Admin.SessionFile
 }
 
 // Validate implements the validation interface for SowerConfig

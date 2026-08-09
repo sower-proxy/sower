@@ -219,21 +219,22 @@ func TestStateStoreApplyConfigRevision(t *testing.T) {
 	t.Parallel()
 	path := stateFilePath(t)
 	st := LoadStateStore(path)
+	strPtr := func(s string) *string { return &s }
 
-	if _, err := st.ApplyConfig(ConfigOverrides{LogLevel: "debug"}, 1); !errors.Is(err, ErrRevisionMismatch) {
+	if _, err := st.ApplyConfig(ConfigOverrides{LogLevel: strPtr("debug")}, 1); !errors.Is(err, ErrRevisionMismatch) {
 		t.Fatalf("stale revision must fail: %v", err)
 	}
-	rev, err := st.ApplyConfig(ConfigOverrides{LogLevel: "debug"}, 0)
+	rev, err := st.ApplyConfig(ConfigOverrides{LogLevel: strPtr("debug")}, 0)
 	if err != nil || rev != 1 {
 		t.Fatalf("apply config: rev=%d err=%v", rev, err)
 	}
-	if got := st.ConfigOverrides(); got.LogLevel != "debug" {
+	if got := st.ConfigOverrides(); got.LogLevel == nil || *got.LogLevel != "debug" {
 		t.Fatalf("unexpected overrides: %+v", got)
 	}
 
 	// Overrides survive a reload.
 	st2 := LoadStateStore(path)
-	if got := st2.ConfigOverrides(); got.LogLevel != "debug" {
+	if got := st2.ConfigOverrides(); got.LogLevel == nil || *got.LogLevel != "debug" {
 		t.Fatalf("overrides not persisted: %+v", got)
 	}
 	if st2.Revision() != 1 {

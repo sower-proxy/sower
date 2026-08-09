@@ -6,11 +6,61 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type rulesRequest struct {
 	Category Category `json:"category"`
 	Rules    []string `json:"rules"`
+}
+
+// RuleSort selects the ordering of a rule listing.
+type RuleSort string
+
+const (
+	RuleSortDefault  RuleSort = ""          // retained rule order (file order)
+	RuleSortRule     RuleSort = "rule"      // alphabetical by rule text
+	RuleSortHits     RuleSort = "hits"      // by hit count
+	RuleSortLastSeen RuleSort = "last_seen" // by most recent hit
+)
+
+func (s RuleSort) valid() bool {
+	switch s {
+	case RuleSortDefault, RuleSortRule, RuleSortHits, RuleSortLastSeen:
+		return true
+	default:
+		return false
+	}
+}
+
+// SortDir selects the direction of a rule listing sort.
+type SortDir string
+
+const (
+	SortDirAsc  SortDir = "asc"
+	SortDirDesc SortDir = "desc"
+)
+
+func (d SortDir) valid() bool {
+	return d == SortDirAsc || d == SortDirDesc
+}
+
+// defaultDir resolves the natural direction for a sort field: text sorts
+// ascending, recency and magnitude sorts descending.
+func defaultDir(s RuleSort) SortDir {
+	if s == RuleSortRule {
+		return SortDirAsc
+	}
+	return SortDirDesc
+}
+
+// RuleEntry is one retained rule in a listing, with its hit count and most
+// recent hit time. Count is zero and LastSeen nil for rules that never
+// matched a routed connection.
+type RuleEntry struct {
+	Rule     string     `json:"rule"`
+	Count    uint64     `json:"count"`
+	LastSeen *time.Time `json:"lastSeen,omitempty"`
 }
 
 // CategoryTest reports whether one rule category matched a tested domain and
@@ -29,6 +79,39 @@ type DomainTest struct {
 	Route   string         `json:"route"`
 	Matches []CategoryTest `json:"matches"`
 	Note    string         `json:"note,omitempty"`
+}
+
+// RuleHit aggregates block decisions attributed to one rule.
+type RuleHit struct {
+	Rule     string    `json:"rule"`
+	Count    uint64    `json:"count"`
+	LastSeen time.Time `json:"lastSeen"`
+}
+
+// RuleMissProvider exposes per-domain access stats for connections that
+// matched no block/direct/proxy rule. Rule holds the domain.
+type RuleMissProvider interface {
+	// RuleMiss returns up to limit domains, ordered by connection count
+	// descending when byCount is true, or by most recent access otherwise.
+	RuleMiss(byCount bool, limit int) []RuleHit
+}
+
+// handleRuleMiss serves per-domain access stats for connections that
+// matched no rule, ordered by count (default) or by most recent access.
+func (s *Server) handleRuleMiss(w http.ResponseWriter, r *http.Request) {
+	provider, ok := s.opts.Rules.(RuleMissProvider)
+	if !ok {
+		writeError(w, http.StatusNotFound, "rule miss stats unavailable")
+		return
+	}
+	byCount := r.URL.Query().Get("sort") != "recent"
+	limit := 0
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	writeJSON(w, http.StatusOK, provider.RuleMiss(byCount, limit))
 }
 
 // handleRulesTest reports which rules match the queried domain and the
@@ -65,7 +148,15 @@ func (s *Server) handleRulesList(w http.ResponseWriter, r *http.Request) {
 	if limit > maxPageSize {
 		limit = maxPageSize
 	}
-	rules, total, err := s.opts.Rules.RuleSearch(category, q, offset, limit)
+	sortBy := RuleSort(r.URL.Query().Get("sort"))
+	if !sortBy.valid() {
+		sortBy = RuleSortDefault
+	}
+	dir := SortDir(r.URL.Query().Get("dir"))
+	if !dir.valid() {
+		dir = defaultDir(sortBy)
+	}
+	rules, total, err := s.opts.Rules.RuleSearch(category, q, offset, limit, sortBy, dir)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

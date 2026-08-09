@@ -23,12 +23,47 @@ type RuleDelta struct {
 }
 
 // ConfigOverrides holds the whitelisted config fields editable through the
-// admin console. Empty fields do not override the file/flag configuration.
-// Secrets must never be added here.
+// admin console. Pointer fields distinguish "not submitted" (nil, keep the
+// previous override) from an explicit change: a non-empty value sets the
+// override, and a non-nil empty value/empty list clears it so the
+// file/flag configuration takes over again. Secrets must never be added
+// here. List fields (rule sources) hold the full inline lists.
 type ConfigOverrides struct {
-	LogLevel    string `json:"log_level,omitempty"`
-	DNSUpstream string `json:"dns_upstream,omitempty"`
-	DNSFallback string `json:"dns_fallback,omitempty"`
+	LogLevel    *string `json:"log_level,omitempty"`
+	DNSUpstream *string `json:"dns_upstream,omitempty"`
+	DNSFallback *string `json:"dns_fallback,omitempty"`
+
+	RemoteType                  *string `json:"remote_type,omitempty"`
+	RemoteAddr                  *string `json:"remote_addr,omitempty"`
+	RemoteTLSServerName         *string `json:"remote_tls_server_name,omitempty"`
+	RemoteTLSClientHello        *string `json:"remote_tls_client_hello,omitempty"`
+	RemoteTLSInsecureSkipVerify *string `json:"remote_tls_insecure_skip_verify,omitempty"`
+
+	DNSServe  *string `json:"dns_serve,omitempty"`
+	DNSServe6 *string `json:"dns_serve6,omitempty"`
+
+	Socks5Addr *string `json:"socks5_addr,omitempty"`
+
+	AdminSessionFile               *string `json:"admin_session_file,omitempty"`
+	AdminDisableSessionPersistence *string `json:"admin_disable_session_persistence,omitempty"`
+	AdminCookieSecure              *string `json:"admin_cookie_secure,omitempty"`
+	AdminStateFile                 *string `json:"admin_state_file,omitempty"`
+
+	RouterBlockFile           *string   `json:"router_block_file,omitempty"`
+	RouterBlockFilePrefix     *string   `json:"router_block_file_prefix,omitempty"`
+	RouterBlockFileSkipRules  *[]string `json:"router_block_file_skip_rules,omitempty"`
+	RouterBlockRules          *[]string `json:"router_block_rules,omitempty"`
+	RouterDirectFile          *string   `json:"router_direct_file,omitempty"`
+	RouterDirectFilePrefix    *string   `json:"router_direct_file_prefix,omitempty"`
+	RouterDirectFileSkipRules *[]string `json:"router_direct_file_skip_rules,omitempty"`
+	RouterDirectRules         *[]string `json:"router_direct_rules,omitempty"`
+	RouterProxyFile           *string   `json:"router_proxy_file,omitempty"`
+	RouterProxyFilePrefix     *string   `json:"router_proxy_file_prefix,omitempty"`
+	RouterProxyFileSkipRules  *[]string `json:"router_proxy_file_skip_rules,omitempty"`
+	RouterProxyRules          *[]string `json:"router_proxy_rules,omitempty"`
+	RouterCountryMMDB         *string   `json:"router_country_mmdb,omitempty"`
+	RouterCountryFile         *string   `json:"router_country_file,omitempty"`
+	RouterCountryRules        *[]string `json:"router_country_rules,omitempty"`
 }
 
 // State is the on-disk admin state document. Revision bumps on every

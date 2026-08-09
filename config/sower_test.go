@@ -169,6 +169,10 @@ fallback = "223.5.5.5"
 [socks_5]
 disable = true
 
+[admin]
+cookie_secure = true
+disable_session_persistence = true
+
 [router.block]
 file_skip_rules = ["t.co"]
 `), 0o600); err != nil {
@@ -192,6 +196,15 @@ file_skip_rules = ["t.co"]
 	}
 	if !cfg.Socks5.Disable {
 		t.Fatal("expected socks_5 section to load")
+	}
+	if !cfg.Admin.CookieSecure {
+		t.Fatal("expected admin.cookie_secure to load")
+	}
+	if !cfg.Admin.DisableSessionPersistence {
+		t.Fatal("expected admin.disable_session_persistence to load")
+	}
+	if cfg.AdminSessionFile() != "" {
+		t.Fatalf("AdminSessionFile() = %q, want persistence disabled", cfg.AdminSessionFile())
 	}
 }
 

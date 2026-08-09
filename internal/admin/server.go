@@ -60,8 +60,9 @@ func (c Category) valid() bool {
 // RuleManager is the rule operations surface the admin server needs. The
 // concrete adapter lives in cmd/sower; tests inject a fake.
 type RuleManager interface {
-	RuleList(category Category) ([]string, error)
-	RuleSearch(category Category, q string, offset, limit int) ([]string, uint64, error)
+	// RuleSearch returns a page of retained rules for the category, filtered
+	// by q and ordered by sortBy in direction dir (see RuleSort constants).
+	RuleSearch(category Category, q string, offset, limit int, sortBy RuleSort, dir SortDir) ([]RuleEntry, uint64, error)
 	RuleAdd(category Category, rules ...string) error
 	RuleRemove(category Category, rule string) (bool, error)
 	// RuleRemoveMany removes a batch atomically from the persisted state and
@@ -79,14 +80,19 @@ type RuleManager interface {
 
 // Options configures the admin server.
 type Options struct {
-	Password    string
-	Version     string
-	Date        string
-	Rules       RuleManager
-	Stats       *Stats
-	SessionFile string
+	Password     string
+	Version      string
+	Date         string
+	Rules        RuleManager
+	Stats        *Stats
+	SessionFile  string
+	CookieSecure bool
 	// Config enables the config display/edit endpoints when non-nil.
 	Config ConfigManager
+	// Restart triggers a process restart when non-nil; the endpoint returns
+	// 501 when nil. The callback must return before the process exits so the
+	// HTTP response can be delivered.
+	Restart func() error
 }
 
 // Server serves the admin API and the embedded frontend on one listener.
@@ -115,6 +121,7 @@ func NewServer(opts Options) *Server {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/session", s.handleLogin)
+	mux.HandleFunc("GET /api/session", s.mutateGuard(s.auth(s.handleSession)))
 	mux.HandleFunc("DELETE /api/session", s.handleLogout)
 	mux.HandleFunc("GET /api/status", s.mutateGuard(s.auth(s.handleStatus)))
 	mux.HandleFunc("GET /api/rules", s.mutateGuard(s.auth(s.handleRulesList)))
@@ -123,6 +130,7 @@ func NewServer(opts Options) *Server {
 	mux.HandleFunc("GET /api/rules/changes", s.mutateGuard(s.auth(s.handleRulesChanges)))
 	mux.HandleFunc("POST /api/rules/reset", s.mutateGuard(s.auth(s.handleRulesReset)))
 	mux.HandleFunc("GET /api/rules/test", s.mutateGuard(s.auth(s.handleRulesTest)))
+	mux.HandleFunc("GET /api/rules/miss", s.mutateGuard(s.auth(s.handleRuleMiss)))
 	mux.HandleFunc("GET /api/traffic", s.mutateGuard(s.auth(s.handleTraffic)))
 	mux.HandleFunc("GET /api/totals", s.mutateGuard(s.auth(s.handleTotals)))
 	mux.HandleFunc("GET /api/history", s.mutateGuard(s.auth(s.handleHistory)))
@@ -130,6 +138,9 @@ func NewServer(opts Options) *Server {
 	if s.opts.Config != nil {
 		mux.HandleFunc("GET /api/config", s.mutateGuard(s.auth(s.handleConfigGet)))
 		mux.HandleFunc("PATCH /api/config", s.mutateGuard(s.auth(s.handleConfigPatch)))
+	}
+	if s.opts.Restart != nil {
+		mux.HandleFunc("POST /api/restart", s.mutateGuard(s.auth(s.handleRestart)))
 	}
 	if s.opts.Stats != nil {
 		mux.HandleFunc("GET /metrics", s.handleMetrics)
@@ -237,11 +248,11 @@ func statStart(stats *Stats) time.Time {
 }
 
 type rulesResponse struct {
-	Category Category `json:"category"`
-	Rules    []string `json:"rules"`
-	Total    uint64   `json:"total"`
-	Offset   int      `json:"offset"`
-	Limit    int      `json:"limit"`
+	Category Category    `json:"category"`
+	Rules    []RuleEntry `json:"rules"`
+	Total    uint64      `json:"total"`
+	Offset   int         `json:"offset"`
+	Limit    int         `json:"limit"`
 }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {

@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -19,6 +20,28 @@ import (
 
 type fakeRules struct {
 	lists map[Category][]string
+	hits  []RuleHit
+	miss  []RuleHit
+}
+
+func (f *fakeRules) RuleMiss(byCount bool, limit int) []RuleHit {
+	out := append([]RuleHit(nil), f.miss...)
+	sort.SliceStable(out, func(i, j int) bool {
+		if byCount {
+			if out[i].Count != out[j].Count {
+				return out[i].Count > out[j].Count
+			}
+			return out[i].LastSeen.After(out[j].LastSeen)
+		}
+		if !out[i].LastSeen.Equal(out[j].LastSeen) {
+			return out[i].LastSeen.After(out[j].LastSeen)
+		}
+		return out[i].Count > out[j].Count
+	})
+	if limit > 0 && limit < len(out) {
+		return out[:limit]
+	}
+	return out
 }
 
 func newFakeRules() *fakeRules {
@@ -29,22 +52,58 @@ func newFakeRules() *fakeRules {
 	}}
 }
 
-func (f *fakeRules) RuleList(c Category) ([]string, error) {
-	return append([]string(nil), f.lists[c]...), nil
-}
-
-func (f *fakeRules) RuleSearch(c Category, q string, offset, limit int) ([]string, uint64, error) {
+func (f *fakeRules) RuleSearch(c Category, q string, offset, limit int, sortBy RuleSort, dir SortDir) ([]RuleEntry, uint64, error) {
 	all := f.lists[c]
-	matched := make([]string, 0, len(all))
+	matched := make([]RuleEntry, 0, len(all))
 	q = strings.ToLower(q)
 	for _, rule := range all {
-		if q == "" || strings.Contains(strings.ToLower(rule), q) {
-			matched = append(matched, rule)
+		if q != "" && !strings.Contains(strings.ToLower(rule), q) {
+			continue
 		}
+		e := RuleEntry{Rule: rule}
+		for _, h := range f.hits {
+			if h.Rule == rule {
+				e.Count = h.Count
+				last := h.LastSeen
+				e.LastSeen = &last
+				break
+			}
+		}
+		matched = append(matched, e)
 	}
 	total := uint64(len(matched))
+	switch sortBy {
+	case RuleSortRule:
+		sort.SliceStable(matched, func(i, j int) bool {
+			if dir == SortDirAsc {
+				return matched[i].Rule < matched[j].Rule
+			}
+			return matched[i].Rule > matched[j].Rule
+		})
+	case RuleSortHits:
+		sort.SliceStable(matched, func(i, j int) bool {
+			if dir == SortDirAsc {
+				return matched[i].Count < matched[j].Count
+			}
+			return matched[i].Count > matched[j].Count
+		})
+	case RuleSortLastSeen:
+		sort.SliceStable(matched, func(i, j int) bool {
+			var ti, tj time.Time
+			if matched[i].LastSeen != nil {
+				ti = *matched[i].LastSeen
+			}
+			if matched[j].LastSeen != nil {
+				tj = *matched[j].LastSeen
+			}
+			if dir == SortDirAsc {
+				return ti.Before(tj)
+			}
+			return ti.After(tj)
+		})
+	}
 	if offset >= len(matched) {
-		return []string{}, total, nil
+		return []RuleEntry{}, total, nil
 	}
 	end := offset + limit
 	if end > len(matched) {
@@ -179,13 +238,13 @@ func (f *fakeConfig) ConfigView() ConfigView {
 func (f *fakeConfig) ApplyConfigChanges(changes ConfigChanges, revision uint64) (ConfigView, error) {
 	overrides := f.state.ConfigOverrides()
 	if changes.LogLevel != nil {
-		overrides.LogLevel = *changes.LogLevel
+		overrides.LogLevel = changes.LogLevel
 	}
 	if changes.DNSUpstream != nil {
-		overrides.DNSUpstream = *changes.DNSUpstream
+		overrides.DNSUpstream = changes.DNSUpstream
 	}
 	if changes.DNSFallback != nil {
-		overrides.DNSFallback = *changes.DNSFallback
+		overrides.DNSFallback = changes.DNSFallback
 	}
 	if _, err := f.state.ApplyConfig(overrides, revision); err != nil {
 		return ConfigView{}, err
@@ -303,6 +362,36 @@ func TestAPIRequiresSession(t *testing.T) {
 	}
 }
 
+func TestSessionEndpoint(t *testing.T) {
+	ts := newTestServer(t, newFakeRules())
+
+	resp, err := http.Get(ts.URL + "/api/session")
+	if err != nil {
+		t.Fatalf("get session without cookie: %v", err)
+	}
+	if resp.StatusCode != http.StatusUnauthorized {
+		resp.Body.Close()
+		t.Fatalf("expected 401 without session, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	cookie := login(t, ts, "secret")
+	resp = authedRequest(t, ts, http.MethodGet, "/api/session", cookie, "")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("expected 204 for valid session, got %d", resp.StatusCode)
+	}
+	if cacheControl := resp.Header.Get("Cache-Control"); cacheControl != "no-store" {
+		t.Fatalf("Cache-Control = %q, want no-store", cacheControl)
+	}
+	for _, c := range resp.Cookies() {
+		if c.Name == sessionCookieName && c.MaxAge == int(sessionCookieMaxAge.Seconds()) {
+			return
+		}
+	}
+	t.Fatal("session probe did not renew the session cookie")
+}
+
 func TestStatusEndpoint(t *testing.T) {
 	ts := newTestServer(t, newFakeRules())
 	cookie := login(t, ts, "secret")
@@ -324,6 +413,7 @@ func TestStatusEndpoint(t *testing.T) {
 func TestRulesCRUD(t *testing.T) {
 	ts := newTestServer(t, newFakeRules())
 	cookie := login(t, ts, "secret")
+	ruleOf := func(v any) string { return v.(map[string]any)["rule"].(string) }
 
 	// list empty
 	resp := authedRequest(t, ts, http.MethodGet, "/api/rules?category=proxy", cookie, "")
@@ -350,7 +440,7 @@ func TestRulesCRUD(t *testing.T) {
 	}
 	resp.Body.Close()
 	body = decodeBody(t, authedRequest(t, ts, http.MethodGet, "/api/rules?category=proxy", cookie, ""))
-	if rules, _ := body["rules"].([]any); len(rules) != 1 || rules[0] != "**.cn" {
+	if rules, _ := body["rules"].([]any); len(rules) != 1 || ruleOf(rules[0]) != "**.cn" {
 		t.Fatalf("unexpected rules after remove: %v", rules)
 	}
 }
@@ -371,7 +461,8 @@ func TestRulesListPaginationAndSearch(t *testing.T) {
 	// pagination
 	resp := authedRequest(t, ts, http.MethodGet, "/api/rules?category=proxy&offset=1&limit=2", cookie, "")
 	body := decodeBody(t, resp)
-	if rules, _ := body["rules"].([]any); len(rules) != 2 || rules[0] != "b.cn" || rules[1] != "a.cn" {
+	ruleOf := func(v any) string { return v.(map[string]any)["rule"].(string) }
+	if rules, _ := body["rules"].([]any); len(rules) != 2 || ruleOf(rules[0]) != "b.cn" || ruleOf(rules[1]) != "a.cn" {
 		t.Fatalf("unexpected page: %v", rules)
 	}
 	if total, _ := body["total"].(float64); total != 5 {
@@ -388,7 +479,7 @@ func TestRulesListPaginationAndSearch(t *testing.T) {
 	// search + pagination
 	resp = authedRequest(t, ts, http.MethodGet, "/api/rules?category=proxy&q=cn&offset=1&limit=1", cookie, "")
 	body = decodeBody(t, resp)
-	if rules, _ := body["rules"].([]any); len(rules) != 1 || rules[0] != "a.cn" {
+	if rules, _ := body["rules"].([]any); len(rules) != 1 || ruleOf(rules[0]) != "a.cn" {
 		t.Fatalf("unexpected search page: %v", rules)
 	}
 
@@ -397,6 +488,117 @@ func TestRulesListPaginationAndSearch(t *testing.T) {
 	body = decodeBody(t, resp)
 	if limit, _ := body["limit"].(float64); limit != maxPageSize {
 		t.Fatalf("expected limit clamped to %d, got %v", maxPageSize, limit)
+	}
+}
+
+func TestRulesListSortByHits(t *testing.T) {
+	rules := newFakeRules()
+	rules.hits = []RuleHit{
+		{Rule: "b.com", Count: 5},
+		{Rule: "a.com", Count: 3},
+	}
+	ts := newTestServer(t, rules)
+	cookie := login(t, ts, "secret")
+	for _, rule := range []string{"a.com", "b.com", "c.com"} {
+		resp := authedRequest(t, ts, http.MethodPost, "/api/rules", cookie,
+			fmt.Sprintf(`{"category":"proxy","rules":[%q]}`, rule))
+		if resp.StatusCode != http.StatusNoContent {
+			t.Fatalf("add %s: %d", rule, resp.StatusCode)
+		}
+		resp.Body.Close()
+	}
+
+	resp := authedRequest(t, ts, http.MethodGet, "/api/rules?category=proxy&sort=hits", cookie, "")
+	defer resp.Body.Close()
+	var page rulesResponse
+	if err := json.NewDecoder(resp.Body).Decode(&page); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	got := make([]string, len(page.Rules))
+	counts := make([]uint64, len(page.Rules))
+	for i, e := range page.Rules {
+		got[i] = e.Rule
+		counts[i] = e.Count
+	}
+	want := []string{"b.com", "a.com", "c.com"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("unexpected hit ordering: %v", got)
+	}
+	if counts[0] != 5 || counts[1] != 3 || counts[2] != 0 {
+		t.Fatalf("unexpected counts: %v", counts)
+	}
+
+	// unknown sort falls back to default order
+	resp = authedRequest(t, ts, http.MethodGet, "/api/rules?category=proxy&sort=bogus", cookie, "")
+	defer resp.Body.Close()
+	if err := json.NewDecoder(resp.Body).Decode(&page); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if page.Rules[0].Rule != "a.com" {
+		t.Fatalf("expected default order for bogus sort, got %+v", page.Rules)
+	}
+}
+
+func TestRulesListSorts(t *testing.T) {
+	t1 := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
+	t2 := time.Date(2025, 1, 2, 10, 0, 0, 0, time.UTC)
+	rules := newFakeRules()
+	rules.hits = []RuleHit{
+		{Rule: "b.com", Count: 5, LastSeen: t1},
+		{Rule: "a.com", Count: 3, LastSeen: t2},
+	}
+	ts := newTestServer(t, rules)
+	cookie := login(t, ts, "secret")
+	for _, rule := range []string{"b.com", "c.com", "a.com"} {
+		resp := authedRequest(t, ts, http.MethodPost, "/api/rules", cookie,
+			fmt.Sprintf(`{"category":"proxy","rules":[%q]}`, rule))
+		if resp.StatusCode != http.StatusNoContent {
+			t.Fatalf("add %s: %d", rule, resp.StatusCode)
+		}
+		resp.Body.Close()
+	}
+
+	orderOf := func(path string) []string {
+		t.Helper()
+		resp := authedRequest(t, ts, http.MethodGet, path, cookie, "")
+		defer resp.Body.Close()
+		var page rulesResponse
+		if err := json.NewDecoder(resp.Body).Decode(&page); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		got := make([]string, len(page.Rules))
+		for i, e := range page.Rules {
+			got[i] = e.Rule
+		}
+		return got
+	}
+	join := func(got []string) string { return strings.Join(got, ",") }
+
+	// rule sort defaults to ascending, honors explicit direction
+	if got := orderOf("/api/rules?category=proxy&sort=rule"); join(got) != "a.com,b.com,c.com" {
+		t.Fatalf("rule asc: %v", got)
+	}
+	if got := orderOf("/api/rules?category=proxy&sort=rule&dir=desc"); join(got) != "c.com,b.com,a.com" {
+		t.Fatalf("rule desc: %v", got)
+	}
+
+	// hits asc puts zero-count rules first, ascending counts behind
+	if got := orderOf("/api/rules?category=proxy&sort=hits&dir=asc"); join(got) != "c.com,a.com,b.com" {
+		t.Fatalf("hits asc: %v", got)
+	}
+
+	// last_seen defaults to most recent first and serializes the timestamp
+	resp := authedRequest(t, ts, http.MethodGet, "/api/rules?category=proxy&sort=last_seen", cookie, "")
+	defer resp.Body.Close()
+	var page rulesResponse
+	if err := json.NewDecoder(resp.Body).Decode(&page); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if page.Rules[0].Rule != "a.com" || page.Rules[1].Rule != "b.com" {
+		t.Fatalf("last_seen order: %+v", page.Rules)
+	}
+	if page.Rules[0].LastSeen == nil || !page.Rules[0].LastSeen.Equal(t2) {
+		t.Fatalf("lastSeen not serialized: %+v", page.Rules[0])
 	}
 }
 
@@ -637,6 +839,81 @@ func TestRulesTestEndpoint(t *testing.T) {
 	}
 }
 
+func TestRuleMissEndpoint(t *testing.T) {
+	t1 := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
+	t2 := time.Date(2025, 1, 2, 10, 0, 0, 0, time.UTC)
+	rules := newFakeRules()
+	rules.miss = []RuleHit{
+		{Rule: "baidu.com", Count: 5, LastSeen: t1},
+		{Rule: "qq.com", Count: 3, LastSeen: t2},
+	}
+	s := NewServer(Options{Password: "secret", Rules: rules})
+	ts := httptest.NewServer(s.http.Handler)
+	t.Cleanup(ts.Close)
+	cookie := login(t, ts, "secret")
+
+	// Default sort: by connection count, descending.
+	resp := authedRequest(t, ts, http.MethodGet, "/api/rules/miss", cookie, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	var miss []RuleHit
+	if err := json.NewDecoder(resp.Body).Decode(&miss); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	resp.Body.Close()
+	if len(miss) != 2 || miss[0].Rule != "baidu.com" || miss[0].Count != 5 {
+		t.Fatalf("unexpected miss order: %+v", miss)
+	}
+
+	// Recent sort: by most recent access, descending.
+	resp = authedRequest(t, ts, http.MethodGet, "/api/rules/miss?sort=recent", cookie, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&miss); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	resp.Body.Close()
+	if len(miss) != 2 || miss[0].Rule != "qq.com" {
+		t.Fatalf("unexpected recent order: %+v", miss)
+	}
+
+	// Limit clamp.
+	resp = authedRequest(t, ts, http.MethodGet, "/api/rules/miss?limit=1", cookie, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&miss); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	resp.Body.Close()
+	if len(miss) != 1 || miss[0].Rule != "baidu.com" {
+		t.Fatalf("unexpected limited miss: %+v", miss)
+	}
+}
+
+// ruleManagerNoHits wraps a RuleManager to hide the RuleHitProvider
+// implementation, exercising the 404 path of the hits endpoint.
+type ruleManagerNoHits struct {
+	RuleManager
+}
+
+// TestRuleHitsUnavailable guards the 404 path when the RuleManager does not
+// implement the hit provider (e.g. an alternative adapter).
+func TestRuleHitsUnavailable(t *testing.T) {
+	s := NewServer(Options{Password: "secret", Rules: ruleManagerNoHits{newFakeRules()}})
+	ts := httptest.NewServer(s.http.Handler)
+	t.Cleanup(ts.Close)
+	cookie := login(t, ts, "secret")
+
+	resp := authedRequest(t, ts, http.MethodGet, "/api/rules/hits", cookie, "")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected 404 without provider, got %d", resp.StatusCode)
+	}
+}
+
 func TestTrafficEndpointRejectsMissingStats(t *testing.T) {
 	s := NewServer(Options{Password: "secret", Rules: newFakeRules()})
 	ts := httptest.NewServer(s.http.Handler)
@@ -841,11 +1118,12 @@ func TestSessionSurvivesRestart(t *testing.T) {
 	ts1 := newServer()
 	cookie := login(t, ts1, "secret")
 
-	// simulate a process restart: a brand-new server sharing the file
+	// simulate a process restart: a frontend-style session probe on the new
+	// server must accept the persisted cookie before rendering the console.
 	ts2 := newServer()
-	resp := authedRequest(t, ts2, http.MethodGet, "/api/status", cookie, "")
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("expected session to survive restart, got %d", resp.StatusCode)
+	resp := authedRequest(t, ts2, http.MethodGet, "/api/session", cookie, "")
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("expected session probe to survive restart, got %d", resp.StatusCode)
 	}
 	resp.Body.Close()
 
@@ -870,22 +1148,146 @@ func TestSessionSurvivesRestart(t *testing.T) {
 
 func TestSessionSlidingExpiry(t *testing.T) {
 	s := NewServer(Options{Password: "secret", Rules: newFakeRules(), Stats: newTestStats(t)})
-	s.mu.Lock()
-	s.sessions["token"] = time.Now().Add(sessionTTL / 4) // less than half TTL remaining
-	s.mu.Unlock()
+	func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		s.sessions["token"] = time.Now().Add(sessionTTL / 4) // less than half TTL remaining
+	}()
+	ts := httptest.NewServer(s.http.Handler)
+	t.Cleanup(ts.Close)
 
-	r := httptest.NewRequest("GET", "/api/status", nil)
-	r.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "token"})
-	if !s.validSession(r) {
-		t.Fatal("expected session valid")
+	resp := authedRequest(t, ts, http.MethodGet, "/api/session", "token", "")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("expected renewed session probe to return 204, got %d", resp.StatusCode)
+	}
+	renewedCookie := false
+	for _, c := range resp.Cookies() {
+		if c.Name != sessionCookieName {
+			continue
+		}
+		if c.MaxAge != int(sessionCookieMaxAge.Seconds()) {
+			t.Fatalf("renewed cookie MaxAge = %d, want %d", c.MaxAge, int(sessionCookieMaxAge.Seconds()))
+		}
+		renewedCookie = true
+	}
+	if !renewedCookie {
+		t.Fatal("session renewal did not emit a cookie")
 	}
 
-	s.mu.Lock()
-	exp := s.sessions["token"]
-	s.mu.Unlock()
+	var exp time.Time
+	func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		exp = s.sessions["token"]
+	}()
 	if remaining := time.Until(exp); remaining < sessionTTL/2 {
 		t.Fatalf("expected sliding expiry to refresh TTL, remaining %v", remaining)
 	}
+}
+
+func TestLoginSucceedsWhenSessionPersistenceFails(t *testing.T) {
+	notDir := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(notDir, []byte("x"), 0o600); err != nil {
+		t.Fatalf("write persistence blocker: %v", err)
+	}
+	s := NewServer(Options{
+		Password: "secret", Rules: newFakeRules(), Stats: newTestStats(t),
+		SessionFile: filepath.Join(notDir, "sessions.json"),
+	})
+	ts := httptest.NewServer(s.http.Handler)
+	t.Cleanup(ts.Close)
+
+	resp, err := http.Post(ts.URL+"/api/session", "application/json", strings.NewReader(`{"password":"secret"}`))
+	if err != nil {
+		t.Fatalf("login with unwritable persistence: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("expected 204 despite persistence failure, got %d", resp.StatusCode)
+	}
+	var cookie string
+	for _, c := range resp.Cookies() {
+		if c.Name == sessionCookieName {
+			cookie = c.Value
+		}
+	}
+	if cookie == "" {
+		t.Fatal("login did not issue a session cookie")
+	}
+	func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if _, ok := s.sessions[cookie]; !ok {
+			t.Fatal("login did not retain the session in memory")
+		}
+	}()
+
+	// The in-memory session must still authenticate API requests.
+	authed := authedRequest(t, ts, http.MethodGet, "/api/session", cookie, "")
+	defer authed.Body.Close()
+	if authed.StatusCode != http.StatusNoContent {
+		t.Fatalf("expected in-memory session to authenticate, got %d", authed.StatusCode)
+	}
+}
+
+func TestLogoutRevokesMemoryWhenPersistenceFails(t *testing.T) {
+	notDir := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(notDir, []byte("x"), 0o600); err != nil {
+		t.Fatalf("write persistence blocker: %v", err)
+	}
+	s := NewServer(Options{
+		Password: "secret", Rules: newFakeRules(), Stats: newTestStats(t),
+		SessionFile: filepath.Join(notDir, "sessions.json"),
+	})
+	ts := httptest.NewServer(s.http.Handler)
+	t.Cleanup(ts.Close)
+
+	cookie := login(t, ts, "secret")
+	req, err := http.NewRequest(http.MethodDelete, ts.URL+"/api/session", nil)
+	if err != nil {
+		t.Fatalf("build logout request: %v", err)
+	}
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: cookie})
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("logout with unwritable persistence: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("expected 204 despite persistence failure, got %d", resp.StatusCode)
+	}
+	func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if _, ok := s.sessions[cookie]; ok {
+			t.Fatal("logout left the session valid in memory")
+		}
+	}()
+}
+
+func TestLoginCookieSecureFromConfig(t *testing.T) {
+	s := NewServer(Options{Password: "secret", Rules: newFakeRules(), CookieSecure: true})
+	ts := httptest.NewServer(s.http.Handler)
+	t.Cleanup(ts.Close)
+
+	resp, err := http.Post(ts.URL+"/api/session", "application/json", strings.NewReader(`{"password":"secret"}`))
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d", resp.StatusCode)
+	}
+	for _, c := range resp.Cookies() {
+		if c.Name == sessionCookieName {
+			if !c.Secure {
+				t.Fatal("expected Secure cookie from CookieSecure option")
+			}
+			return
+		}
+	}
+	t.Fatal("login cookie not set")
 }
 
 func TestExpiredSessionsDroppedOnLoad(t *testing.T) {
@@ -971,6 +1373,67 @@ func TestStreamEndpointPushesEvents(t *testing.T) {
 			if prefix, ok := strings.CutPrefix(l.text, "event: "); ok {
 				saw[prefix] = true
 			}
+		}
+	}
+}
+
+func TestStreamSessionRenewalClosesWithoutAuth(t *testing.T) {
+	stats := newTestStats(t)
+	s := NewServer(Options{Password: "secret", Rules: newFakeRules(), Stats: stats})
+	ts := httptest.NewServer(s.http.Handler)
+	t.Cleanup(ts.Close)
+
+	cookie := login(t, ts, "secret")
+	req, err := http.NewRequest(http.MethodGet, ts.URL+"/api/stream", nil)
+	if err != nil {
+		t.Fatalf("new stream request: %v", err)
+	}
+	req.Header.Set("Cookie", sessionCookieName+"="+cookie)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("open stream: %v", err)
+	}
+	defer resp.Body.Close()
+
+	events := make(chan string, 16)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		defer close(events)
+		scanner := bufio.NewScanner(resp.Body)
+		for scanner.Scan() {
+			if event, ok := strings.CutPrefix(scanner.Text(), "event: "); ok {
+				events <- event
+			}
+		}
+	}()
+
+	func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		s.sessions[cookie] = time.Now().Add(sessionTTL / 4)
+	}()
+
+	deadline := time.After(8 * time.Second)
+	for {
+		select {
+		case event, ok := <-events:
+			if !ok {
+				t.Fatal("stream closed before sending renewal event")
+			}
+			switch event {
+			case "auth":
+				t.Fatal("renewal emitted auth event")
+			case "renew":
+				select {
+				case <-done:
+				case <-time.After(2 * time.Second):
+					t.Fatal("stream stayed open after renewal event")
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for session renewal")
 		}
 	}
 }
@@ -1094,7 +1557,7 @@ func TestConfigPatchValidationAndRevision(t *testing.T) {
 	if rev, _ := body["revision"].(float64); rev != 1 {
 		t.Fatalf("expected revision 1 after patch, got %v", body["revision"])
 	}
-	if got := fake.state.ConfigOverrides(); got.LogLevel != "debug" || got.DNSUpstream != "1.1.1.1" {
+	if got := fake.state.ConfigOverrides(); got.LogLevel == nil || *got.LogLevel != "debug" || got.DNSUpstream == nil || *got.DNSUpstream != "1.1.1.1" {
 		t.Fatalf("overrides not persisted: %+v", got)
 	}
 
@@ -1105,7 +1568,7 @@ func TestConfigPatchValidationAndRevision(t *testing.T) {
 		t.Fatalf("expected 200 for clearing override, got %d", resp.StatusCode)
 	}
 	resp.Body.Close()
-	if got := fake.state.ConfigOverrides(); got.DNSUpstream != "" {
+	if got := fake.state.ConfigOverrides(); got.DNSUpstream == nil || *got.DNSUpstream != "" {
 		t.Fatalf("override not cleared: %+v", got)
 	}
 }
