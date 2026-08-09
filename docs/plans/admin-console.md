@@ -1,6 +1,6 @@
 # Admin Console Plan (MVP)
 
-Status: 实施中
+Status: 已实现；本文为历史计划，非权威来源。权威规则见根目录 `ARCHITECTURE.md`。
 Scope: `cmd/sower`（客户端）管理控制台，前端 embed 进二进制
 
 ## 目标
