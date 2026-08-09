@@ -1,8 +1,15 @@
 # Admin 规则持久化与配置页设计
 
-Status: 已实现并部署验证（2026-08-07）
+Status: 已实现并部署验证（2026-08-07）；本文为历史计划，非权威来源。权威规则见根目录 `ARCHITECTURE.md`。
 Supersedes: `docs/plans/admin-console.md` 中的 MVP 边界「规则变更仅运行期生效，重启后重置，不改写 TOML、不持久化」
 Scope: `cmd/sower` admin 控制台
+
+## 后续演进（超出本文 v1 范围，已实现）
+
+- **配置页可编辑白名单扩展**：v1 仅 `log_level`、`dns.upstream`、`dns.fallback` 三个 immediate 字段；后续扩展为指针型 overrides，区分「未提交」与「显式清空」，白名单字段覆盖远程代理、监听地址、规则来源、会话选项等，除 `log_level` 与 DNS 上游立即生效外均需重启。
+- **进程重启端点**：`POST /api/restart` 在 Unix 上原地 `exec`（PID 不变，systemd 无感知）；不支持的平台返回错误而非假成功。
+- **会话持久化选项**：新增 `admin.session_file` 说明、`admin.disable_session_persistence`、`admin.cookie_secure`；持久化改为 best-effort（磁盘失败不阻断登录、不残留有效登出会话）。
+- **规则命中/未命中统计**：每规则命中计数与未命中规则的域名访问统计，由 router 观察者喂入有界内存表，供规则页排序与 miss 视图展示。
 
 ## 背景与问题
 

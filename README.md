@@ -271,6 +271,18 @@ password = "your_admin_password"  # 启用时必填
 
 启动后打开 `http://127.0.0.1:19090`，输入 admin 密码即可。密码只用于换取会话 cookie，不会保存在浏览器里。
 
+### Admin 配置项
+
+| 字段 | 默认值 | 说明 |
+|---|---|---|
+| `disable` | `true` | 默认关闭管理台 |
+| `addr` | `127.0.0.1:19090` | 监听地址；设为 `dns.serve:80` 时与 HTTP 代理共享端口 |
+| `password` | 空 | 启用时必填；只用于换取会话 cookie |
+| `state_file` | `/etc/sower/admin-state.json` | 规则增量与配置覆盖的持久化文件；空字符串禁用持久化 |
+| `session_file` | `/etc/sower/sessions.json` | 会话持久化文件，重启后浏览器免重新登录；仅限单进程使用 |
+| `disable_session_persistence` | `false` | 设为 `true` 关闭会话持久化（重启后需重新登录） |
+| `cookie_secure` | `false` | 仅当管理台位于 TLS 终止代理（如 nginx/caddy）之后时设为 `true`，给会话 cookie 加 `Secure` 标记 |
+
 ### 与 HTTP 代理共享端口
 
 如果希望管理台与 HTTP 代理复用同一个 `IP:80`，把 `admin.addr` 设为 `dns.serve:80`：
