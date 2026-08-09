@@ -261,6 +261,7 @@
       </Card.CardHeader>
       <Card.CardContent>
         <AreaChart
+          label="上下行速率历史"
           series={[
             { name: '下行', color: 'var(--chart-1)', values: rates.bytesDown },
             { name: '上行', color: 'var(--chart-4)', values: rates.bytesUp },
@@ -279,6 +280,7 @@
       </Card.CardHeader>
       <Card.CardContent>
         <AreaChart
+          label="DNS 与连接速率历史"
           series={[
             { name: 'DNS', color: 'var(--chart-2)', values: rates.dns },
             { name: '连接', color: 'var(--chart-3)', values: rates.conns },
@@ -297,6 +299,7 @@
       </Card.CardHeader>
       <Card.CardContent>
         <AreaChart
+          label="活跃连接历史"
           series={[
             { name: 'HTTP', color: 'var(--chart-1)', values: history.map((h) => h.activeHttp) },
             { name: 'HTTPS', color: 'var(--chart-4)', values: history.map((h) => h.activeHttps) },
@@ -316,6 +319,7 @@
       </Card.CardHeader>
       <Card.CardContent>
         <AreaChart
+          label="规则命中速率历史"
           series={[
             { name: 'Proxy', color: 'var(--chart-1)', values: rates.proxy },
             { name: 'Direct', color: 'var(--chart-2)', values: rates.direct },

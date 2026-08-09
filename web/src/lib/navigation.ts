@@ -1,9 +1,20 @@
+import type { Category, Source } from "./api";
+
 export type NavKey = "overview" | "rules" | "traffic" | "config";
 
 export interface NavItem {
 	key: NavKey;
 	label: string;
 	description: string;
+}
+
+// FavoritePage is a pinned page that may carry its sub-menu state (rules
+// category, traffic source) so the shortcut lands on the exact view the
+// user pinned.
+export interface FavoritePage {
+	key: NavKey;
+	category?: Category | "miss";
+	source?: Source;
 }
 
 export interface BreadcrumbContextOption {
@@ -19,6 +30,9 @@ export interface BreadcrumbContextSegment {
 	title?: string;
 	tone?: "default" | "strong" | "method";
 	options?: BreadcrumbContextOption[];
+	// Informational segments (e.g. the build version) yield to the nav
+	// controls on narrow viewports instead of wrapping the header.
+	mobileHidden?: boolean;
 }
 
 export const navItems: NavItem[] = [

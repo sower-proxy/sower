@@ -6,7 +6,8 @@
   import Input from '$lib/components/ui/input/input.svelte'
   import Label from '$lib/components/ui/label/label.svelte'
   import Button from '$lib/components/ui/button/button.svelte'
-  import { CircleAlert, LoaderCircle, Sprout } from 'lucide-svelte'
+  import Logo from '$lib/components/Logo.svelte'
+  import { CircleAlert, LoaderCircle } from 'lucide-svelte'
 
   let { onLogin }: { onLogin: () => void } = $props()
 
@@ -38,8 +39,8 @@
 <div class="flex min-h-svh items-center justify-center p-4">
   <Card.Card class="w-full max-w-sm">
     <Card.CardHeader>
-      <div class="mb-1 flex size-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
-        <Sprout class="size-5" aria-hidden="true" />
+      <div class="mb-1 flex size-10 items-center justify-center rounded-lg bg-primary/10">
+        <Logo class="size-6" />
       </div>
       <Card.CardTitle>Sower Admin</Card.CardTitle>
       <Card.CardDescription>输入 sower 配置中的 admin 密码。</Card.CardDescription>
@@ -47,13 +48,13 @@
     <Card.CardContent>
       <form class="grid gap-4" onsubmit={(e) => { e.preventDefault(); submit() }}>
         <div class="grid gap-2">
-          <Label for="admin-password">Password</Label>
+          <Label for="admin-password">密码</Label>
           <Input
             id="admin-password"
             type="password"
             bind:ref={passwordInput}
             bind:value={password}
-            placeholder="Password"
+            placeholder="admin 密码"
             autocomplete="current-password"
           />
         </div>
@@ -66,9 +67,9 @@
         <Button type="submit" disabled={busy || !password}>
           {#if busy}
             <LoaderCircle class="size-4 animate-spin" aria-hidden="true" />
-            Signing in…
+            登录中…
           {:else}
-            Sign in
+            登录
           {/if}
         </Button>
       </form>

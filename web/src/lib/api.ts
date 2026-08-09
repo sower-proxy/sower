@@ -80,10 +80,22 @@ export interface History {
 
 export interface RulesResponse {
 	category: Category;
-	rules: string[];
+	rules: RuleEntry[];
 	total: number;
 	offset: number;
 	limit: number;
+}
+
+export interface RuleEntry {
+	rule: string;
+	count: number;
+	lastSeen?: string;
+}
+
+export interface RuleHit {
+	rule: string;
+	count: number;
+	lastSeen: string;
 }
 
 export interface CategoryTest {
@@ -103,7 +115,13 @@ export interface RulesQuery {
 	q?: string;
 	offset?: number;
 	limit?: number;
+	sort?: RuleSort;
+	dir?: RuleSortDir;
 }
+
+export type RuleSort = "default" | "rule" | "hits" | "last_seen";
+
+export type RuleSortDir = "asc" | "desc";
 
 export interface RuleDelta {
 	add: string[];
@@ -127,6 +145,8 @@ export interface ConfigField {
 	constraint?: string;
 	secret?: boolean;
 	configured?: boolean;
+	type?: string;
+	options?: string[];
 }
 
 export interface ConfigSection {
@@ -140,11 +160,39 @@ export interface ConfigView {
 }
 
 // ConfigChanges is the whitelisted PATCH payload: a present key replaces the
-// override (empty string clears it), an absent key leaves it unchanged.
+// override (empty string or empty list clears it), an absent key leaves it
+// unchanged. List fields (rule sources) carry the full inline lists.
 export interface ConfigChanges {
 	log_level?: string;
 	dns_upstream?: string;
 	dns_fallback?: string;
+	remote_type?: string;
+	remote_addr?: string;
+	remote_tls_server_name?: string;
+	remote_tls_client_hello?: string;
+	remote_tls_insecure_skip_verify?: string;
+	dns_serve?: string;
+	dns_serve6?: string;
+	socks5_addr?: string;
+	admin_session_file?: string;
+	admin_disable_session_persistence?: string;
+	admin_cookie_secure?: string;
+	admin_state_file?: string;
+	router_block_file?: string;
+	router_block_file_prefix?: string;
+	router_block_file_skip_rules?: string[];
+	router_block_rules?: string[];
+	router_direct_file?: string;
+	router_direct_file_prefix?: string;
+	router_direct_file_skip_rules?: string[];
+	router_direct_rules?: string[];
+	router_proxy_file?: string;
+	router_proxy_file_prefix?: string;
+	router_proxy_file_skip_rules?: string[];
+	router_proxy_rules?: string[];
+	router_country_mmdb?: string;
+	router_country_file?: string;
+	router_country_rules?: string[];
 }
 
 export class ApiError extends Error {
@@ -175,6 +223,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 	return (await resp.json()) as T;
 }
 
+export const probeSession = () =>
+	request<void>("/api/session", { cache: "no-store" });
+
 export const api = {
 	login: (password: string) =>
 		request<void>("/api/session", {
@@ -188,6 +239,10 @@ export const api = {
 		if (params?.q) sp.set("q", params.q);
 		if (params?.offset != null) sp.set("offset", String(params.offset));
 		if (params?.limit != null) sp.set("limit", String(params.limit));
+		if (params?.sort && params.sort !== "default") {
+			sp.set("sort", params.sort);
+			if (params?.dir) sp.set("dir", params.dir);
+		}
 		return request<RulesResponse>(`/api/rules?${sp}`);
 	},
 	addRules: (category: Category, rules: string[]) =>
@@ -208,12 +263,18 @@ export const api = {
 			method: "POST",
 			body: JSON.stringify({ category: category ?? "" }),
 		}),
+	ruleMiss: (sort: "count" | "recent", limit?: number) =>
+		request<RuleHit[]>(
+			`/api/rules/miss?sort=${sort}${limit ? `&limit=${limit}` : ""}`,
+		),
 	config: () => request<ConfigView>("/api/config"),
 	patchConfig: (revision: number, changes: ConfigChanges) =>
 		request<ConfigView>("/api/config", {
 			method: "PATCH",
 			body: JSON.stringify({ revision, changes }),
 		}),
+	restart: () =>
+		request<{ status: string }>("/api/restart", { method: "POST" }),
 	traffic: (sort?: DomainSort, source?: Source, client?: string) => {
 		const params: string[] = [];
 		if (sort) params.push(`sort=${sort}`);

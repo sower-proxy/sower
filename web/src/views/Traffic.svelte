@@ -5,11 +5,12 @@
   import { connectLive, live } from '$lib/live.svelte.ts'
   import AreaChart from '$lib/components/AreaChart.svelte'
   import * as Card from '$lib/components/ui/card'
+  import * as Alert from '$lib/components/ui/alert'
   import * as Table from '$lib/components/ui/table'
   import Badge from '$lib/components/ui/badge/badge.svelte'
   import Input from '$lib/components/ui/input/input.svelte'
   import Loading from '$lib/components/Loading.svelte'
-  import { Inbox, Search } from 'lucide-svelte'
+  import { CircleAlert, Inbox, Search } from 'lucide-svelte'
 
   let { source = 'all' }: { source?: Source } = $props()
 
@@ -90,9 +91,10 @@
   <Loading />
 {:else}
   {#if !live.connected}
-    <p class="mb-3 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-      实时连接已断开，正在自动重连…
-    </p>
+    <Alert.Alert variant="destructive" class="mb-4">
+      <CircleAlert class="size-4" />
+      <Alert.AlertDescription>实时连接已断开，正在自动重连…</Alert.AlertDescription>
+    </Alert.Alert>
   {/if}
   <div class="mb-3 grid gap-2 sm:flex sm:items-center">
     <div class="relative min-w-0 w-full sm:w-64">
@@ -105,13 +107,13 @@
       />
     </div>
     <div
-      class="flex shrink-0 items-center gap-0.5 rounded-md border bg-muted/50 p-0.5"
+      class="flex w-fit shrink-0 items-center gap-0.5 rounded-md border bg-muted/50 p-0.5 [&>button]:min-h-11 sm:[&>button]:min-h-0"
       role="group"
       aria-label="数据范围"
     >
       <button
         type="button"
-        class="rounded-sm px-2.5 py-1 text-xs font-medium transition-colors {view === 'live'
+        class="rounded-sm px-2.5 py-1 text-xs font-medium transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50 {view === 'live'
           ? 'bg-card text-foreground shadow-sm'
           : 'text-muted-foreground hover:text-foreground'}"
         aria-pressed={view === 'live'}
@@ -121,7 +123,7 @@
       </button>
       <button
         type="button"
-        class="rounded-sm px-2.5 py-1 text-xs font-medium transition-colors {view === 'totals'
+        class="rounded-sm px-2.5 py-1 text-xs font-medium transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50 {view === 'totals'
           ? 'bg-card text-foreground shadow-sm'
           : 'text-muted-foreground hover:text-foreground'}"
         aria-pressed={view === 'totals'}
@@ -131,7 +133,7 @@
       </button>
       <button
         type="button"
-        class="rounded-sm px-2.5 py-1 text-xs font-medium transition-colors {view === 'blocked'
+        class="rounded-sm px-2.5 py-1 text-xs font-medium transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50 {view === 'blocked'
           ? 'bg-card text-foreground shadow-sm'
           : 'text-muted-foreground hover:text-foreground'}"
         aria-pressed={view === 'blocked'}
@@ -142,14 +144,14 @@
     </div>
     {#if view === 'live'}
       <div
-        class="flex shrink-0 items-center gap-0.5 rounded-md border bg-muted/50 p-0.5"
+        class="flex w-fit shrink-0 items-center gap-0.5 rounded-md border bg-muted/50 p-0.5 [&>button]:min-h-11 sm:[&>button]:min-h-0"
         role="group"
         aria-label="排序方式"
       >
         {#each sortModes as m}
           <button
             type="button"
-            class="rounded-sm px-2.5 py-1 text-xs font-medium transition-colors {sort === m.value
+            class="rounded-sm px-2.5 py-1 text-xs font-medium transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50 {sort === m.value
               ? 'bg-card text-foreground shadow-sm'
               : 'text-muted-foreground hover:text-foreground'}"
             aria-pressed={sort === m.value}
@@ -162,19 +164,19 @@
     {/if}
     <Badge variant="secondary" class="justify-self-end shrink-0 sm:ml-auto">
       {#if view === 'blocked'}
-        {formatCount(visibleBlocked.length)} blocked
+        {formatCount(visibleBlocked.length)} 次拦截
       {:else if visibleDomains.length === domains.length}
-        {formatCount(visibleDomains.length)} domains
+        {formatCount(visibleDomains.length)} 个域名
       {:else}
-        {formatCount(visibleDomains.length)} / {formatCount(domains.length)} domains
+        {formatCount(visibleDomains.length)} / {formatCount(domains.length)} 个域名
       {/if}
     </Badge>
   </div>
   {#if view !== 'blocked' && clients.length > 0}
-    <div class="mb-3 flex flex-wrap items-center gap-1.5" role="group" aria-label="客户端过滤">
+    <div class="mb-3 flex flex-wrap items-center gap-1.5 [&>button]:min-h-11 sm:[&>button]:min-h-0" role="group" aria-label="客户端过滤">
       <button
         type="button"
-        class="rounded-full border px-3 py-1 text-xs font-medium transition-colors {view === 'live' && !client
+        class="rounded-full border px-3 py-1 text-xs font-medium transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50 {view === 'live' && !client
           ? 'border-primary/40 bg-primary/10 text-foreground'
           : 'text-muted-foreground hover:text-foreground'}"
         aria-pressed={view === 'live' && !client}
@@ -185,7 +187,7 @@
       {#each clients as c}
         <button
           type="button"
-          class="rounded-full border px-3 py-1 font-mono text-xs transition-colors {view === 'live' && client === c.ip
+          class="rounded-full border px-3 py-1 font-mono text-xs transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50 {view === 'live' && client === c.ip
             ? 'border-primary/40 bg-primary/10 text-foreground'
             : 'text-muted-foreground hover:text-foreground'}"
           aria-pressed={view === 'live' && client === c.ip}
@@ -205,6 +207,7 @@
     <div>
       <p class="mb-1 text-xs text-muted-foreground">上下行速率 · 全局历史</p>
       <AreaChart
+        label="上下行速率历史（全局）"
         series={[
           { name: '下行', color: 'var(--chart-1)', values: rates.bytesDown },
           { name: '上行', color: 'var(--chart-4)', values: rates.bytesUp },
@@ -218,6 +221,7 @@
     <div>
       <p class="mb-1 text-xs text-muted-foreground">连接与查询 · 全局历史</p>
       <AreaChart
+        label="连接与查询速率历史（全局）"
         series={[
           { name: '连接', color: 'var(--chart-3)', values: rates.conns },
           { name: 'DNS', color: 'var(--chart-2)', values: rates.dns },
@@ -240,9 +244,9 @@
       <Table.Table>
         <Table.TableHeader>
           <Table.TableRow>
-            <Table.TableHead class={headCell}>Domain</Table.TableHead>
-            <Table.TableHead class={headCell + ' text-right'}>Blocked</Table.TableHead>
-            <Table.TableHead class={headCell + ' text-right'}>Last seen</Table.TableHead>
+            <Table.TableHead scope="col" class={headCell}>域名</Table.TableHead>
+            <Table.TableHead scope="col" class={headCell + ' text-right'}>拦截次数</Table.TableHead>
+            <Table.TableHead scope="col" class={headCell + ' text-right'}>最近出现</Table.TableHead>
           </Table.TableRow>
         </Table.TableHeader>
         <Table.TableBody>
@@ -255,7 +259,7 @@
           {/if}
           {#each visibleBlocked as b (b.domain)}
             <Table.TableRow>
-              <Table.TableCell class="max-w-[20rem] truncate font-mono text-xs">{b.domain}</Table.TableCell>
+              <Table.TableCell class="max-w-[20rem] truncate font-mono text-xs" title={b.domain}>{b.domain}</Table.TableCell>
               <Table.TableCell class="text-right tabular-nums">{formatCount(b.count)}</Table.TableCell>
               <Table.TableCell class="text-right text-muted-foreground tabular-nums">
                 {formatTime(b.lastSeen)}
@@ -277,15 +281,15 @@
     <Table.Table>
       <Table.TableHeader>
         <Table.TableRow>
-          <Table.TableHead class={headCell}>Domain</Table.TableHead>
-          <Table.TableHead class={headCell + ' text-right'}>Requests</Table.TableHead>
+          <Table.TableHead scope="col" class={headCell}>域名</Table.TableHead>
+          <Table.TableHead scope="col" class={headCell + ' text-right'}>请求</Table.TableHead>
           {#if showBytes}
-            <Table.TableHead class={headCell + ' text-right'}>Up</Table.TableHead>
-            <Table.TableHead class={headCell + ' text-right'}>Down</Table.TableHead>
-            <Table.TableHead class={headCell + ' text-right'}>Total</Table.TableHead>
+            <Table.TableHead scope="col" class={headCell + ' text-right'}>上行</Table.TableHead>
+            <Table.TableHead scope="col" class={headCell + ' text-right'}>下行</Table.TableHead>
+            <Table.TableHead scope="col" class={headCell + ' text-right'}>总计</Table.TableHead>
           {/if}
-          <Table.TableHead class={headCell}>Client</Table.TableHead>
-          <Table.TableHead class={headCell + ' text-right'}>Last seen</Table.TableHead>
+          <Table.TableHead scope="col" class={headCell}>客户端</Table.TableHead>
+          <Table.TableHead scope="col" class={headCell + ' text-right'}>最近出现</Table.TableHead>
         </Table.TableRow>
       </Table.TableHeader>
       <Table.TableBody>
@@ -298,7 +302,7 @@
         {/if}
         {#each visibleDomains as d (d.domain)}
           <Table.TableRow>
-            <Table.TableCell class="max-w-[20rem] truncate font-mono text-xs">{d.domain}</Table.TableCell>
+            <Table.TableCell class="max-w-[20rem] truncate font-mono text-xs" title={d.domain}>{d.domain}</Table.TableCell>
             <Table.TableCell class="text-right tabular-nums">{formatCount(d.conns)}</Table.TableCell>
             {#if showBytes}
               <Table.TableCell class="text-right tabular-nums">{formatBytes(d.bytesUp)}</Table.TableCell>

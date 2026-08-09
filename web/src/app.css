@@ -105,4 +105,11 @@
     background-image: var(--canvas-texture);
     background-attachment: fixed;
   }
+  /* Fixed attachment forces full-viewport repaints while scrolling on small
+     screens, where the falloff is visually identical once it scrolls. */
+  @media (max-width: 767px) {
+    body {
+      background-attachment: scroll;
+    }
+  }
 }

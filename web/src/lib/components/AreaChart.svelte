@@ -13,6 +13,7 @@
     labels,
     timestamps,
     height = 160,
+    label = '历史数据曲线',
     format = (v: number) => String(v),
   }: {
     series: ChartSeries[]
@@ -22,6 +23,9 @@
     // in every other chart sharing the same timeline.
     timestamps: string[]
     height?: number
+    // label is the accessible name of the chart, distinct per usage site so
+    // screen-reader users can tell the charts apart.
+    label?: string
     format?: (v: number) => string
   } = $props()
 
@@ -124,6 +128,34 @@
     rafId = requestAnimationFrame(applyHover)
   }
 
+  // The chart is focusable so keyboard users can inspect samples with the
+  // arrow keys, matching what pointer hover reveals. shown is the starting
+  // point: it may be a linked crosshair from another chart.
+  function onKeyDown(e: KeyboardEvent) {
+    if (!hasData || labels.length < 2) return
+    const base = shown ?? 0
+    let next: number | null = null
+    switch (e.key) {
+      case 'ArrowLeft':
+        next = Math.max(0, base - 1)
+        break
+      case 'ArrowRight':
+        next = Math.min(labels.length - 1, base + 1)
+        break
+      case 'Home':
+        next = 0
+        break
+      case 'End':
+        next = labels.length - 1
+        break
+      default:
+        return
+    }
+    e.preventDefault()
+    pendingIndex = next
+    applyHover()
+  }
+
   function cancelPending() {
     if (rafId != null) {
       cancelAnimationFrame(rafId)
@@ -151,12 +183,14 @@
         bind:this={svg}
         viewBox={`0 0 ${W} ${H}`}
         preserveAspectRatio="none"
-        class="w-full cursor-crosshair"
+        class="w-full cursor-crosshair focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
         style={`height:${H}px`}
         role="img"
-        aria-label="历史数据曲线"
+        aria-label={label}
+        tabindex="0"
         onpointermove={onMove}
         onpointerleave={onLeave}
+        onkeydown={onKeyDown}
       >
         {#each [0.25, 0.5, 0.75] as g}
           <line
@@ -206,7 +240,7 @@
           ></span>
         {/each}
         <span
-          class="pointer-events-none absolute top-0 -translate-x-1/2 rounded border bg-popover px-1.5 py-0.5 text-[10px] tabular-nums text-muted-foreground shadow-sm"
+          class="pointer-events-none absolute top-0 -translate-x-1/2 rounded border bg-popover px-1.5 py-0.5 text-[11px] tabular-nums text-muted-foreground shadow-sm"
           style={`left:${Math.min(92, Math.max(8, (x(shown) / W) * 100))}%`}
         >
           {shownTime}
@@ -214,7 +248,7 @@
       {/if}
     </div>
 
-    <div class="mt-1.5 flex items-center justify-between text-[10px] text-muted-foreground">
+    <div class="mt-1.5 flex items-center justify-between text-[11px] text-muted-foreground">
       {#each axisLabels as l}
         <span>{l}</span>
       {/each}
