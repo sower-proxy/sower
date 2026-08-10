@@ -153,7 +153,7 @@ func (ac *adminConfig) configViewLocked() admin.ConfigView {
 					ApplyMode: admin.ApplyRestart, Source: source(overrides.RemoteAddr != nil),
 					Constraint: "代理地址，如 proxy.com 或 proxy.com:443"},
 				{Key: "remote.password", ApplyMode: admin.ApplyReadonly, Source: admin.SourceConfig,
-					Secret: true, Configured: cfg.Remote.Password.Value() != ""},
+					Secret: true, Configured: cfg.Remote.Password != ""},
 				{Key: "remote.tls.server_name", Value: cfg.Remote.TLS.ServerName, Editable: true,
 					ApplyMode: admin.ApplyRestart, Source: source(overrides.RemoteTLSServerName != nil),
 					Constraint: "覆盖上游 TLS SNI；留空使用地址"},

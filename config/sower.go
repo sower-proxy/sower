@@ -17,10 +17,15 @@ type RemoteTLSConfig struct {
 }
 
 type RemoteConfig struct {
-	Type     string            `default:"sower" required:"true" usage:"option: sower/socks5"`
-	Addr     string            `required:"true" usage:"proxy address, eg: proxy.com or proxy.com:443"`
-	Password deferlog.Password `usage:"remote proxy password"`
-	TLS      RemoteTLSConfig   `flag:"tls"`
+	Type string `default:"sower" required:"true" usage:"option: sower/socks5"`
+	Addr string `required:"true" usage:"proxy address, eg: proxy.com or proxy.com:443"`
+	// Password is sent verbatim to the upstream proxy. It stays a plain
+	// string (not deferlog.Password): the base64-or-plain heuristic in
+	// deferlog.Password would silently corrupt passwords that happen to be
+	// valid canonical base64, breaking auth against servers that compare
+	// byte-for-byte.
+	Password string          `usage:"remote proxy password"`
+	TLS      RemoteTLSConfig `flag:"tls"`
 }
 
 // SowerConfig represents the configuration for sower client

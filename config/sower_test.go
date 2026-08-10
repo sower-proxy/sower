@@ -271,22 +271,24 @@ func TestSowerConfigLoadsPackagedExamples(t *testing.T) {
 	}
 }
 
-// TestSowerConfigPasswordFieldsRedactOnLog pins the masking contract: logging
-// or printing a SowerConfig must never leak configured passwords. The
-// password fields use deferlog.Password, which renders as *** through
-// fmt.Stringer while keeping the plain value reachable via Value().
-func TestSowerConfigPasswordFieldsRedactOnLog(t *testing.T) {
+// TestSowerConfigAdminPasswordRedactsOnLog pins the masking contract for the
+// admin password field: logging a SowerConfig must never leak it. The admin
+// password uses deferlog.Password, which renders as *** through fmt.Stringer
+// while keeping the plain value reachable via Value(). Remote.Password is a
+// plain string (sent verbatim to the upstream proxy) and is masked at the
+// startup log site instead, see cmd/sower/main.go.
+func TestSowerConfigAdminPasswordRedactsOnLog(t *testing.T) {
 	t.Parallel()
 
 	cfg := SowerConfig{}
-	cfg.Remote.Password = deferlog.NewPassword("topsecret-remote")
+	cfg.Remote.Password = "topsecret-remote"
 	cfg.Admin.Password = deferlog.NewPassword("topsecret-admin")
 
 	var buf bytes.Buffer
 	slog.New(slog.NewTextHandler(&buf, nil)).Error("load config", "config", cfg)
 
 	out := buf.String()
-	for _, secret := range []string{"topsecret-remote", "topsecret-admin"} {
+	for _, secret := range []string{"topsecret-admin"} {
 		if strings.Contains(out, secret) {
 			t.Fatalf("secret %q leaked in slog output", secret)
 		}
@@ -296,10 +298,11 @@ func TestSowerConfigPasswordFieldsRedactOnLog(t *testing.T) {
 	}
 }
 
-// TestSowerConfigPasswordAcceptsBase64 pins that password fields decode
-// canonical base64 values from TOML (a deferlog.Password feature), so
-// operators can avoid writing plaintext secrets into config files.
-func TestSowerConfigPasswordAcceptsBase64(t *testing.T) {
+// TestSowerConfigRemotePasswordVerbatim pins that the remote password is
+// taken verbatim from TOML: unlike the admin password, it must round-trip
+// byte-for-byte to the upstream proxy, so even values that happen to be valid
+// canonical base64 (like "fnhkwfnh") must not be decoded.
+func TestSowerConfigRemotePasswordVerbatim(t *testing.T) {
 	t.Parallel()
 
 	path := t.TempDir() + "/sower.toml"
@@ -307,6 +310,50 @@ func TestSowerConfigPasswordAcceptsBase64(t *testing.T) {
 [remote]
 type = "sower"
 addr = "example.com"
+password = "fnhkwfnh"
+
+[dns]
+disable = true
+fallback = "223.5.5.5"
+
+[socks_5]
+disable = true
+`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	var cfg SowerConfig
+	if err := aconfig.LoaderFor(&cfg, aconfig.Config{
+		SkipEnv:   true,
+		SkipFlags: true,
+		Files:     []string{path},
+		FileDecoders: map[string]aconfig.FileDecoder{
+			".toml": aconfigtoml.New(),
+		},
+	}).Load(); err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if got := cfg.Remote.Password; got != "fnhkwfnh" {
+		t.Fatalf("remote password = %q, want verbatim fnhkwfnh", got)
+	}
+}
+
+// TestSowerConfigAdminPasswordAcceptsBase64 pins that the admin password
+// field still decodes canonical base64 values from TOML (a deferlog.Password
+// feature), so operators can avoid writing plaintext admin secrets into
+// config files.
+func TestSowerConfigAdminPasswordAcceptsBase64(t *testing.T) {
+	t.Parallel()
+
+	path := t.TempDir() + "/sower.toml"
+	if err := os.WriteFile(path, []byte(`
+[remote]
+type = "sower"
+addr = "example.com"
+
+[admin]
+disable = false
+addr = "127.0.0.1:19090"
 password = "c2VjcmV0LXBhc3M="
 
 [dns]
@@ -330,7 +377,7 @@ disable = true
 	}).Load(); err != nil {
 		t.Fatalf("load config: %v", err)
 	}
-	if got := cfg.Remote.Password.Value(); got != "secret-pass" {
-		t.Fatalf("base64 password = %q, want secret-pass", got)
+	if got := cfg.Admin.Password.Value(); got != "secret-pass" {
+		t.Fatalf("admin base64 password = %q, want secret-pass", got)
 	}
 }

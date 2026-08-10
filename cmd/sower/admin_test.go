@@ -254,7 +254,7 @@ func TestAdminConfigViewAndApply(t *testing.T) {
 	base := config.SowerConfig{LogLevel: slog.LevelInfo}
 	base.Remote.Type = "sower"
 	base.Remote.Addr = "proxy.example.com"
-	base.Remote.Password = deferlog.NewPassword("supersecret")
+	base.Remote.Password = "supersecret"
 	base.DNS.Serve = "127.0.0.1"
 	base.DNS.Upstream = "8.8.8.8"
 	base.DNS.Fallback = "223.5.5.5"

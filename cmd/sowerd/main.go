@@ -144,7 +144,7 @@ func run(ctx context.Context, conf config.SowerdConfig) error {
 	defer ln.Close()
 
 	protocolHandlers := []proxyProtocolHandler{
-		newSowerProtocolHandler(transportSower.New(conf.Password.Value())),
+		newSowerProtocolHandler(transportSower.New(conf.Password)),
 	}
 
 	httpsErrCh := make(chan error, 1)
