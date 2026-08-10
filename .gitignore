@@ -34,6 +34,7 @@
 /*.tf
 # frontend
 /web/node_modules
+/web/dist
 
 # agent working data (subagent artifacts, not project content)
 /.pi-subagents
