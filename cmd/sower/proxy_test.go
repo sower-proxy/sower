@@ -429,3 +429,73 @@ func newTestStats(t *testing.T) *admin.Stats {
 	}
 	return s
 }
+
+func TestHandleHTTPConnConnectTunnelsToTargetPort(t *testing.T) {
+	t.Parallel()
+
+	downstreamServer, downstreamClient := net.Pipe()
+	defer downstreamClient.Close()
+
+	upstreamClient, upstreamServer := net.Pipe()
+	defer upstreamServer.Close()
+
+	request := []byte("CONNECT example.com:443 HTTP/1.1\r\nHost: example.com:443\r\n\r\n")
+	tunnelData := []byte("\x16\x03\x01\x00\x05hello")
+	var (
+		gotHost string
+		gotPort uint16
+	)
+	r := &router.Router{
+		BlockRule:  router.NewRuleSet("example.com"),
+		DirectRule: router.NewRuleSet(),
+		ProxyRule:  router.NewRuleSet(),
+		ProxyDial: func(network, host string, port uint16) (net.Conn, error) {
+			gotHost = host
+			gotPort = port
+			return upstreamClient, nil
+		},
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		handleHTTPConn(downstreamServer, r, newTestStats(t))
+	}()
+
+	downstreamClient.SetWriteDeadline(time.Now().Add(2 * time.Second))
+	if _, err := downstreamClient.Write(request); err != nil {
+		t.Fatalf("write connect request: %v", err)
+	}
+
+	// The proxy must acknowledge CONNECT before tunneling.
+	reply := make([]byte, len("HTTP/1.1 200 Connection established\r\n\r\n"))
+	downstreamClient.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if _, err := io.ReadFull(downstreamClient, reply); err != nil {
+		t.Fatalf("read connect reply: %v", err)
+	}
+	if !strings.HasPrefix(string(reply), "HTTP/1.1 200") {
+		t.Fatalf("unexpected connect reply: %q", string(reply))
+	}
+
+	if _, err := downstreamClient.Write(tunnelData); err != nil {
+		t.Fatalf("write tunnel data: %v", err)
+	}
+
+	// The request head must be consumed; only raw tunnel data reaches the target.
+	gotData := make([]byte, len(tunnelData))
+	upstreamServer.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if _, err := io.ReadFull(upstreamServer, gotData); err != nil {
+		t.Fatalf("read upstream data: %v", err)
+	}
+	if string(gotData) != string(tunnelData) {
+		t.Fatalf("unexpected upstream data: %q", gotData)
+	}
+	if gotHost != "example.com" || gotPort != 443 {
+		t.Fatalf("unexpected proxy target: %s:%d", gotHost, gotPort)
+	}
+
+	_ = downstreamClient.Close()
+	_ = upstreamServer.Close()
+	waitForHandler(t, &wg)
+}

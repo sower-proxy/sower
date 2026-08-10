@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -115,6 +116,20 @@ func hostOnly(addr string) string {
 	return addr
 }
 
+// splitHostPort splits host:port, falling back to defPort when addr has no
+// port or the port is invalid.
+func splitHostPort(addr string, defPort uint16) (string, uint16) {
+	host, portStr, err := net.SplitHostPort(addr)
+	if err != nil {
+		return addr, defPort
+	}
+	p, err := strconv.Atoi(portStr)
+	if err != nil || p < 1 || p > 65535 {
+		return host, defPort
+	}
+	return host, uint16(p)
+}
+
 func upstreamDialAddr(addr, defaultPort string) (string, error) {
 	if host, port, err := net.SplitHostPort(addr); err == nil {
 		if host == "" || port == "" {
@@ -189,14 +204,30 @@ func handleHTTPConn(conn net.Conn, r *router.Router, stats *admin.Stats) {
 	_ = rereadConn.SetDeadline(time.Time{})
 
 	stats.BindConn(conn, hostOnly(req.Host))
-	rc, err := r.DialProxyOnly("tcp", req.Host, 80)
+	defPort := uint16(80)
+	if req.Method == http.MethodConnect {
+		// CONNECT targets use the port from the request line, defaulting to 443.
+		defPort = 443
+	}
+	host, port := splitHostPort(req.Host, defPort)
+	rc, err := r.DialProxyOnly("tcp", host, port)
 	if err != nil {
 		slog.Error("dial proxy", "error", err, "host", req.Host, "req", req.URL)
 		return
 	}
 	defer rc.Close()
 
-	rereadConn.Stop().Reread()
+	if req.Method == http.MethodConnect {
+		// Acknowledge CONNECT before tunneling raw bytes; the request head
+		// must not be replayed to the target, which expects TLS data.
+		rereadConn.Stop().Reset()
+		if _, err := rereadConn.Write([]byte("HTTP/1.1 200 Connection established\r\n\r\n")); err != nil {
+			slog.Debug("write connect response", "error", err, "host", host, "port", port)
+			return
+		}
+	} else {
+		rereadConn.Stop().Reread()
+	}
 	err = relay.Relay(rereadConn, rc)
 	if err != nil {
 		slog.Debug("serve http", "error", err, "host", req.Host, "spend", time.Since(start))
