@@ -80,13 +80,14 @@ type RuleManager interface {
 
 // Options configures the admin server.
 type Options struct {
-	Password     string
-	Version      string
-	Date         string
-	Rules        RuleManager
-	Stats        *Stats
-	SessionFile  string
-	CookieSecure bool
+	Password          string
+	TemporaryPassword bool
+	Version           string
+	Date              string
+	Rules             RuleManager
+	Stats             *Stats
+	SessionFile       string
+	CookieSecure      bool
 	// Config enables the config display/edit endpoints when non-nil.
 	Config ConfigManager
 	// Restart triggers a process restart when non-nil; the endpoint returns
@@ -123,6 +124,7 @@ func NewServer(opts Options) *Server {
 	mux.HandleFunc("POST /api/session", s.handleLogin)
 	mux.HandleFunc("GET /api/session", s.mutateGuard(s.auth(s.handleSession)))
 	mux.HandleFunc("DELETE /api/session", s.handleLogout)
+	mux.HandleFunc("GET /api/login-info", s.handleLoginInfo)
 	mux.HandleFunc("GET /api/status", s.mutateGuard(s.auth(s.handleStatus)))
 	mux.HandleFunc("GET /api/rules", s.mutateGuard(s.auth(s.handleRulesList)))
 	mux.HandleFunc("POST /api/rules", s.mutateGuard(s.auth(s.handleRulesAdd)))
@@ -166,6 +168,16 @@ func (s *Server) Serve(ln net.Listener) error {
 // Shutdown gracefully stops the server.
 func (s *Server) Shutdown(ctx context.Context) error {
 	return s.http.Shutdown(ctx)
+}
+
+// handleLoginInfo reports whether the admin console runs with a
+// startup-generated temporary password, so the login page can tell the user
+// where to find it. It is intentionally public: the login page needs it
+// before authenticating, and it leaks no credential material.
+func (s *Server) handleLoginInfo(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"temporaryPassword": s.opts.TemporaryPassword,
+	})
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {

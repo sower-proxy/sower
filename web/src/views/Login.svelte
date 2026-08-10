@@ -14,10 +14,19 @@
   let password = $state('')
   let error = $state('')
   let busy = $state(false)
+  let tempPassword = $state(false)
   let passwordInput: HTMLInputElement | null = $state(null)
 
   onMount(() => {
     passwordInput?.focus()
+    api
+      .loginInfo()
+      .then((info) => {
+        tempPassword = info.temporaryPassword
+      })
+      .catch(() => {
+        // login info is best-effort; the login form still works without it
+      })
   })
 
   async function submit() {
@@ -46,6 +55,14 @@
       <Card.CardDescription>输入 sower 配置中的 admin 密码。</Card.CardDescription>
     </Card.CardHeader>
     <Card.CardContent>
+      {#if tempPassword}
+        <Alert.Alert class="mb-4">
+          <CircleAlert class="size-4" />
+          <Alert.AlertDescription>
+            未配置固定密码，请使用 sower 启动日志中打印的临时密码登录（每次重启会更换；已登录的浏览器不受影响）。
+          </Alert.AlertDescription>
+        </Alert.Alert>
+      {/if}
       <form class="grid gap-4" onsubmit={(e) => { e.preventDefault(); submit() }}>
         <div class="grid gap-2">
           <Label for="admin-password">密码</Label>

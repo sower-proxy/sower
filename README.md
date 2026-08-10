@@ -276,10 +276,10 @@ sudo sowerd -i
 [admin]
 disable  = false               # 默认 true
 addr     = "127.0.0.1:19090"  # 默认仅监听回环
-password = "your_admin_password"  # 启用时必填
+password = "your_admin_password"  # 示例值；留空则启动时自动生成临时密码
 ```
 
-启动后打开 `http://127.0.0.1:19090`，输入 admin 密码即可。密码只用于换取会话 cookie，不会保存在浏览器里。
+启动后打开 `http://127.0.0.1:19090`，输入 admin 密码即可。未配置 `password` 时，登录页会提示使用启动日志中打印的临时密码（每次重启更换；已登录的浏览器通过会话持久化免重新登录）。密码只用于换取会话 cookie，不会保存在浏览器里。
 
 ### Admin 配置项
 
@@ -287,7 +287,7 @@ password = "your_admin_password"  # 启用时必填
 |---|---|---|
 | `disable` | `true` | 默认关闭管理台 |
 | `addr` | `127.0.0.1:19090` | 监听地址；设为 `dns.serve:80` 时与 HTTP 代理共享端口 |
-| `password` | 空 | 启用时必填；只用于换取会话 cookie |
+| `password` | 空 | 未配置时启动自动生成一次性随机密码（打印到启动日志）；只用于换取会话 cookie |
 | `state_file` | `/etc/sower/admin-state.json` | 规则增量与配置覆盖的持久化文件；空字符串禁用持久化 |
 | `session_file` | `/etc/sower/sessions.json` | 会话持久化文件，重启后浏览器免重新登录；仅限单进程使用 |
 | `disable_session_persistence` | `false` | 设为 `true` 关闭会话持久化（重启后需重新登录） |
@@ -325,6 +325,7 @@ password = "your_admin_password"
 `sower.toml` 是默认示例配置。完整示例见 [config/sower.toml](./config/sower.toml)。
 
 配置格式仅支持 TOML（`sower.toml` / `sowerd.toml`）。旧版本支持的同名 YAML 配置文件已不再被读取，升级前请将 YAML 配置迁移为 TOML。
+
 几个容易踩坑的点：
 
 - 远程规则文件会通过上游代理下载，不会直接出网。

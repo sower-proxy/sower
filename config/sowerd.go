@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"os"
 	"strings"
+
+	"github.com/sower-proxy/deferlog/v2"
 )
 
 const ExampleSowerdConfigTOML = `# Sowerd configuration example (TOML format)
@@ -52,11 +54,11 @@ type SiteRoute struct {
 
 // SowerdConfig represents the configuration for sowerd daemon
 type SowerdConfig struct {
-	LogLevel   slog.Level  `default:"info" usage:"log level: debug, info, warn, error"`
-	ServeIP    string      `usage:"listen to port 80 443 of the IP"`
-	Password   string      `required:"true"`
-	FakeSite   string      `default:"/var/www" usage:"fake site address or directoy. serving on 127.0.0.1:80 if directory"`
-	SiteRoutes []SiteRoute `usage:"domain-to-upstream routing rules for fallback traffic"`
+	LogLevel   slog.Level        `default:"info" usage:"log level: debug, info, warn, error"`
+	ServeIP    string            `usage:"listen to port 80 443 of the IP"`
+	Password   deferlog.Password `required:"true"`
+	FakeSite   string            `default:"/var/www" usage:"fake site address or directoy. serving on 127.0.0.1:80 if directory"`
+	SiteRoutes []SiteRoute       `usage:"domain-to-upstream routing rules for fallback traffic"`
 
 	Cert struct {
 		Email string
@@ -70,7 +72,7 @@ func (c *SowerdConfig) Validate() error {
 	if c.ServeIP != "" && net.ParseIP(c.ServeIP) == nil {
 		return fmt.Errorf("invalid serve ip: %q", c.ServeIP)
 	}
-	if c.Password == "" {
+	if c.Password.Value() == "" {
 		return fmt.Errorf("password is required")
 	}
 	if c.FakeSite == "" {

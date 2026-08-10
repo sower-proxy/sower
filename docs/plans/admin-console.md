@@ -26,10 +26,10 @@ Scope: `cmd/sower`（客户端）管理控制台，前端 embed 进二进制
 [admin]
 disable  = true                  # 默认禁用
 addr     = "127.0.0.1:19090"     # 默认仅回环
-password = ""                    # 启用时必填
+password = ""                    # 为空时启动自动生成
 ```
 
-校验规则：`disable=false` 时，`addr` 必须是合法 `host:port`，且 `password` 非空；否则启动失败。
+校验规则：`disable=false` 时，`addr` 必须是合法 `host:port`；`password` 为空时启动自动生成一次性随机密码并打印到日志（已实现变更，见 `ARCHITECTURE.md`）。
 
 ## 后端设计
 
@@ -128,5 +128,4 @@ API：
 
 ## 文档收尾
 
-- 定稿后回写 `ARCHITECTURE.md`（admin 边界、数据流、设计决策）与 `README.md`（admin 用法）
-- `config/sower.toml` / `sower.yaml` 示例同步 `[admin]` 段
+- 定稿后回写 `ARCHITECTURE.md`（admin 边界、数据流、设计决策）与 `README.md`（admin 用法）；`[admin]` 段示例以 `config/sower.toml` 为准

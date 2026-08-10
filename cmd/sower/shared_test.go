@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sower-proxy/deferlog/v2"
 	"github.com/sower-proxy/sower/config"
 	"github.com/sower-proxy/sower/internal/admin"
 )
@@ -22,7 +23,7 @@ func TestSharedAdminHTTPAddr(t *testing.T) {
 	base := config.SowerConfig{}
 	base.DNS.Serve = "127.0.0.1"
 	base.Admin.Addr = "127.0.0.1:80"
-	base.Admin.Password = "secret"
+	base.Admin.Password = deferlog.NewPassword("secret")
 
 	cfg := base
 	if addr, ok := sharedAdminHTTPAddr(cfg); !ok || addr != "127.0.0.1:80" {

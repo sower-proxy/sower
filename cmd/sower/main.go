@@ -113,7 +113,7 @@ func init() {
 		"log_level", conf.LogLevel,
 		"remote_type", conf.Remote.Type,
 		"remote_addr", conf.Remote.Addr,
-		"remote_password", deferlog.Secret(conf.Remote.Password),
+		"remote_password", conf.Remote.Password,
 		"remote_tls", conf.Remote.TLS,
 		"dns", conf.DNS,
 		"socks5", conf.Socks5,
@@ -136,7 +136,7 @@ func run(ctx context.Context, stop context.CancelFunc, cfg config.SowerConfig) e
 	applyConfigOverrides(&cfg, stateStore.ConfigOverrides())
 
 	upstreamDNS := effectiveUpstreamDNS(cfg)
-	proxyDial, err := GenProxyDial(cfg.Remote.Type, cfg.Remote.Addr, cfg.Remote.Password, upstreamDNS, upstreamtls.Options{
+	proxyDial, err := GenProxyDial(cfg.Remote.Type, cfg.Remote.Addr, cfg.Remote.Password.Value(), upstreamDNS, upstreamtls.Options{
 		ServerName:         cfg.Remote.TLS.ServerName,
 		ClientHello:        cfg.Remote.TLS.ClientHello,
 		InsecureSkipVerify: cfg.Remote.TLS.InsecureSkipVerify,

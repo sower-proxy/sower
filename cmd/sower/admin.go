@@ -20,6 +20,24 @@ import (
 
 const adminShutdownTimeout = 5 * time.Second
 
+// resolveAdminPassword returns the configured admin password, or a random one
+// generated at startup when none is configured, plus whether the fallback was
+// used. The generated password is printed once in the startup log
+// (intentionally: it is the only way to log in) and changes on every restart;
+// persisted sessions keep an already logged-in browser working across
+// restarts. The temporary flag drives the /api/login-info hint on the login
+// page.
+func resolveAdminPassword(configured string) (password string, temporary bool) {
+	if configured != "" {
+		return configured, false
+	}
+	pw := admin.GeneratePassword()
+	slog.Warn("admin enabled without a password; generated a temporary password",
+		"password", pw,
+		"hint", "set [admin].password to use a fixed password")
+	return pw, true
+}
+
 // adminRules adapts the router's rule sets to the admin RuleManager
 // interface. Mutations persist through the StateStore first; the runtime
 // rule set only changes after a successful write, so a persist failure
@@ -410,16 +428,18 @@ func startAdminListener(ctx context.Context, wg *sync.WaitGroup, cfg config.Sowe
 		return nil
 	}
 
+	password, temporary := resolveAdminPassword(cfg.Admin.Password.Value())
 	srv := admin.NewServer(admin.Options{
-		Password:     cfg.Admin.Password,
-		Version:      version,
-		Date:         date,
-		Rules:        rules,
-		Stats:        stats,
-		SessionFile:  cfg.AdminSessionFile(),
-		CookieSecure: cfg.Admin.CookieSecure,
-		Config:       configMgr,
-		Restart:      restartFn(restartCh),
+		Password:          password,
+		TemporaryPassword: temporary,
+		Version:           version,
+		Date:              date,
+		Rules:             rules,
+		Stats:             stats,
+		SessionFile:       cfg.AdminSessionFile(),
+		CookieSecure:      cfg.Admin.CookieSecure,
+		Config:            configMgr,
+		Restart:           restartFn(restartCh),
 	})
 
 	ln, err := net.Listen("tcp", cfg.Admin.Addr)
@@ -458,16 +478,18 @@ func startSharedHTTPListener(ctx context.Context, wg *sync.WaitGroup, cfg config
 	}
 	slog.Info("service listening", "service", "http proxy + admin", "network", "tcp", "addr", addr)
 
+	password, temporary := resolveAdminPassword(cfg.Admin.Password.Value())
 	srv := admin.NewServer(admin.Options{
-		Password:     cfg.Admin.Password,
-		Version:      version,
-		Date:         date,
-		Rules:        rules,
-		Stats:        stats,
-		SessionFile:  cfg.AdminSessionFile(),
-		CookieSecure: cfg.Admin.CookieSecure,
-		Config:       configMgr,
-		Restart:      restartFn(restartCh),
+		Password:          password,
+		TemporaryPassword: temporary,
+		Version:           version,
+		Date:              date,
+		Rules:             rules,
+		Stats:             stats,
+		SessionFile:       cfg.AdminSessionFile(),
+		CookieSecure:      cfg.Admin.CookieSecure,
+		Config:            configMgr,
+		Restart:           restartFn(restartCh),
 	})
 	go func() {
 		<-ctx.Done()

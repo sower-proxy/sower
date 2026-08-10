@@ -326,6 +326,51 @@ func decodeBody(t *testing.T, resp *http.Response) map[string]any {
 	return out
 }
 
+func TestLoginInfoTemporaryPassword(t *testing.T) {
+	s := NewServer(Options{Password: "generated", TemporaryPassword: true, Rules: newFakeRules()})
+	ts := httptest.NewServer(s.http.Handler)
+	t.Cleanup(ts.Close)
+
+	resp, err := http.Get(ts.URL + "/api/login-info")
+	if err != nil {
+		t.Fatalf("get login info: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	var out struct {
+		TemporaryPassword bool `json:"temporaryPassword"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if !out.TemporaryPassword {
+		t.Fatal("expected temporaryPassword=true for a startup-generated password")
+	}
+}
+
+func TestLoginInfoFixedPassword(t *testing.T) {
+	s := NewServer(Options{Password: "secret", Rules: newFakeRules()})
+	ts := httptest.NewServer(s.http.Handler)
+	t.Cleanup(ts.Close)
+
+	resp, err := http.Get(ts.URL + "/api/login-info")
+	if err != nil {
+		t.Fatalf("get login info: %v", err)
+	}
+	defer resp.Body.Close()
+	var out struct {
+		TemporaryPassword bool `json:"temporaryPassword"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if out.TemporaryPassword {
+		t.Fatal("expected temporaryPassword=false for a configured password")
+	}
+}
+
 func TestLoginWrongPassword(t *testing.T) {
 	ts := newTestServer(t, newFakeRules())
 	resp, err := http.Post(ts.URL+"/api/session", "application/json", strings.NewReader(`{"password":"wrong"}`))

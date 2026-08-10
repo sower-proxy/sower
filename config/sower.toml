@@ -19,7 +19,7 @@ insecure_skip_verify = false # Skip upstream TLS certificate verification
 [dns]
 disable = false        # Disable DNS proxy
 serve = "127.0.0.1"    # DNS server IP address
-serve_6 = ""           # DNS server IPv6 address (optional); aconfig maps Serve6 -> serve_6
+serve_6 = ""           # DNS server IPv6 address (optional)
 serve_iface = ""       # Network interface to get IP from (optional)
 upstream = "8.8.8.8"   # Upstream DNS server (optional)
 fallback = "223.5.5.5" # Fallback DNS server
@@ -32,7 +32,8 @@ addr = "127.0.0.1:1080" # SOCKS5 listen address
 
 # Admin web server configuration
 # Serves the embedded admin console for runtime rule management and traffic monitoring.
-# Disabled by default; when enabled, a non-empty password is required.
+# Disabled by default; when enabled, set a password or one is generated at startup
+# and printed to the log.
 #
 # Standalone mode (default): admin listens on its own address, e.g. 127.0.0.1:19090.
 # Shared mode: set addr to the DNS HTTP proxy address (dns.serve:80) to serve the
@@ -42,7 +43,7 @@ addr = "127.0.0.1:1080" # SOCKS5 listen address
 [admin]
 disable = true           # Disable admin web server
 addr = "127.0.0.1:19090" # Admin web server listen address
-password = ""            # Admin web server password (required when enabled)
+password = "your_admin_password" # Admin web server password; empty = random at startup
 session_file = "/etc/sower/sessions.json" # Persist admin sessions for one sower process only
 disable_session_persistence = false # Set true to disable session persistence
 cookie_secure = false      # Set true only when a TLS-terminating proxy protects this origin

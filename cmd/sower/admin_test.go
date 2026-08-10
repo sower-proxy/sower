@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sower-proxy/deferlog/v2"
 	"github.com/sower-proxy/sower/config"
 	"github.com/sower-proxy/sower/internal/admin"
 	"github.com/sower-proxy/sower/router"
@@ -253,13 +254,13 @@ func TestAdminConfigViewAndApply(t *testing.T) {
 	base := config.SowerConfig{LogLevel: slog.LevelInfo}
 	base.Remote.Type = "sower"
 	base.Remote.Addr = "proxy.example.com"
-	base.Remote.Password = "supersecret"
+	base.Remote.Password = deferlog.NewPassword("supersecret")
 	base.DNS.Serve = "127.0.0.1"
 	base.DNS.Upstream = "8.8.8.8"
 	base.DNS.Fallback = "223.5.5.5"
 	base.Socks5.Addr = "127.0.0.1:1080"
 	base.Admin.Addr = "127.0.0.1:19090"
-	base.Admin.Password = "adminsecret"
+	base.Admin.Password = deferlog.NewPassword("adminsecret")
 	base.Admin.StateFile = "/etc/sower/admin-state.json"
 
 	state := admin.LoadStateStore("")
@@ -464,6 +465,21 @@ func runAdminRulesMutation(i int, rules *adminRules, errs chan<- error, wg *sync
 	}
 	if err != nil {
 		errs <- err
+	}
+}
+
+func TestResolveAdminPassword(t *testing.T) {
+	t.Parallel()
+
+	if pw, temp := resolveAdminPassword("secret"); pw != "secret" || temp {
+		t.Fatalf("configured password: got (%q, %v), want (secret, false)", pw, temp)
+	}
+	pw, temp := resolveAdminPassword("")
+	if pw == "" || !temp {
+		t.Fatalf("empty password: got (%q, %v), want (non-empty, true)", pw, temp)
+	}
+	if pw2, _ := resolveAdminPassword(""); pw2 == pw {
+		t.Fatal("temporary password must differ across startups")
 	}
 }
 

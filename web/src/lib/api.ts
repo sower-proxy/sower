@@ -195,6 +195,10 @@ export interface ConfigChanges {
 	router_country_rules?: string[];
 }
 
+export interface LoginInfo {
+	temporaryPassword: boolean;
+}
+
 export class ApiError extends Error {
 	constructor(
 		public status: number,
@@ -227,6 +231,7 @@ export const probeSession = () =>
 	request<void>("/api/session", { cache: "no-store" });
 
 export const api = {
+	loginInfo: () => request<LoginInfo>("/api/login-info"),
 	login: (password: string) =>
 		request<void>("/api/session", {
 			method: "POST",

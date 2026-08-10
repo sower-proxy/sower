@@ -245,3 +245,16 @@ func secureEqual(a, b string) bool {
 	hb := sha256.Sum256([]byte(b))
 	return subtle.ConstantTimeCompare(ha[:], hb[:]) == 1
 }
+
+// GeneratePassword returns a cryptographically random 128-bit password
+// (hex-encoded). cmd/sower uses it when the admin console is enabled
+// without a configured password, so the listener never runs with an empty
+// credential. The generated value is printed once in the startup log and
+// changes on every restart.
+func GeneratePassword() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		panic(fmt.Sprintf("read crypto/rand: %v", err))
+	}
+	return hex.EncodeToString(b[:])
+}

@@ -1,11 +1,15 @@
 package config
 
 import (
+	"bytes"
+	"log/slog"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/cristalhq/aconfig"
 	"github.com/cristalhq/aconfig/aconfigtoml"
+	"github.com/sower-proxy/deferlog/v2"
 )
 
 func TestSowerConfigValidateRejectsInvalidRemoteType(t *testing.T) {
@@ -84,7 +88,11 @@ func TestSowerConfigValidateRejectsInvalidTLSClientHello(t *testing.T) {
 	}
 }
 
-func TestSowerConfigValidateAdminRequiresPassword(t *testing.T) {
+// TestSowerConfigValidateAdminAllowsEmptyPassword pins the startup-fallback
+// contract: enabling the admin console without a password must not fail
+// validation; cmd/sower generates a random password at runtime and prints it
+// to the startup log.
+func TestSowerConfigValidateAdminAllowsEmptyPassword(t *testing.T) {
 	t.Parallel()
 
 	cfg := SowerConfig{}
@@ -96,8 +104,8 @@ func TestSowerConfigValidateAdminRequiresPassword(t *testing.T) {
 	cfg.Admin.Disable = false
 	cfg.Admin.Addr = "127.0.0.1:19090"
 
-	if err := cfg.Validate(); err == nil {
-		t.Fatal("expected validation error for missing admin password")
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("validate admin with empty password: %v", err)
 	}
 }
 
@@ -112,7 +120,7 @@ func TestSowerConfigValidateAdminRejectsInvalidAddr(t *testing.T) {
 	cfg.Socks5.Disable = true
 	cfg.Admin.Disable = false
 	cfg.Admin.Addr = "127.0.0.1"
-	cfg.Admin.Password = "secret"
+	cfg.Admin.Password = deferlog.NewPassword("secret")
 
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("expected validation error for invalid admin address")
@@ -130,25 +138,52 @@ func TestSowerConfigValidateAdminAllowsValidConfig(t *testing.T) {
 	cfg.Socks5.Disable = true
 	cfg.Admin.Disable = false
 	cfg.Admin.Addr = "127.0.0.1:19090"
-	cfg.Admin.Password = "secret"
+	cfg.Admin.Password = deferlog.NewPassword("secret")
 
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("validate config: %v", err)
 	}
 }
 
-func TestSowerConfigValidateAdminZeroValueIsIgnored(t *testing.T) {
+// TestSowerConfigAdminDisabledByDefault pins the upgrade-compatible default:
+// a config without an [admin] section must load with admin disabled (the aconfig
+// default) and pass validation, so existing deployments keep working after
+// upgrading without adding an [admin] block or password.
+func TestSowerConfigAdminDisabledByDefault(t *testing.T) {
 	t.Parallel()
 
-	cfg := SowerConfig{}
-	cfg.Remote.Type = "sower"
-	cfg.Remote.Addr = "example.com"
-	cfg.DNS.Disable = true
-	cfg.DNS.Fallback = "223.5.5.5"
-	cfg.Socks5.Disable = true
+	path := t.TempDir() + "/sower.toml"
+	if err := os.WriteFile(path, []byte(`
+[remote]
+type = "sower"
+addr = "example.com"
 
+[dns]
+serve = "127.0.0.1"
+fallback = "223.5.5.5"
+
+[socks_5]
+disable = true
+`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	var cfg SowerConfig
+	if err := aconfig.LoaderFor(&cfg, aconfig.Config{
+		SkipEnv:   true,
+		SkipFlags: true,
+		Files:     []string{path},
+		FileDecoders: map[string]aconfig.FileDecoder{
+			".toml": aconfigtoml.New(),
+		},
+	}).Load(); err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if !cfg.Admin.Disable {
+		t.Fatal("expected admin disabled by default without an [admin] section")
+	}
 	if err := cfg.Validate(); err != nil {
-		t.Fatalf("validate zero-value admin: %v", err)
+		t.Fatalf("validate config without admin section: %v", err)
 	}
 }
 
@@ -233,5 +268,69 @@ func TestSowerConfigLoadsPackagedExamples(t *testing.T) {
 				t.Fatalf("validate config: %v", err)
 			}
 		})
+	}
+}
+
+// TestSowerConfigPasswordFieldsRedactOnLog pins the masking contract: logging
+// or printing a SowerConfig must never leak configured passwords. The
+// password fields use deferlog.Password, which renders as *** through
+// fmt.Stringer while keeping the plain value reachable via Value().
+func TestSowerConfigPasswordFieldsRedactOnLog(t *testing.T) {
+	t.Parallel()
+
+	cfg := SowerConfig{}
+	cfg.Remote.Password = deferlog.NewPassword("topsecret-remote")
+	cfg.Admin.Password = deferlog.NewPassword("topsecret-admin")
+
+	var buf bytes.Buffer
+	slog.New(slog.NewTextHandler(&buf, nil)).Error("load config", "config", cfg)
+
+	out := buf.String()
+	for _, secret := range []string{"topsecret-remote", "topsecret-admin"} {
+		if strings.Contains(out, secret) {
+			t.Fatalf("secret %q leaked in slog output", secret)
+		}
+	}
+	if !strings.Contains(out, "***") {
+		t.Fatal("expected masked *** in slog output")
+	}
+}
+
+// TestSowerConfigPasswordAcceptsBase64 pins that password fields decode
+// canonical base64 values from TOML (a deferlog.Password feature), so
+// operators can avoid writing plaintext secrets into config files.
+func TestSowerConfigPasswordAcceptsBase64(t *testing.T) {
+	t.Parallel()
+
+	path := t.TempDir() + "/sower.toml"
+	if err := os.WriteFile(path, []byte(`
+[remote]
+type = "sower"
+addr = "example.com"
+password = "c2VjcmV0LXBhc3M="
+
+[dns]
+disable = true
+fallback = "223.5.5.5"
+
+[socks_5]
+disable = true
+`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	var cfg SowerConfig
+	if err := aconfig.LoaderFor(&cfg, aconfig.Config{
+		SkipEnv:   true,
+		SkipFlags: true,
+		Files:     []string{path},
+		FileDecoders: map[string]aconfig.FileDecoder{
+			".toml": aconfigtoml.New(),
+		},
+	}).Load(); err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if got := cfg.Remote.Password.Value(); got != "secret-pass" {
+		t.Fatalf("base64 password = %q, want secret-pass", got)
 	}
 }

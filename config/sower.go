@@ -6,6 +6,7 @@ import (
 	"net"
 	"strings"
 
+	"github.com/sower-proxy/deferlog/v2"
 	"github.com/sower-proxy/sower/pkg/upstreamtls"
 )
 
@@ -16,10 +17,10 @@ type RemoteTLSConfig struct {
 }
 
 type RemoteConfig struct {
-	Type     string          `default:"sower" required:"true" usage:"option: sower/socks5"`
-	Addr     string          `required:"true" usage:"proxy address, eg: proxy.com or proxy.com:443"`
-	Password string          `usage:"remote proxy password"`
-	TLS      RemoteTLSConfig `flag:"tls"`
+	Type     string            `default:"sower" required:"true" usage:"option: sower/socks5"`
+	Addr     string            `required:"true" usage:"proxy address, eg: proxy.com or proxy.com:443"`
+	Password deferlog.Password `usage:"remote proxy password"`
+	TLS      RemoteTLSConfig   `flag:"tls"`
 }
 
 // SowerConfig represents the configuration for sower client
@@ -46,13 +47,13 @@ type SowerConfig struct {
 	} `flag:"socks5"`
 
 	Admin struct {
-		Disable                   bool   `default:"true" usage:"disable admin web server"`
-		Addr                      string `default:"127.0.0.1:19090" usage:"admin web server listen address"`
-		Password                  string `usage:"admin web server password, required when enabled"`
-		SessionFile               string `default:"/etc/sower/sessions.json" usage:"persist admin sessions to this file; one sower process only"`
-		DisableSessionPersistence bool   `default:"false" usage:"disable admin session persistence"`
-		CookieSecure              bool   `default:"false" usage:"set Secure on admin session cookies behind a TLS-terminating proxy"`
-		StateFile                 string `default:"/etc/sower/admin-state.json" usage:"persist admin rule and config changes to this file, empty disables persistence"`
+		Disable                   bool              `default:"true" usage:"disable admin web server"`
+		Addr                      string            `default:"127.0.0.1:19090" usage:"admin web server listen address"`
+		Password                  deferlog.Password `usage:"admin web server password; empty generates a random one at startup"`
+		SessionFile               string            `default:"/etc/sower/sessions.json" usage:"persist admin sessions to this file; one sower process only"`
+		DisableSessionPersistence bool              `default:"false" usage:"disable admin session persistence"`
+		CookieSecure              bool              `default:"false" usage:"set Secure on admin session cookies behind a TLS-terminating proxy"`
+		StateFile                 string            `default:"/etc/sower/admin-state.json" usage:"persist admin rule and config changes to this file, empty disables persistence"`
 	} `flag:"admin"`
 
 	Router struct {
@@ -164,9 +165,6 @@ func (c *SowerConfig) Validate() error {
 		host, port, err := net.SplitHostPort(c.Admin.Addr)
 		if err != nil || host == "" {
 			return fmt.Errorf("invalid admin listen address %q", c.Admin.Addr)
-		}
-		if c.Admin.Password == "" {
-			return fmt.Errorf("admin password is required when admin is enabled")
 		}
 		// The admin console can share the DNS HTTP proxy listener on port 80
 		// (admin.addr == dns.serve:80), but it cannot share the HTTPS or DNS
