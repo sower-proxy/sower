@@ -42,5 +42,10 @@ export function rateSeries(
 		}
 		prevMs = at;
 	}
+	// The first sample has no predecessor to diff against; backfill it with
+	// the second rate so charts don't show a fake drop to zero at the edge.
+	if (history.length > 1) {
+		for (const k of keys) out[k][0] = out[k][1] ?? 0;
+	}
 	return out;
 }

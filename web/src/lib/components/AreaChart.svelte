@@ -99,6 +99,9 @@
   let svg = $state<SVGSVGElement>()
   let rafId: number | null = null
   let pendingIndex: number | null = null
+  // Touch has no persistent hover: a tap pins the crosshair so the value
+  // readout stays visible after the finger lifts; a second tap releases it.
+  let pinned = $state(false)
 
   function clearOwnedLink() {
     if (chartLink.owner !== chartOwner) return
@@ -133,6 +136,12 @@
   // point: it may be a linked crosshair from another chart.
   function onKeyDown(e: KeyboardEvent) {
     if (!hasData || labels.length < 2) return
+    if (e.key === 'Escape') {
+      pinned = false
+      hoverTimestamp = null
+      clearOwnedLink()
+      return
+    }
     const base = shown ?? 0
     let next: number | null = null
     switch (e.key) {
@@ -165,9 +174,23 @@
   }
 
   function onLeave() {
+    if (pinned) return
     cancelPending()
     hoverTimestamp = null
     clearOwnedLink()
+  }
+
+  function onPointerDown(e: PointerEvent) {
+    if (e.pointerType !== 'touch') return
+    if (pinned) {
+      pinned = false
+      cancelPending()
+      hoverTimestamp = null
+      clearOwnedLink()
+      return
+    }
+    pinned = true
+    onMove(e)
   }
 
   onDestroy(() => {
@@ -189,6 +212,7 @@
         aria-label={label}
         tabindex="0"
         onpointermove={onMove}
+        onpointerdown={onPointerDown}
         onpointerleave={onLeave}
         onkeydown={onKeyDown}
       >
@@ -232,7 +256,13 @@
       {#if shown !== null}
         <!-- Markers and the timestamp badge live outside the SVG: the viewBox
              stretches with preserveAspectRatio="none", which would distort
-             any SVG circle or text. -->
+             any SVG circle or text. The visually-hidden status announces the
+             inspected point to screen readers; it changes only on user-driven
+             crosshair moves, never on background data pushes. -->
+        <span class="sr-only" role="status">
+          {shownTime}
+          {series.map((s) => `${s.name} ${format(s.values[shown] ?? 0)}`).join(', ')}
+        </span>
         {#each series as s}
           <span
             class="pointer-events-none absolute size-2 -translate-x-1/2 -translate-y-1/2 rounded-full ring-2 ring-background"
@@ -240,7 +270,7 @@
           ></span>
         {/each}
         <span
-          class="pointer-events-none absolute top-0 -translate-x-1/2 rounded border bg-popover px-1.5 py-0.5 text-[11px] tabular-nums text-muted-foreground shadow-sm"
+          class="pointer-events-none absolute top-0 -translate-x-1/2 rounded border bg-popover px-1.5 py-0.5 text-xs tabular-nums text-muted-foreground shadow-sm"
           style={`left:${Math.min(92, Math.max(8, (x(shown) / W) * 100))}%`}
         >
           {shownTime}
@@ -248,7 +278,7 @@
       {/if}
     </div>
 
-    <div class="mt-1.5 flex items-center justify-between text-[11px] text-muted-foreground">
+    <div class="mt-1.5 flex items-center justify-between text-xs text-muted-foreground">
       {#each axisLabels as l}
         <span>{l}</span>
       {/each}
@@ -262,13 +292,17 @@
     </div>
   {/if}
 
+  <!-- The legend always shows a live value: the crosshair point while one is
+       active, otherwise the latest sample, so the current level is readable
+       without hovering (and on touch devices at all). -->
   <div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
     {#each series as s}
+      {@const valueIndex = shown ?? (s.values.length > 0 ? s.values.length - 1 : null)}
       <span class="inline-flex items-center gap-1.5">
         <span class="size-2 rounded-full" style={`background:${s.color}`}></span>
         {s.name}
-        {#if shown !== null}
-          <span class="tabular-nums text-foreground">{format(s.values[shown] ?? 0)}</span>
+        {#if valueIndex !== null}
+          <span class="tabular-nums text-foreground">{format(s.values[valueIndex] ?? 0)}</span>
         {/if}
       </span>
     {/each}
