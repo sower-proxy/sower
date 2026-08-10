@@ -26,6 +26,7 @@
 /cmd/server/server
 /sower
 /sowerd
+/sower-*-*
 /*.yml
 /*.yaml
 /*.toml
