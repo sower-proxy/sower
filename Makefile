@@ -3,7 +3,7 @@ GO:=CGO_ENABLED=0 go
 
 default: test build
 
-test:
+test: web
 	${GO} vet ./...
 	${GO} test ./...
 
