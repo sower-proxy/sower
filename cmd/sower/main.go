@@ -24,7 +24,6 @@ import (
 
 	"github.com/cristalhq/aconfig"
 	"github.com/cristalhq/aconfig/aconfigtoml"
-	"github.com/cristalhq/aconfig/aconfigyaml"
 	"github.com/lmittmann/tint"
 	"github.com/miekg/dns"
 	"github.com/sower-proxy/deferlog/v2"
@@ -65,15 +64,9 @@ func init() {
 		FileFlag:           "c",
 		Files: []string{
 			"sower.toml",
-			"sower.yaml",
-			"sower.yml",
 			"/etc/sower/sower.toml",
-			"/etc/sower/sower.yaml",
-			"/etc/sower/sower.yml",
 		},
 		FileDecoders: map[string]aconfig.FileDecoder{
-			".yml":  aconfigyaml.New(),
-			".yaml": aconfigyaml.New(),
 			".toml": aconfigtoml.New(),
 		},
 	}).Load(); err != nil {

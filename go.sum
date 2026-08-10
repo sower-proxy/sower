@@ -12,8 +12,6 @@ github.com/cristalhq/aconfig v0.19.0 h1:fAo9ZObtzboHnf+5eAoMfb9KTDU5G/ij8OYO2wbp
 github.com/cristalhq/aconfig v0.19.0/go.mod h1:9ogrGEt9yU5V4pif/ThkVUfhj8JkdV+iDeahZGgfnDU=
 github.com/cristalhq/aconfig/aconfigtoml v0.17.1 h1:TA3xH8mALD8YeULsr4v87cMbKGBma35lWeRga4Xn11Q=
 github.com/cristalhq/aconfig/aconfigtoml v0.17.1/go.mod h1:xt4kCEjhgvHWO/oDGJHQHrW5CnvSEoBjJhRXVBdYbhQ=
-github.com/cristalhq/aconfig/aconfigyaml v0.17.1 h1:xCCbRKVmKrft9gQj3gHOq6U5PduasvlXEIsxtyzmFZ0=
-github.com/cristalhq/aconfig/aconfigyaml v0.17.1/go.mod h1:5DTsjHkvQ6hfbyxfG32roB1lF0U82rROtFaLxibL8V8=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/go-logr/logr v1.2.2/go.mod h1:jdQByPbusPIv2/zmleS9BjJVeZ6kBagPoEUsqbVz/1A=

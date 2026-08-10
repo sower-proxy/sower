@@ -324,6 +324,7 @@ password = "your_admin_password"
 
 `sower.toml` 是默认示例配置。完整示例见 [config/sower.toml](./config/sower.toml)。
 
+配置格式仅支持 TOML（`sower.toml` / `sowerd.toml`）。旧版本支持的同名 YAML 配置文件已不再被读取，升级前请将 YAML 配置迁移为 TOML。
 几个容易踩坑的点：
 
 - 远程规则文件会通过上游代理下载，不会直接出网。

@@ -6,7 +6,6 @@ import (
 
 	"github.com/cristalhq/aconfig"
 	"github.com/cristalhq/aconfig/aconfigtoml"
-	"github.com/cristalhq/aconfig/aconfigyaml"
 )
 
 func TestSowerConfigValidateRejectsInvalidRemoteType(t *testing.T) {
@@ -213,9 +212,7 @@ func TestSowerConfigLoadsPackagedExamples(t *testing.T) {
 
 	for _, path := range []string{
 		"../config/sower.toml",
-		"../config/sower.yaml",
 		"../.github/sower.toml",
-		"../.github/sower.yaml",
 	} {
 		path := path
 		t.Run(path, func(t *testing.T) {
@@ -228,7 +225,6 @@ func TestSowerConfigLoadsPackagedExamples(t *testing.T) {
 				Files:     []string{path},
 				FileDecoders: map[string]aconfig.FileDecoder{
 					".toml": aconfigtoml.New(),
-					".yaml": aconfigyaml.New(),
 				},
 			}).Load(); err != nil {
 				t.Fatalf("load config: %v", err)

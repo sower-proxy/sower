@@ -5,7 +5,6 @@ go 1.26.1
 require (
 	github.com/cristalhq/aconfig v0.19.0
 	github.com/cristalhq/aconfig/aconfigtoml v0.17.1
-	github.com/cristalhq/aconfig/aconfigyaml v0.17.1
 	github.com/krolaw/dhcp4 v0.0.0-20190909130307-a50d88189771
 	github.com/libp2p/go-reuseport v0.4.0
 	github.com/lmittmann/tint v1.2.0

@@ -8,7 +8,6 @@ import (
 
 	"github.com/cristalhq/aconfig"
 	"github.com/cristalhq/aconfig/aconfigtoml"
-	"github.com/cristalhq/aconfig/aconfigyaml"
 )
 
 func TestLoadExampleSowerConfigFiles(t *testing.T) {
@@ -19,7 +18,6 @@ func TestLoadExampleSowerConfigFiles(t *testing.T) {
 		file string
 	}{
 		{name: "toml", file: "sower.toml"},
-		{name: "yaml", file: "sower.yaml"},
 	}
 
 	for _, tt := range tests {
@@ -81,15 +79,6 @@ func TestLoadExampleSowerdConfigFiles(t *testing.T) {
 			ext: ".toml",
 		},
 		{
-			name: "file yaml",
-			content: strings.ReplaceAll(
-				mustReadFileForTest(t, "sowerd.yaml"),
-				`fake_site: "/var/www"`,
-				`fake_site: "127.0.0.1:80"`,
-			),
-			ext: ".yaml",
-		},
-		{
 			name: "active site routes toml",
 			content: `log_level = "info"
 serve_ip = "0.0.0.0"
@@ -105,24 +94,6 @@ domains = ["c.example.com"]
 upstream = "https://backend.example.com"
 `,
 			ext:        ".toml",
-			wantRoutes: 2,
-		},
-		{
-			name: "active site routes yaml",
-			content: `log_level: "info"
-serve_ip: "0.0.0.0"
-password: "change_me"
-fake_site: "127.0.0.1:80"
-site_routes:
-  - domains:
-      - "a.example.com"
-      - "b.example.com"
-    upstream: "http://127.0.0.1:8080"
-  - domains:
-      - "c.example.com"
-    upstream: "https://backend.example.com"
-`,
-			ext:        ".yaml",
 			wantRoutes: 2,
 		},
 	}
@@ -164,7 +135,6 @@ func loadConfigFileForTest(path string, dst any) error {
 		AllowUnknownFields: false,
 		Files:              []string{path},
 		FileDecoders: map[string]aconfig.FileDecoder{
-			".yaml": aconfigyaml.New(),
 			".toml": aconfigtoml.New(),
 		},
 	}).Load()

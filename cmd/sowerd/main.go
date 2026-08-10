@@ -22,7 +22,6 @@ import (
 
 	"github.com/cristalhq/aconfig"
 	"github.com/cristalhq/aconfig/aconfigtoml"
-	"github.com/cristalhq/aconfig/aconfigyaml"
 	"github.com/lmittmann/tint"
 	"github.com/sower-proxy/conns/relay"
 	"github.com/sower-proxy/conns/reread"
@@ -88,18 +87,10 @@ func loadConfig() (config.SowerdConfig, error) {
 		FileFlag:           "c",
 		Files: []string{
 			"sowerd.toml",
-			"sowerd.yaml",
-			"sowerd.yml",
 			"config/sowerd.toml",
-			"config/sowerd.yaml",
-			"config/sowerd.yml",
 			"/etc/sower/sowerd.toml",
-			"/etc/sower/sowerd.yaml",
-			"/etc/sower/sowerd.yml",
 		},
 		FileDecoders: map[string]aconfig.FileDecoder{
-			".yml":  aconfigyaml.New(),
-			".yaml": aconfigyaml.New(),
 			".toml": aconfigtoml.New(),
 		},
 	}).Load(); err != nil {

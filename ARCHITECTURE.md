@@ -118,6 +118,7 @@ For non-transport fallback traffic, it can route by TLS SNI to per-domain upstre
 
 - Client and server both fail fast on invalid startup configuration instead of silently degrading.
 - The client loads TOML by default, with YAML kept as an alternate file format; HCL is not supported.
+- The client and server load TOML configuration files only; YAML and HCL are not supported.
 - Sensitive configuration values must never be printed verbatim in logs.
 - Local listeners use explicit shutdown hooks instead of blocking forever with unmanaged goroutines.
 - Network operations use timeouts and `context` to limit hangs during dialing and remote rule downloads.
