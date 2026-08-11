@@ -81,6 +81,7 @@ addr = "<Sower 节点的 Tailscale IP>:1080"
 - 如果上游代理就在同一台机器上，例如 Clash 本地 SOCKS5 是 `127.0.0.1:7890`，就按上面这样写。
 - 如果上游代理在另一台机器上，把 `remote.addr` 改成对应的 `host:port`。
 - 如果你使用的是 `sowerd` 上游，把 `remote.type` 改成 `sower`，并按你的服务端信息填写 `remote.addr` 和 `remote.password`。
+- `remote.password` 与 sowerd 的 `password` 按字面值传输，不做任何编解码（旧版本会把恰好是合法 base64 的密码当 base64 解码，导致认证失败；该行为已移除）。不要在配置文件里用编码“隐藏”密码，文件权限才是正确的手段。
 - `dns.serve` 会同时决定 Sower 的 DNS 入口，以及 DNS 模式下 HTTP/HTTPS 透明代理监听的 IP。
 
 启动：
@@ -278,6 +279,8 @@ disable  = false               # 默认 true
 addr     = "127.0.0.1:19090"  # 默认仅监听回环
 password = "your_admin_password"  # 示例值；留空则启动时自动生成临时密码
 ```
+
+`admin.password` 接受明文或 canonical base64（如 `echo -n "your_password" | base64`）。注意：明文密码若恰好是合法的 canonical base64 会被解码，这类值请先显式 base64 编码再写入配置。
 
 启动后打开 `http://127.0.0.1:19090`，输入 admin 密码即可。未配置 `password` 时，登录页会提示使用启动日志中打印的临时密码（每次重启更换；已登录的浏览器通过会话持久化免重新登录）。密码只用于换取会话 cookie，不会保存在浏览器里。
 

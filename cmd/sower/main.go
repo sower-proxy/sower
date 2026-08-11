@@ -50,16 +50,11 @@ const defaultMemoryLimitMiB = 128
 // shift cannot overflow int64.
 const maxMemoryLimitMiB int64 = 1 << 20 // 1 TiB
 
-func init() {
-	fi, _ := os.Stdout.Stat()
-	noColor := (fi.Mode() & os.ModeCharDevice) == 0
-	deferlog.SetDefault(slog.New(tint.NewHandler(os.Stdout,
-		&tint.Options{AddSource: true, NoColor: noColor, Level: &logLevel})))
-	if strings.HasSuffix(os.Args[0], ".test") {
-		return
-	}
-
-	if err := aconfig.LoaderFor(&conf, aconfig.Config{
+// loadConfig loads the TOML config into a fresh SowerConfig. It is a
+// separate function from init so the loader is reachable from tests.
+func loadConfig() (config.SowerConfig, error) {
+	var cfg config.SowerConfig
+	err := aconfig.LoaderFor(&cfg, aconfig.Config{
 		AllowUnknownFields: false,
 		FileFlag:           "c",
 		Files: []string{
@@ -69,8 +64,31 @@ func init() {
 		FileDecoders: map[string]aconfig.FileDecoder{
 			".toml": aconfigtoml.New(),
 		},
-	}).Load(); err != nil {
-		slog.Error("load config", "error", err, "config", conf)
+	}).Load()
+	return cfg, err
+}
+
+// logConfigLoadError reports a config load failure without dumping the
+// partially-populated config: Remote.Password is a plain string and must not
+// reach the log, even when surrounding fields were already parsed before the
+// loader hit the offending line.
+func logConfigLoadError(err error, cfg config.SowerConfig) {
+	slog.Error("load config", "error", err, "remote_addr", cfg.Remote.Addr)
+}
+
+func init() {
+	fi, _ := os.Stdout.Stat()
+	noColor := (fi.Mode() & os.ModeCharDevice) == 0
+	deferlog.SetDefault(slog.New(tint.NewHandler(os.Stdout,
+		&tint.Options{AddSource: true, NoColor: noColor, Level: &logLevel})))
+	if strings.HasSuffix(os.Args[0], ".test") {
+		return
+	}
+
+	var err error
+	conf, err = loadConfig()
+	if err != nil {
+		logConfigLoadError(err, conf)
 		os.Exit(1)
 	}
 

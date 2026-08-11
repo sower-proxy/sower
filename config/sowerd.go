@@ -52,8 +52,12 @@ type SiteRoute struct {
 
 // SowerdConfig represents the configuration for sowerd daemon
 type SowerdConfig struct {
-	LogLevel   slog.Level  `default:"info" usage:"log level: debug, info, warn, error"`
-	ServeIP    string      `usage:"listen to port 80 443 of the IP"`
+	LogLevel slog.Level `default:"info" usage:"log level: debug, info, warn, error"`
+	ServeIP  string     `usage:"listen to port 80 443 of the IP"`
+	// Password is compared byte-for-byte against the client-supplied value. It
+	// stays a plain string (not deferlog.Password): the base64-or-plain
+	// heuristic in deferlog.Password would silently corrupt passwords that
+	// happen to be valid canonical base64, breaking client auth.
 	Password   string      `required:"true"`
 	FakeSite   string      `default:"/var/www" usage:"fake site address or directoy. serving on 127.0.0.1:80 if directory"`
 	SiteRoutes []SiteRoute `usage:"domain-to-upstream routing rules for fallback traffic"`

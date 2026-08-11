@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -239,4 +240,26 @@ func writeGzipRuleFile(t *testing.T, content string) string {
 		t.Fatalf("write rule file: %v", err)
 	}
 	return path
+}
+
+func TestLogConfigLoadErrorRedactsRemotePassword(t *testing.T) {
+	prev := slog.Default()
+	defer slog.SetDefault(prev)
+
+	var buf strings.Builder
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+
+	cfg := config.SowerConfig{}
+	cfg.Remote.Addr = "proxy.example.com"
+	cfg.Remote.Password = "topsecret-remote"
+
+	logConfigLoadError(errors.New("boom"), cfg)
+
+	out := buf.String()
+	if strings.Contains(out, "topsecret-remote") {
+		t.Fatalf("remote password leaked in load-failure log: %s", out)
+	}
+	if !strings.Contains(out, "load config") || !strings.Contains(out, "boom") {
+		t.Fatalf("load-failure log missing error context: %s", out)
+	}
 }

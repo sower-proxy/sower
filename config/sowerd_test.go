@@ -11,7 +11,39 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/cristalhq/aconfig"
+	"github.com/cristalhq/aconfig/aconfigtoml"
 )
+
+func TestSowerdConfigPasswordVerbatim(t *testing.T) {
+	t.Parallel()
+
+	path := t.TempDir() + "/sowerd.toml"
+	if err := os.WriteFile(path, []byte(`
+password = "fnhkwfnh"
+fake_site = "127.0.0.1:18080"
+`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	var cfg SowerdConfig
+	if err := aconfig.LoaderFor(&cfg, aconfig.Config{
+		SkipEnv:   true,
+		SkipFlags: true,
+		Files:     []string{path},
+		FileDecoders: map[string]aconfig.FileDecoder{
+			".toml": aconfigtoml.New(),
+		},
+	}).Load(); err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	// "fnhkwfnh" is valid canonical base64; it must stay verbatim or client
+	// auth (byte-for-byte checksum over the password) silently breaks.
+	if got := cfg.Password; got != "fnhkwfnh" {
+		t.Fatalf("sowerd password = %q, want verbatim fnhkwfnh", got)
+	}
+}
 
 func TestSowerdConfigValidate(t *testing.T) {
 	t.Parallel()

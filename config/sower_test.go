@@ -298,6 +298,24 @@ func TestSowerConfigAdminPasswordRedactsOnLog(t *testing.T) {
 	}
 }
 
+// TestSowerConfigAdminPasswordRedactsOnJSON pins the masking contract under a
+// JSON handler too: deferlog.Password serializes as base64 via MarshalJSON
+// (obfuscation, not plaintext), so the plaintext value must never appear.
+// This guards against a future handler change silently degrading the redaction.
+func TestSowerConfigAdminPasswordRedactsOnJSON(t *testing.T) {
+	t.Parallel()
+
+	cfg := SowerConfig{}
+	cfg.Admin.Password = deferlog.NewPassword("topsecret-admin")
+
+	var buf bytes.Buffer
+	slog.New(slog.NewJSONHandler(&buf, nil)).Error("load config", "config", cfg)
+
+	if strings.Contains(buf.String(), "topsecret-admin") {
+		t.Fatalf("admin password leaked in slog output: %s", buf.String())
+	}
+}
+
 // TestSowerConfigRemotePasswordVerbatim pins that the remote password is
 // taken verbatim from TOML: unlike the admin password, it must round-trip
 // byte-for-byte to the upstream proxy, so even values that happen to be valid
