@@ -38,8 +38,9 @@ func TestParseReverseName(t *testing.T) {
 		"256.1.2.3.in-addr.arpa.", // octet out of range
 		"1.2.3.in-addr.arpa.",     // too few octets
 		"1.2.3.4.5.in-addr.arpa.", // too many octets
-		"g.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.ip6.arpa.", // invalid hex nibble
-		"1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.ip6.arpa.",     // 31 nibbles
+		"g.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.ip6.arpa.",  // invalid hex nibble
+		"ff.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.ip6.arpa.", // multi-char label
+		"1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.ip6.arpa.",      // 31 nibbles
 	} {
 		if ip, ok := parseReverseName(name); ok {
 			t.Fatalf("expected %q to be rejected, got %v", name, ip)
@@ -95,6 +96,11 @@ func TestDNSUpstreamIsInternal(t *testing.T) {
 		t.Fatal("internal upstream not reported")
 	}
 
+	r.dns.upstreamAddrs = []string{"[::1]:53"}
+	if !r.dnsUpstreamIsInternal() {
+		t.Fatal("ipv6 loopback upstream not reported")
+	}
+
 	r.dns.upstreamAddrs = nil
 	r.dns.upstreamDNS = "192.168.1.1"
 	r.dns.fallbackDNS = "223.5.5.5"
@@ -106,6 +112,27 @@ func TestDNSUpstreamIsInternal(t *testing.T) {
 	r.dns.fallbackDNS = "223.5.5.5"
 	if r.dnsUpstreamIsInternal() {
 		t.Fatal("public fallback reported as internal")
+	}
+}
+
+func TestIsInternalHost(t *testing.T) {
+	t.Parallel()
+
+	internal := []string{
+		"8.8.8.8:53",
+		"192.168.1.1", "192.168.1.1:53",
+		"[fd00::1]:53", "[::1]", "[fe80::1]:53",
+	}
+	for _, hostport := range internal[1:] {
+		if !isInternalHost(hostport) {
+			t.Errorf("expected %q to be internal", hostport)
+		}
+	}
+	if isInternalHost(internal[0]) {
+		t.Error("expected 8.8.8.8:53 to be public")
+	}
+	if isInternalHost("") {
+		t.Error("expected empty host to be public")
 	}
 }
 

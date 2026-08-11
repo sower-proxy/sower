@@ -175,6 +175,9 @@ func parseReverseName(domain string) (net.IP, bool) {
 		}
 		ip := make(net.IP, net.IPv6len)
 		for i, h := range nibbles {
+			if len(h) != 1 {
+				return nil, false // each label is exactly one hex nibble
+			}
 			v, err := strconv.ParseUint(h, 16, 8)
 			if err != nil {
 				return nil, false
