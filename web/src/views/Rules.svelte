@@ -118,7 +118,7 @@
       await reloadView()
       if (category !== requestedCategory) return
       await refreshChanges()
-      flashSaved()
+      flashSaved(`已添加规则 ${rule}`)
     } catch (e) {
       if (!requestIsCurrent(id, requestedCategory)) return
       if (e instanceof ApiError && e.status === 401) {
@@ -176,7 +176,7 @@
       await api.addRules(category, [rule])
       await reloadView()
       await refreshChanges()
-      flashSaved()
+      flashSaved(`已恢复规则 ${rule}`)
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) {
         onUnauthorized()
@@ -197,7 +197,7 @@
       changesOpen = false
       await reloadView()
       await refreshChanges()
-      flashSaved()
+      flashSaved(`已重置${categoryName(category)}规则`)
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) {
         onUnauthorized()
@@ -215,7 +215,8 @@
   let changesOpen = $state(false)
   let lastRemoved = $state<string | null>(null)
   let undoTimer: ReturnType<typeof setTimeout> | undefined
-  let savedFlash = $state(false)
+  let savedMessage = $state<string | null>(null)
+  let savedTimer: ReturnType<typeof setTimeout> | undefined
 
   const categoryDelta = $derived(category === 'miss' ? undefined : changes?.rules[category])
   const changeCount = $derived((categoryDelta?.add.length ?? 0) + (categoryDelta?.remove.length ?? 0))
@@ -229,9 +230,10 @@
     }
   }
 
-  function flashSaved() {
-    savedFlash = true
-    setTimeout(() => (savedFlash = false), 2500)
+  function flashSaved(message: string) {
+    clearTimeout(savedTimer)
+    savedMessage = message
+    savedTimer = setTimeout(() => (savedMessage = null), 2500)
   }
 
   // Domain routing test: report which rules match a domain and the route a
@@ -246,6 +248,19 @@
     direct: '直连',
     proxy: '代理',
     auto: '自动检测',
+  }
+
+  function categoryName(c: Category | 'miss'): string {
+    switch (c) {
+      case 'block':
+        return '拦截'
+      case 'direct':
+        return '直连'
+      case 'proxy':
+        return '代理'
+      default:
+        return '未命中'
+    }
   }
 
   type BadgeVariant = 'default' | 'secondary' | 'destructive' | 'outline'
@@ -303,6 +318,7 @@
     category
     clearTimeout(searchTimer)
     clearTimeout(undoTimer)
+    clearTimeout(savedTimer)
     rules = null
     total = 0
     offset = 0
@@ -314,6 +330,7 @@
     busy = false
     lastRemoved = null
     changesOpen = false
+    savedMessage = null
     missSort = 'count'
     missDomains = null
     missError = ''
@@ -548,17 +565,17 @@
       role="status"
     >
       <span class="min-w-0 flex-1 truncate">
-        已删除 <code class="font-mono text-xs">{lastRemoved}</code>,已保存。
+        已删除规则 <code class="font-mono text-xs">{lastRemoved}</code>，已保存。
       </span>
       <Button variant="ghost" size="sm" class="shrink-0 gap-1" onclick={undoRemove} disabled={busy}>
         <Undo2 class="size-3.5" />
         撤销
       </Button>
     </div>
-  {:else if savedFlash}
+  {:else if savedMessage}
     <div class="mb-3 flex items-center gap-1.5 px-1 text-sm text-primary" in:fade={{ duration: prefersReducedMotion.current ? 0 : 120 }} role="status">
-      <Check class="size-4" />
-      已保存
+      <Check class="size-4 shrink-0" />
+      <span class="min-w-0 truncate">{savedMessage}</span>
     </div>
   {/if}
   {#if total === 0}
