@@ -170,6 +170,7 @@ type BlockedStat struct {
 // proxy connections and DNS queries originating from the IP.
 type ClientStat struct {
 	IP        string    `json:"ip"`
+	Hostname  string    `json:"hostname"`
 	Conns     uint64    `json:"conns"`
 	BytesUp   uint64    `json:"bytesUp"`
 	BytesDown uint64    `json:"bytesDown"`
@@ -220,20 +221,20 @@ type Stats struct {
 	start   time.Time
 	metrics *metrics.Metrics
 
-	dnsQueries  atomic.Uint64
-	connsHTTP   atomic.Uint64
-	connsHTTPS  atomic.Uint64
-	connsSocks  atomic.Uint64
-	activeHTTP  atomic.Uint64
-	activeHTTPS atomic.Uint64
-	activeSocks atomic.Uint64
-	bytesUp     atomic.Uint64
-	bytesDown   atomic.Uint64
-	ruleBlock   atomic.Uint64
-	ruleDirect  atomic.Uint64
-	ruleProxy   atomic.Uint64
-	dialFailed  atomic.Uint64
-	dnsFailed   atomic.Uint64
+	dnsQueries   atomic.Uint64
+	connsHTTP    atomic.Uint64
+	connsHTTPS   atomic.Uint64
+	connsSocks   atomic.Uint64
+	activeHTTP   atomic.Uint64
+	activeHTTPS  atomic.Uint64
+	activeSocks  atomic.Uint64
+	bytesUp      atomic.Uint64
+	bytesDown    atomic.Uint64
+	ruleBlock    atomic.Uint64
+	ruleDirect   atomic.Uint64
+	ruleProxy    atomic.Uint64
+	dialFailed   atomic.Uint64
+	dnsFailed    atomic.Uint64
 	acceptFailed atomic.Uint64
 
 	errMu     sync.Mutex

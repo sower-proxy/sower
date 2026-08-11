@@ -45,6 +45,11 @@ type SowerConfig struct {
 		ServeIface string `usage:"use the IP in the net interface, if serve ip not setted. eg: eth0"`
 		Upstream   string `usage:"upstream dns server"`
 		Fallback   string `default:"223.5.5.5" required:"true" usage:"fallback dns server"`
+		// Reverse is the DNS server used to resolve client IPs to hostnames
+		// for the traffic console. Typically the local LAN resolver (e.g.
+		// dnsmasq) so LAN leases and tailnet names resolve; empty disables
+		// reverse lookups and the console shows raw IPs.
+		Reverse string `usage:"reverse dns server for client hostname lookup"`
 	}
 	Socks5 struct {
 		Disable bool   `default:"false" usage:"disable sock5 proxy"`
@@ -158,6 +163,9 @@ func (c *SowerConfig) Validate() error {
 		return err
 	}
 	if err := validateRequiredIP("dns fallback", c.DNS.Fallback); err != nil {
+		return err
+	}
+	if err := validateOptionalIP("dns reverse", c.DNS.Reverse); err != nil {
 		return err
 	}
 

@@ -94,6 +94,9 @@ type Options struct {
 	// 501 when nil. The callback must return before the process exits so the
 	// HTTP response can be delivered.
 	Restart func() error
+	// Hostnames resolves client IPs to hostnames for the traffic console;
+	// reverse lookups are skipped when nil.
+	Hostnames HostnameResolver
 }
 
 // Server serves the admin API and the embedded frontend on one listener.
@@ -104,6 +107,7 @@ type Server struct {
 	mu          sync.Mutex
 	trafficMu   sync.Mutex
 	traffic     cachedTraffic
+	hostnames   *hostnameCache
 	http        *http.Server
 }
 
@@ -117,6 +121,9 @@ func NewServer(opts Options) *Server {
 		opts:        opts,
 		sessions:    make(map[string]time.Time),
 		sessionFile: opts.SessionFile,
+	}
+	if opts.Hostnames != nil {
+		s.hostnames = newHostnameCache(opts.Hostnames)
 	}
 	s.loadSessions()
 

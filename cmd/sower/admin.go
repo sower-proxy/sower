@@ -20,6 +20,28 @@ import (
 
 const adminShutdownTimeout = 5 * time.Second
 
+// newAdminServer builds the admin server, wiring in the configured reverse
+// DNS hostname resolver when present.
+func newAdminServer(cfg config.SowerConfig, password string, temporary bool, rules admin.RuleManager, configMgr admin.ConfigManager, stats *admin.Stats, restartCh chan<- struct{}) *admin.Server {
+	var hostnames admin.HostnameResolver
+	if cfg.DNS.Reverse != "" {
+		hostnames = newDNSHostnameResolver(cfg.DNS.Reverse)
+	}
+	return admin.NewServer(admin.Options{
+		Password:          password,
+		TemporaryPassword: temporary,
+		Version:           version,
+		Date:              date,
+		Rules:             rules,
+		Stats:             stats,
+		SessionFile:       cfg.AdminSessionFile(),
+		CookieSecure:      cfg.Admin.CookieSecure,
+		Config:            configMgr,
+		Restart:           restartFn(restartCh),
+		Hostnames:         hostnames,
+	})
+}
+
 // resolveAdminPassword returns the configured admin password, or a random one
 // generated at startup when none is configured, plus whether the fallback was
 // used. The generated password is printed once in the startup log
@@ -429,18 +451,7 @@ func startAdminListener(ctx context.Context, wg *sync.WaitGroup, cfg config.Sowe
 	}
 
 	password, temporary := resolveAdminPassword(cfg.Admin.Password.Value())
-	srv := admin.NewServer(admin.Options{
-		Password:          password,
-		TemporaryPassword: temporary,
-		Version:           version,
-		Date:              date,
-		Rules:             rules,
-		Stats:             stats,
-		SessionFile:       cfg.AdminSessionFile(),
-		CookieSecure:      cfg.Admin.CookieSecure,
-		Config:            configMgr,
-		Restart:           restartFn(restartCh),
-	})
+	srv := newAdminServer(cfg, password, temporary, rules, configMgr, stats, restartCh)
 
 	ln, err := net.Listen("tcp", cfg.Admin.Addr)
 	if err != nil {
@@ -479,18 +490,7 @@ func startSharedHTTPListener(ctx context.Context, wg *sync.WaitGroup, cfg config
 	slog.Info("service listening", "service", "http proxy + admin", "network", "tcp", "addr", addr)
 
 	password, temporary := resolveAdminPassword(cfg.Admin.Password.Value())
-	srv := admin.NewServer(admin.Options{
-		Password:          password,
-		TemporaryPassword: temporary,
-		Version:           version,
-		Date:              date,
-		Rules:             rules,
-		Stats:             stats,
-		SessionFile:       cfg.AdminSessionFile(),
-		CookieSecure:      cfg.Admin.CookieSecure,
-		Config:            configMgr,
-		Restart:           restartFn(restartCh),
-	})
+	srv := newAdminServer(cfg, password, temporary, rules, configMgr, stats, restartCh)
 	go func() {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), adminShutdownTimeout)

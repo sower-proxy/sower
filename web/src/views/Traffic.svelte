@@ -198,13 +198,13 @@
             ? 'border-primary/40 bg-primary/10 text-foreground'
             : 'text-muted-foreground hover:text-foreground'}"
           aria-pressed={view === 'live' && client === c.ip}
-          title={`${formatCount(c.conns)} 次 · ↑${formatBytes(c.bytesUp)} ↓${formatBytes(c.bytesDown)}`}
+          title={`${c.hostname ? c.hostname + ' · ' : ''}${c.ip} · ${formatCount(c.conns)} 次 · ↑${formatBytes(c.bytesUp)} ↓${formatBytes(c.bytesDown)}`}
           onclick={() => {
             if (view === 'totals') view = 'live'
             client = c.ip
           }}
         >
-          {c.ip}
+          {c.hostname || c.ip}
           <span class="ms-1 text-muted-foreground">{formatCount(c.conns)}</span>
         </button>
       {/each}

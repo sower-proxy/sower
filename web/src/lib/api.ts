@@ -22,6 +22,7 @@ export interface DomainStat {
 
 export interface ClientStat {
 	ip: string;
+	hostname?: string;
 	conns: number;
 	bytesUp: number;
 	bytesDown: number;

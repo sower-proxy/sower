@@ -14,7 +14,9 @@ func (s *Server) handleTraffic(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sort, source, client := parseTrafficQuery(r)
-	writeJSON(w, http.StatusOK, s.opts.Stats.Snapshot(sort, source, client))
+	snap := s.opts.Stats.Snapshot(sort, source, client)
+	s.attachHostnames(snap.Clients)
+	writeJSON(w, http.StatusOK, snap)
 }
 
 // handleTotals serves the from-start cumulative traffic view. It ignores
@@ -24,7 +26,9 @@ func (s *Server) handleTotals(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "stats unavailable")
 		return
 	}
-	writeJSON(w, http.StatusOK, s.opts.Stats.Totals())
+	totals := s.opts.Stats.Totals()
+	s.attachHostnames(totals.Clients)
+	writeJSON(w, http.StatusOK, totals)
 }
 
 // parseTrafficQuery extracts the domain sort, source, and client filters
@@ -53,19 +57,22 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 // streamTrafficSnapshot caches the unfiltered live view for one stream tick.
 // Filtered views remain immediate to avoid an unbounded per-client cache.
 func (s *Server) streamTrafficSnapshot(sort DomainSort, source Source, client string) TrafficSnapshot {
+	var snap TrafficSnapshot
 	if sort != DomainSortBytes || source != SourceAll || client != "" {
-		return s.opts.Stats.Snapshot(sort, source, client)
+		snap = s.opts.Stats.Snapshot(sort, source, client)
+	} else {
+		now := time.Now()
+		s.trafficMu.Lock()
+		defer s.trafficMu.Unlock()
+		if !s.traffic.at.IsZero() && now.Sub(s.traffic.at) < trafficCacheTTL {
+			return s.traffic.snapshot
+		}
+		s.traffic.snapshot = s.opts.Stats.Snapshot(sort, source, client)
+		s.traffic.at = now
+		snap = s.traffic.snapshot
 	}
-
-	now := time.Now()
-	s.trafficMu.Lock()
-	defer s.trafficMu.Unlock()
-	if !s.traffic.at.IsZero() && now.Sub(s.traffic.at) < trafficCacheTTL {
-		return s.traffic.snapshot
-	}
-	s.traffic.snapshot = s.opts.Stats.Snapshot(sort, source, client)
-	s.traffic.at = now
-	return s.traffic.snapshot
+	s.attachHostnames(snap.Clients)
+	return snap
 }
 
 // sseWriteTimeout bounds each individual SSE write. A client that vanished
