@@ -70,6 +70,7 @@ type ConfigChanges struct {
 	LogLevel    *string `json:"log_level"`
 	DNSUpstream *string `json:"dns_upstream"`
 	DNSFallback *string `json:"dns_fallback"`
+	DNSReverse  *string `json:"dns_reverse"`
 
 	RemoteType                  *string `json:"remote_type"`
 	RemoteAddr                  *string `json:"remote_addr"`

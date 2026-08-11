@@ -71,6 +71,11 @@ func TestDNSHostnameResolver(t *testing.T) {
 		t.Fatalf("reverse invalid ip: got %q", got)
 	}
 
+	// IPv6 zone suffix is stripped before the reverse name is built.
+	if got := r.Hostname(ctx, "192.168.1.2%eth0"); got != "phone.lan" {
+		t.Fatalf("reverse with zone suffix: got %q", got)
+	}
+
 	// Canceled context: empty.
 	canceled, cancel := context.WithCancel(ctx)
 	cancel()

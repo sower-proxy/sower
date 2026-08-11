@@ -26,9 +26,15 @@ func (s *Server) handleTotals(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "stats unavailable")
 		return
 	}
+	writeJSON(w, http.StatusOK, s.totalsWithHostnames())
+}
+
+// totalsWithHostnames decorates the cumulative totals with resolved client
+// hostnames, shared by the HTTP endpoint and the SSE stream.
+func (s *Server) totalsWithHostnames() Totals {
 	totals := s.opts.Stats.Totals()
 	s.attachHostnames(totals.Clients)
-	writeJSON(w, http.StatusOK, totals)
+	return totals
 }
 
 // parseTrafficQuery extracts the domain sort, source, and client filters
@@ -133,7 +139,7 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	if !send("status", s.statusPayload()) ||
 		!send("traffic", s.streamTrafficSnapshot(sort, source, client)) ||
 		!send("history", s.opts.Stats.History()) ||
-		!send("totals", s.opts.Stats.Totals()) {
+		!send("totals", s.totalsWithHostnames()) {
 		return
 	}
 
@@ -166,7 +172,7 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		case <-totalsTicker.C:
-			if !send("totals", s.opts.Stats.Totals()) {
+			if !send("totals", s.totalsWithHostnames()) {
 				return
 			}
 		}

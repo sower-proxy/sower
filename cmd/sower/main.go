@@ -335,6 +335,13 @@ func applyConfigOverrides(cfg *config.SowerConfig, o admin.ConfigOverrides) {
 			cfg.DNS.Fallback = *o.DNSFallback
 		}
 	}
+	if o.DNSReverse != nil && *o.DNSReverse != "" {
+		if net.ParseIP(*o.DNSReverse) == nil {
+			slog.Warn("ignore invalid admin state override", "field", "dns_reverse")
+		} else {
+			cfg.DNS.Reverse = *o.DNSReverse
+		}
+	}
 	applyStr(&cfg.Remote.Type, o.RemoteType)
 	applyStr(&cfg.Remote.Addr, o.RemoteAddr)
 	applyStr(&cfg.Remote.TLS.ServerName, o.RemoteTLSServerName)

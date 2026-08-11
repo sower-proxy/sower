@@ -27,6 +27,11 @@ func newDNSHostnameResolver(reverseDNS string) *dnsHostnameResolver {
 }
 
 func (r *dnsHostnameResolver) Hostname(ctx context.Context, ip string) string {
+	// Transport addresses may carry an IPv6 zone (fe80::1%eth0); strip it
+	// before constructing the reverse name.
+	if i := strings.IndexByte(ip, '%'); i >= 0 {
+		ip = ip[:i]
+	}
 	arpa, err := dns.ReverseAddr(ip)
 	if err != nil {
 		return ""

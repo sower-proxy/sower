@@ -32,6 +32,7 @@ type ConfigOverrides struct {
 	LogLevel    *string `json:"log_level,omitempty"`
 	DNSUpstream *string `json:"dns_upstream,omitempty"`
 	DNSFallback *string `json:"dns_fallback,omitempty"`
+	DNSReverse  *string `json:"dns_reverse,omitempty"`
 
 	RemoteType                  *string `json:"remote_type,omitempty"`
 	RemoteAddr                  *string `json:"remote_addr,omitempty"`

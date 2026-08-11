@@ -72,6 +72,7 @@ func (ac *adminConfig) ApplyConfigChanges(changes admin.ConfigChanges, revision 
 	}
 	applyStr(&overrides.DNSUpstream, changes.DNSUpstream)
 	applyStr(&overrides.DNSFallback, changes.DNSFallback)
+	applyStr(&overrides.DNSReverse, changes.DNSReverse)
 	applyStr(&overrides.RemoteType, changes.RemoteType)
 	applyStr(&overrides.RemoteAddr, changes.RemoteAddr)
 	applyStr(&overrides.RemoteTLSServerName, changes.RemoteTLSServerName)
@@ -177,6 +178,9 @@ func (ac *adminConfig) configViewLocked() admin.ConfigView {
 				{Key: "dns.fallback", Value: cfg.DNS.Fallback, Editable: true,
 					ApplyMode: admin.ApplyImmediate, Source: source(overrides.DNSFallback != nil),
 					Constraint: "IPv4/IPv6 地址；清空恢复配置文件值"},
+				{Key: "dns.reverse", Value: cfg.DNS.Reverse, Editable: true,
+					ApplyMode: admin.ApplyRestart, Source: source(overrides.DNSReverse != nil),
+					Constraint: "客户端反查 DNS，如 127.0.0.1（dnsmasq）；清空恢复配置文件值"},
 			}},
 			{Name: "监听", Fields: []admin.ConfigField{
 				{Key: "socks5.addr", Value: cfg.Socks5.Addr, Editable: true,

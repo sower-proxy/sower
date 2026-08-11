@@ -204,7 +204,7 @@
             client = c.ip
           }}
         >
-          {c.hostname || c.ip}
+          <span class="inline-block max-w-[10rem] truncate align-middle">{c.hostname || c.ip}</span>
           <span class="ms-1 text-muted-foreground">{formatCount(c.conns)}</span>
         </button>
       {/each}

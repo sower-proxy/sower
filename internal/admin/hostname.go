@@ -77,15 +77,23 @@ func (c *hostnameCache) attach(clients []ClientStat) {
 		return
 	}
 
-	// Resolve outside the lock so one slow lookup does not serialize the
-	// traffic view; the per-lookup timeout bounds the wait regardless.
+	// Resolve unknown IPs concurrently so a stalled resolver delays the
+	// traffic view by at most one lookup, not by every client in turn.
+	// Each write targets a distinct slice element; the cache itself is
+	// guarded by its own mutex.
+	var wg sync.WaitGroup
+	wg.Add(len(unknown))
 	for _, i := range unknown {
-		ctx, cancel := context.WithTimeout(context.Background(), hostnameTimeout)
-		host := c.resolver.Hostname(ctx, clients[i].IP)
-		cancel()
-		c.store(clients[i].IP, host, now)
-		clients[i].Hostname = host
+		go func(i int) {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), hostnameTimeout)
+			host := c.resolver.Hostname(ctx, clients[i].IP)
+			cancel()
+			c.store(clients[i].IP, host, now)
+			clients[i].Hostname = host
+		}(i)
 	}
+	wg.Wait()
 }
 
 func (c *hostnameCache) store(ip, host string, now time.Time) {
