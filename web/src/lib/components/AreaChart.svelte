@@ -101,7 +101,27 @@
   let pendingIndex: number | null = null
   // Touch has no persistent hover: a tap pins the crosshair so the value
   // readout stays visible after the finger lifts; a second tap releases it.
+  // The pin commits on pointerup so scroll gestures (which end in
+  // pointercancel) never leave a stray crosshair behind.
   let pinned = $state(false)
+  let tapStart = $state<{ x: number; y: number } | null>(null)
+
+  // The sr-only status announces the point this chart itself is inspecting
+  // (pointer, keyboard, or a pin). Charts that merely mirror another chart's
+  // crosshair via chartLink stay silent, so a linked hover never produces a
+  // burst of announcements from every chart on the page. The region stays in
+  // the DOM permanently; screen readers announce content changes reliably,
+  // which is not guaranteed for regions inserted and removed on hover.
+  const statusText = $derived(
+    shown != null && chartLink.owner === chartOwner
+      ? `${shownTime}：${series
+          .map((s) => {
+            const v = s.values[shown] ?? null
+            return `${s.name} ${v == null ? '-' : format(v)}`
+          })
+          .join(', ')}`
+      : '',
+  )
 
   function clearOwnedLink() {
     if (chartLink.owner !== chartOwner) return
@@ -137,7 +157,10 @@
   function onKeyDown(e: KeyboardEvent) {
     if (!hasData || labels.length < 2) return
     if (e.key === 'Escape') {
+      // Escape only clears crosshairs this chart owns; a crosshair linked
+      // from another chart stays until its source chart releases it.
       pinned = false
+      cancelPending()
       hoverTimestamp = null
       clearOwnedLink()
       return
@@ -180,8 +203,30 @@
     clearOwnedLink()
   }
 
+  // A pinned timestamp can slide out of the history window on the next SSE
+  // push; release the stale pin so the legend falls back to the live value
+  // and the next tap starts fresh.
+  $effect(() => {
+    if (pinned && shown === null) {
+      pinned = false
+      hoverTimestamp = null
+      clearOwnedLink()
+    }
+  })
+
   function onPointerDown(e: PointerEvent) {
     if (e.pointerType !== 'touch') return
+    tapStart = { x: e.clientX, y: e.clientY }
+  }
+
+  function onPointerUp(e: PointerEvent) {
+    if (e.pointerType !== 'touch' || tapStart == null) return
+    const dx = e.clientX - tapStart.x
+    const dy = e.clientY - tapStart.y
+    tapStart = null
+    // Only a tap (not a drag) toggles the pin; dragging just moves the
+    // crosshair via pointermove while the finger is down.
+    if (Math.hypot(dx, dy) > 8) return
     if (pinned) {
       pinned = false
       cancelPending()
@@ -190,7 +235,27 @@
       return
     }
     pinned = true
-    onMove(e)
+    // Position the crosshair at the tap point synchronously so the pin is
+    // visible as soon as the finger lifts, not one frame later.
+    if (!svg) return
+    const rect = svg.getBoundingClientRect()
+    if (rect.width === 0 || labels.length < 2) return
+    const frac = (e.clientX - rect.left) / rect.width
+    const i = Math.max(0, Math.min(labels.length - 1, Math.round(frac * (labels.length - 1))))
+    pendingIndex = i
+    applyHover()
+  }
+
+  // A scroll gesture from the chart area fires pointercancel; roll back the
+  // transient hover so no stray crosshair survives a scroll, and drop any
+  // pending tap.
+  function onPointerCancel(e: PointerEvent) {
+    if (e.pointerType !== 'touch') return
+    tapStart = null
+    if (pinned) return
+    cancelPending()
+    hoverTimestamp = null
+    clearOwnedLink()
   }
 
   onDestroy(() => {
@@ -213,6 +278,8 @@
         tabindex="0"
         onpointermove={onMove}
         onpointerdown={onPointerDown}
+        onpointerup={onPointerUp}
+        onpointercancel={onPointerCancel}
         onpointerleave={onLeave}
         onkeydown={onKeyDown}
       >
@@ -253,16 +320,11 @@
           />
         {/if}
       </svg>
+      <span class="sr-only" role="status">{statusText}</span>
       {#if shown !== null}
         <!-- Markers and the timestamp badge live outside the SVG: the viewBox
              stretches with preserveAspectRatio="none", which would distort
-             any SVG circle or text. The visually-hidden status announces the
-             inspected point to screen readers; it changes only on user-driven
-             crosshair moves, never on background data pushes. -->
-        <span class="sr-only" role="status">
-          {shownTime}
-          {series.map((s) => `${s.name} ${format(s.values[shown] ?? 0)}`).join(', ')}
-        </span>
+             any SVG circle or text. -->
         {#each series as s}
           <span
             class="pointer-events-none absolute size-2 -translate-x-1/2 -translate-y-1/2 rounded-full ring-2 ring-background"
@@ -294,15 +356,18 @@
 
   <!-- The legend always shows a live value: the crosshair point while one is
        active, otherwise the latest sample, so the current level is readable
-       without hovering (and on touch devices at all). -->
+       without hovering (and on touch devices at all). With fewer than two
+       samples there is no rate yet; the chart body shows the waiting state
+       and the legend omits values instead of fabricating a zero. -->
   <div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
     {#each series as s}
-      {@const valueIndex = shown ?? (s.values.length > 0 ? s.values.length - 1 : null)}
+      {@const valueIndex = shown ?? (s.values.length > 1 ? s.values.length - 1 : null)}
+      {@const value = valueIndex != null ? (s.values[valueIndex] ?? null) : null}
       <span class="inline-flex items-center gap-1.5">
         <span class="size-2 rounded-full" style={`background:${s.color}`}></span>
         {s.name}
-        {#if valueIndex !== null}
-          <span class="tabular-nums text-foreground">{format(s.values[valueIndex] ?? 0)}</span>
+        {#if value != null}
+          <span class="tabular-nums text-foreground">{format(value)}</span>
         {/if}
       </span>
     {/each}
