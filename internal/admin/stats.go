@@ -8,6 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/sower-proxy/sower/internal/metrics"
 )
@@ -363,16 +364,27 @@ func (s *Stats) RecordProxyError(kind string, detail string) {
 	}
 	s.metrics.RecordProxyError(kind)
 
-	if len(detail) > maxErrorDetailLen {
-		detail = detail[:maxErrorDetailLen]
-	}
-	ev := ErrorEvent{At: time.Now(), Kind: kind, Detail: detail}
+	ev := ErrorEvent{At: time.Now(), Kind: kind, Detail: cleanErrorDetail(detail)}
 	s.errMu.Lock()
 	s.errEvents = append(s.errEvents, ev)
 	if len(s.errEvents) > maxErrorEvents {
 		s.errEvents = s.errEvents[len(s.errEvents)-maxErrorEvents:]
 	}
 	s.errMu.Unlock()
+}
+
+// cleanErrorDetail bounds an error detail to the byte budget without
+// splitting a UTF-8 rune (a host can be an IDN in Chinese), and collapses
+// line breaks so a multiline error cannot break the console alert layout.
+func cleanErrorDetail(detail string) string {
+	detail = strings.ReplaceAll(detail, "\n", " ")
+	if len(detail) > maxErrorDetailLen {
+		detail = detail[:maxErrorDetailLen]
+		for !utf8.ValidString(detail) {
+			detail = detail[:len(detail)-1]
+		}
+	}
+	return detail
 }
 
 // RecordRoute counts one connection routing decision. It is called exactly

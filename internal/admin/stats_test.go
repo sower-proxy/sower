@@ -10,6 +10,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 type fakeConn struct {
@@ -507,6 +508,36 @@ func TestStatsErrorEventDetailTruncated(t *testing.T) {
 	snap := s.Snapshot(DomainSortBytes, SourceAll, "")
 	if len(snap.Events) != 1 || len(snap.Events[0].Detail) != maxErrorDetailLen {
 		t.Fatalf("detail not truncated to %d: %d", maxErrorDetailLen, len(snap.Events[0].Detail))
+	}
+}
+
+func TestStatsErrorEventDetailTruncationKeepsValidUTF8(t *testing.T) {
+	s := newTestStats(t)
+	// A Chinese host name is 3 bytes per rune; a byte-sliced truncation would
+	// split a rune and emit invalid UTF-8 into the JSON payload.
+	s.RecordProxyError("dial", strings.Repeat("中", 50))
+	snap := s.Snapshot(DomainSortBytes, SourceAll, "")
+	if len(snap.Events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(snap.Events))
+	}
+	d := snap.Events[0].Detail
+	if !utf8.ValidString(d) {
+		t.Fatalf("truncated detail must stay valid UTF-8: %q", d)
+	}
+	if len(d) > maxErrorDetailLen {
+		t.Fatalf("detail exceeds byte budget: %d > %d", len(d), maxErrorDetailLen)
+	}
+}
+
+func TestStatsErrorEventDetailCollapsesNewlines(t *testing.T) {
+	s := newTestStats(t)
+	s.RecordProxyError("dial", "first line\nsecond line\n")
+	snap := s.Snapshot(DomainSortBytes, SourceAll, "")
+	if len(snap.Events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(snap.Events))
+	}
+	if d := snap.Events[0].Detail; strings.ContainsAny(d, "\r\n") {
+		t.Fatalf("detail must not contain line breaks: %q", d)
 	}
 }
 

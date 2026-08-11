@@ -29,10 +29,18 @@
   const history = $derived(live.history)
 
   // Proxy-side failures (upstream dial, DNS, accept) surface as a service
-  // alert; blocked connections are routing decisions and never counted.
+  // alert; blocked connections are routing decisions and never counted. The
+  // alert reflects the current state: it only shows while a failure happened
+  // within alertWindowMs, so a past outage does not keep a red banner up
+  // forever. The cumulative counts are shown as context inside it.
+  const alertWindowMs = 10 * 60 * 1000
   const errorTotal = $derived(
     traffic ? traffic.errors.dial + traffic.errors.dns + traffic.errors.accept : 0,
   )
+  const errorActive = $derived.by(() => {
+    const first = traffic?.events[0]
+    return !!first && Date.now() - new Date(first.at).getTime() < alertWindowMs
+  })
   const recentErrors = $derived(traffic?.events.slice(0, 3) ?? [])
   const errorKindLabel = (kind: string) =>
     kind === 'dial' ? '连接上游失败' : kind === 'dns' ? 'DNS 解析失败' : '连接接收失败'
@@ -70,7 +78,7 @@
       <Alert.AlertDescription>连接正常，但数据已停止更新，请刷新页面</Alert.AlertDescription>
     </Alert.Alert>
   {/if}
-  {#if errorTotal > 0}
+  {#if errorActive}
     <Alert.Alert variant="destructive" class="mb-4">
       <CircleAlert class="size-4" />
       <Alert.AlertDescription>
@@ -83,7 +91,7 @@
         </p>
         {#if recentErrors.length > 0}
           <ul class="mt-2 space-y-1 text-xs">
-            {#each recentErrors as ev (ev.at + ev.detail)}
+            {#each recentErrors as ev, i}
               <li class="tabular-nums">
                 <span class="text-muted-foreground">{formatTime(ev.at)}</span>
                 <span class="text-destructive">{errorKindLabel(ev.kind)}</span>
