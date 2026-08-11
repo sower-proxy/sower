@@ -17,7 +17,7 @@ import (
 func TestGenProxyDialRejectsUnknownProxyType(t *testing.T) {
 	t.Parallel()
 
-	if _, err := GenProxyDial("unknown", "example.com", "", "8.8.8.8", upstreamtls.Options{}); err == nil {
+	if _, err := GenProxyDial("unknown", "example.com", "", "8.8.8.8", upstreamtls.Options{}, nil); err == nil {
 		t.Fatal("expected error for unknown proxy type")
 	}
 }
@@ -27,7 +27,7 @@ func TestGenProxyDialRejectsInvalidTLSClientHello(t *testing.T) {
 
 	_, err := GenProxyDial("sower", "example.com", "", "8.8.8.8", upstreamtls.Options{
 		ClientHello: "invalid",
-	})
+	}, nil)
 	if err == nil {
 		t.Fatal("expected error for invalid TLS client hello")
 	}

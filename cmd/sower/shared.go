@@ -224,7 +224,7 @@ func ServeSharedHTTP(ctx context.Context, ln net.Listener, r *router.Router, sta
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
-			if shouldRetryAccept(ctx, "http", err) {
+			if shouldRetryAccept(ctx, "http", err, stats) {
 				continue
 			}
 			return wrapAcceptErr(ctx, "http", err)

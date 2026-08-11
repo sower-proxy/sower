@@ -34,7 +34,7 @@ const (
 	maxTLSPlaintextRecordLen = 64 * 1024
 )
 
-func GenProxyDial(proxyType, proxyHost, proxyPassword, dns string, tlsOptions upstreamtls.Options) (router.ProxyDialFn, error) {
+func GenProxyDial(proxyType, proxyHost, proxyPassword, dns string, tlsOptions upstreamtls.Options, stats *admin.Stats) (router.ProxyDialFn, error) {
 	var proxy transport.Transport
 	var dialFn func() (net.Conn, error)
 
@@ -48,6 +48,9 @@ func GenProxyDial(proxyType, proxyHost, proxyPassword, dns string, tlsOptions up
 				c, err := d.DialContext(ctx, "udp", net.JoinHostPort(dns, "53"))
 				if err != nil {
 					slog.Warn("dial fallback dns failed, use default dns setting", "error", err)
+					if stats != nil {
+						stats.RecordProxyError("dns", fmt.Sprintf("fallback dial %s: %v", dns, err))
+					}
 					c, err = d.DialContext(ctx, network, address)
 				}
 				return c, err
@@ -154,7 +157,7 @@ func ServeHTTP(ctx context.Context, ln net.Listener, r *router.Router, stats *ad
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
-			if shouldRetryAccept(ctx, "http", err) {
+			if shouldRetryAccept(ctx, "http", err, stats) {
 				continue
 			}
 			return wrapAcceptErr(ctx, "http", err)
@@ -167,7 +170,7 @@ func ServeHTTPS(ctx context.Context, ln net.Listener, r *router.Router, stats *a
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
-			if shouldRetryAccept(ctx, "https", err) {
+			if shouldRetryAccept(ctx, "https", err, stats) {
 				continue
 			}
 			return wrapAcceptErr(ctx, "https", err)
@@ -180,7 +183,7 @@ func ServeSocks5(ctx context.Context, ln net.Listener, r *router.Router, stats *
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
-			if shouldRetryAccept(ctx, "socks5", err) {
+			if shouldRetryAccept(ctx, "socks5", err, stats) {
 				continue
 			}
 			return wrapAcceptErr(ctx, "socks5", err)
@@ -213,6 +216,7 @@ func handleHTTPConn(conn net.Conn, r *router.Router, stats *admin.Stats) {
 	rc, err := r.DialProxyOnly("tcp", host, port)
 	if err != nil {
 		slog.Error("dial proxy", "error", err, "host", req.Host, "req", req.URL)
+		stats.RecordProxyError("dial", fmt.Sprintf("%s: %v", hostOnly(req.Host), err))
 		return
 	}
 	defer rc.Close()
@@ -256,6 +260,7 @@ func handleHTTPSConn(conn net.Conn, r *router.Router, stats *admin.Stats) {
 	rc, err := r.DialProxyOnly("tcp", domain, 443)
 	if err != nil {
 		slog.Error("dial proxy", "error", err, "host", domain)
+		stats.RecordProxyError("dial", fmt.Sprintf("%s: %v", domain, err))
 		return
 	}
 	defer rc.Close()
@@ -350,6 +355,9 @@ func handleSocks5Conn(conn net.Conn, r *router.Router, stats *admin.Stats) {
 		stats.BindConn(conn, host)
 		rc, err := r.DialSmart("tcp", host, port)
 		if err != nil {
+			if !stderrors.Is(err, router.ErrBlocked) {
+				stats.RecordProxyError("dial", fmt.Sprintf("%s: %v", host, err))
+			}
 			if replyErr := server.WriteReply(rereadConn, routeSocks5ReplyCode(err)); replyErr != nil {
 				slog.Debug("write socks5 failure reply", "error", replyErr, "host", host, "port", port)
 			}
@@ -380,6 +388,9 @@ func handleSocks5Conn(conn net.Conn, r *router.Router, stats *admin.Stats) {
 	stats.BindConn(conn, host)
 	rc, err := r.DialSmart("tcp", host, port)
 	if err != nil {
+		if !stderrors.Is(err, router.ErrBlocked) {
+			stats.RecordProxyError("dial", fmt.Sprintf("%s: %v", host, err))
+		}
 		writeHTTPProxyError(rereadConn.Stop(), err)
 		return
 	}
@@ -400,12 +411,15 @@ func handleSocks5Conn(conn net.Conn, r *router.Router, stats *admin.Stats) {
 	}
 }
 
-func shouldRetryAccept(ctx context.Context, protocol string, err error) bool {
+func shouldRetryAccept(ctx context.Context, protocol string, err error, stats *admin.Stats) bool {
 	if err == nil || ctx.Err() != nil {
 		return false
 	}
 	if ne, ok := err.(net.Error); ok && ne.Temporary() {
 		slog.Warn("temporary accept failed", "protocol", protocol, "error", err)
+		if stats != nil {
+			stats.RecordProxyError("accept", fmt.Sprintf("%s listener: %v", protocol, err))
+		}
 		time.Sleep(200 * time.Millisecond)
 		return true
 	}

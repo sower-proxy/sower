@@ -34,6 +34,12 @@ export interface BlockedStat {
 	lastSeen: string;
 }
 
+export interface ErrorEvent {
+	at: string;
+	kind: "dial" | "dns" | "accept";
+	detail: string;
+}
+
 export interface TrafficSnapshot {
 	uptime: number;
 	dnsQueries: number;
@@ -46,6 +52,8 @@ export interface TrafficSnapshot {
 		connsPerSec: number;
 	};
 	ruleHits: { block: number; direct: number; proxy: number };
+	errors: { dial: number; dns: number; accept: number };
+	events: ErrorEvent[];
 	blocked: BlockedStat[];
 	system: { goroutines: number; heapAlloc: number };
 	bytesUp: number;

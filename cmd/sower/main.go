@@ -154,11 +154,15 @@ func run(ctx context.Context, stop context.CancelFunc, cfg config.SowerConfig) e
 	applyConfigOverrides(&cfg, stateStore.ConfigOverrides())
 
 	upstreamDNS := effectiveUpstreamDNS(cfg)
+	stats, err := admin.NewStats()
+	if err != nil {
+		return fmt.Errorf("init stats: %w", err)
+	}
 	proxyDial, err := GenProxyDial(cfg.Remote.Type, cfg.Remote.Addr, cfg.Remote.Password, upstreamDNS, upstreamtls.Options{
 		ServerName:         cfg.Remote.TLS.ServerName,
 		ClientHello:        cfg.Remote.TLS.ClientHello,
 		InsecureSkipVerify: cfg.Remote.TLS.InsecureSkipVerify,
-	})
+	}, stats)
 	if err != nil {
 		return fmt.Errorf("build proxy dialer: %w", err)
 	}
@@ -172,10 +176,6 @@ func run(ctx context.Context, stop context.CancelFunc, cfg config.SowerConfig) e
 		}
 	}()
 
-	stats, err := admin.NewStats()
-	if err != nil {
-		return fmt.Errorf("init stats: %w", err)
-	}
 	blockHits := newRuleHitTracker(r.BlockRule, maxRuleHits)
 	directHits := newRuleHitTracker(r.DirectRule, maxRuleHitsWide)
 	proxyHits := newRuleHitTracker(r.ProxyRule, maxRuleHitsWide)

@@ -32,6 +32,7 @@ type Metrics struct {
 	conns       metric.Int64Counter // attr: protocol=http|https|socks5
 	activeConns metric.Int64UpDownCounter
 	ruleHits    metric.Int64Counter // attr: route=block|direct|proxy
+	proxyErrors metric.Int64Counter // attr: kind=dial|dns|accept
 	connDur     metric.Int64Histogram
 
 	start time.Time
@@ -68,6 +69,8 @@ func New() (*Metrics, error) {
 		metric.WithDescription("Proxy connections currently open"))
 	m.ruleHits = mustCounter(m.meter, "sower.rule_hits",
 		metric.WithDescription("Connection routing decisions by rule category"))
+	m.proxyErrors = mustCounter(m.meter, "sower.proxy_errors",
+		metric.WithDescription("Proxy-side failures by kind"))
 	m.connDur = mustHistogram(m.meter, "sower.connection_duration",
 		metric.WithDescription("Proxy connection lifetime"),
 		metric.WithUnit("ms"))
@@ -136,6 +139,14 @@ func (m *Metrics) RecordRoute(route string) {
 // RecordConnDuration records a connection lifetime.
 func (m *Metrics) RecordConnDuration(d time.Duration) {
 	m.connDur.Record(context.Background(), d.Milliseconds())
+}
+
+// RecordProxyError counts one proxy-side failure. kind is dial, dns, or
+// accept. Failures are low-frequency relative to the relay hot path, so the
+// attribute is built per call without a precomputed option.
+func (m *Metrics) RecordProxyError(kind string) {
+	m.proxyErrors.Add(context.Background(), 1,
+		metric.WithAttributes(attribute.String("kind", kind)))
 }
 
 // ServeHTTP serves the Prometheus exposition format.

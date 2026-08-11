@@ -6,6 +6,7 @@ import (
 	"net"
 	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -454,6 +455,58 @@ func TestStatsRecordRoute(t *testing.T) {
 	}
 	if snap.Blocked[1].Domain != "tracker.example.net" || snap.Blocked[1].Count != 1 {
 		t.Fatalf("unexpected blocked ranking: %+v", snap.Blocked)
+	}
+}
+
+func TestStatsRecordProxyErrorCountsAndRings(t *testing.T) {
+	s := newTestStats(t)
+	s.RecordProxyError("dial", "example.com: connection refused")
+	s.RecordProxyError("dial", "example.org: timeout")
+	s.RecordProxyError("dns", "fallback dial 1.1.1.1: timeout")
+	s.RecordProxyError("accept", "http listener: accept failed")
+	// Unknown kinds are ignored, not counted.
+	s.RecordProxyError("bogus", "ignored")
+
+	snap := s.Snapshot(DomainSortBytes, SourceAll, "")
+	if snap.Errors.Dial != 2 || snap.Errors.DNS != 1 || snap.Errors.Accept != 1 {
+		t.Fatalf("unexpected error counts: %+v", snap.Errors)
+	}
+	if len(snap.Events) != 4 {
+		t.Fatalf("expected 4 events, got %d", len(snap.Events))
+	}
+	// Ring is newest first.
+	if snap.Events[0].Kind != "accept" || snap.Events[3].Kind != "dial" {
+		t.Fatalf("unexpected event order: %+v", snap.Events)
+	}
+	if snap.Events[0].Detail != "http listener: accept failed" {
+		t.Fatalf("unexpected event detail: %q", snap.Events[0].Detail)
+	}
+}
+
+func TestStatsErrorEventRingIsBounded(t *testing.T) {
+	s := newTestStats(t)
+	for i := 0; i < maxErrorEvents+20; i++ {
+		s.RecordProxyError("dial", fmt.Sprintf("host-%d: refused", i))
+	}
+	snap := s.Snapshot(DomainSortBytes, SourceAll, "")
+	if len(snap.Events) != maxErrorEvents {
+		t.Fatalf("expected ring capped at %d, got %d", maxErrorEvents, len(snap.Events))
+	}
+	// The oldest events are dropped: 84 recorded, 64 retained, host-0..host-19 evicted.
+	if snap.Events[len(snap.Events)-1].Detail != "host-20: refused" {
+		t.Fatalf("unexpected oldest retained event: %+v", snap.Events[len(snap.Events)-1])
+	}
+	if snap.Errors.Dial != maxErrorEvents+20 {
+		t.Fatalf("counter must stay cumulative, got %d", snap.Errors.Dial)
+	}
+}
+
+func TestStatsErrorEventDetailTruncated(t *testing.T) {
+	s := newTestStats(t)
+	s.RecordProxyError("dial", strings.Repeat("x", maxErrorDetailLen*2))
+	snap := s.Snapshot(DomainSortBytes, SourceAll, "")
+	if len(snap.Events) != 1 || len(snap.Events[0].Detail) != maxErrorDetailLen {
+		t.Fatalf("detail not truncated to %d: %d", maxErrorDetailLen, len(snap.Events[0].Detail))
 	}
 }
 

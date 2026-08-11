@@ -19,12 +19,21 @@ export const live = $state({
 	history: [] as HistorySample[],
 	totals: null as Totals | null,
 	connected: false,
+	// stale means the stream is open but every recent traffic tick failed to
+	// parse: the browser keeps a live connection while the server pushes
+	// malformed data (version mismatch, corrupted handler), so the last good
+	// snapshot would otherwise be mistaken for current data.
+	stale: false,
 });
 
 let es: EventSource | null = null;
 let activeParams = "";
 let unauthorizedHandler: (() => void) | null = null;
 let generation = 0;
+// staleTicks counts consecutive traffic events that failed to parse; three
+// consecutive failures (15s at the 5s tick) flip the stale flag.
+let staleTicks = 0;
+const staleTickLimit = 3;
 
 // safeParse tolerates a malformed SSE payload without breaking the stream
 // handler; the previous value stays in place until a valid event arrives.
@@ -91,6 +100,8 @@ export function connectLive(params = "") {
 		if (!isCurrent(source, sourceGeneration)) return;
 		checkingSession = false;
 		live.connected = true;
+		live.stale = false;
+		staleTicks = 0;
 	};
 	source.onerror = () => {
 		if (!isCurrent(source, sourceGeneration)) return;
@@ -110,7 +121,13 @@ export function connectLive(params = "") {
 	source.addEventListener("traffic", (e) => {
 		if (!isCurrent(source, sourceGeneration)) return;
 		const parsed = safeParse<TrafficSnapshot>(e.data);
-		if (parsed) live.traffic = parsed;
+		if (parsed) {
+			live.traffic = parsed;
+			live.stale = false;
+			staleTicks = 0;
+		} else if (++staleTicks >= staleTickLimit) {
+			live.stale = true;
+		}
 	});
 	source.addEventListener("history", (e) => {
 		if (!isCurrent(source, sourceGeneration)) return;
@@ -142,4 +159,6 @@ export function closeLive() {
 	live.history = [];
 	live.totals = null;
 	live.connected = false;
+	live.stale = false;
+	staleTicks = 0;
 }

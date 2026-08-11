@@ -1,6 +1,6 @@
 <script lang="ts">
   import { type Status } from '$lib/api'
-  import { formatBytes, formatUptime, formatCount } from '$lib/format'
+  import { formatBytes, formatCount, formatTime, formatUptime } from '$lib/format'
   import { rateSeries, ts } from '$lib/history'
   import { live } from '$lib/live.svelte.ts'
   import * as Card from '$lib/components/ui/card'
@@ -28,6 +28,15 @@
   const traffic = $derived(live.traffic)
   const history = $derived(live.history)
 
+  // Proxy-side failures (upstream dial, DNS, accept) surface as a service
+  // alert; blocked connections are routing decisions and never counted.
+  const errorTotal = $derived(
+    traffic ? traffic.errors.dial + traffic.errors.dns + traffic.errors.accept : 0,
+  )
+  const recentErrors = $derived(traffic?.events.slice(0, 3) ?? [])
+  const errorKindLabel = (kind: string) =>
+    kind === 'dial' ? '连接上游失败' : kind === 'dns' ? 'DNS 解析失败' : '连接接收失败'
+
   // --- history series helpers ---
   const labels = $derived(history.map((h) => ts(h.at)))
   const timestamps = $derived(history.map((h) => h.at))
@@ -54,6 +63,36 @@
     <Alert.Alert variant="destructive" class="mb-4">
       <CircleAlert class="size-4" />
       <Alert.AlertDescription>实时连接已断开，正在重连…</Alert.AlertDescription>
+    </Alert.Alert>
+  {:else if live.stale}
+    <Alert.Alert variant="destructive" class="mb-4">
+      <CircleAlert class="size-4" />
+      <Alert.AlertDescription>连接正常，但数据已停止更新，请刷新页面</Alert.AlertDescription>
+    </Alert.Alert>
+  {/if}
+  {#if errorTotal > 0}
+    <Alert.Alert variant="destructive" class="mb-4">
+      <CircleAlert class="size-4" />
+      <Alert.AlertDescription>
+        <p>
+          服务异常 {formatCount(errorTotal)} 次
+          <span class="tabular-nums">
+            （上游连接 {formatCount(traffic.errors.dial)} · DNS
+            {formatCount(traffic.errors.dns)} · 接收 {formatCount(traffic.errors.accept)}）
+          </span>
+        </p>
+        {#if recentErrors.length > 0}
+          <ul class="mt-2 space-y-1 text-xs">
+            {#each recentErrors as ev (ev.at + ev.detail)}
+              <li class="tabular-nums">
+                <span class="text-muted-foreground">{formatTime(ev.at)}</span>
+                <span class="text-destructive">{errorKindLabel(ev.kind)}</span>
+                <span class="break-all">{ev.detail}</span>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      </Alert.AlertDescription>
     </Alert.Alert>
   {/if}
   <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

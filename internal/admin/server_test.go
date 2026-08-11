@@ -24,6 +24,8 @@ type fakeRules struct {
 	lists map[Category][]string
 	hits  []RuleHit
 	miss  []RuleHit
+	// errAdd makes RuleAdd fail, simulating a state persistence failure.
+	errAdd error
 }
 
 func (f *fakeRules) RuleMiss(byCount bool, limit int) []RuleHit {
@@ -115,6 +117,9 @@ func (f *fakeRules) RuleSearch(c Category, q string, offset, limit int, sortBy R
 }
 
 func (f *fakeRules) RuleAdd(c Category, rules ...string) error {
+	if f.errAdd != nil {
+		return f.errAdd
+	}
 	f.lists[c] = append(f.lists[c], rules...)
 	return nil
 }
@@ -454,6 +459,28 @@ func TestStatusEndpoint(t *testing.T) {
 	rules := body["rules"].(map[string]any)
 	if rules["proxy"] != float64(0) {
 		t.Fatalf("unexpected rules: %v", rules)
+	}
+}
+
+// TestRulesAddPersistFailureReturns500 pins the contract that a state
+// persistence failure surfaces as a 500 instead of a silent 204, so the
+// console cannot pretend a rule change landed when it was not written.
+func TestRulesAddPersistFailureReturns500(t *testing.T) {
+	fr := newFakeRules()
+	fr.errAdd = errors.New("persist rule additions: write /tmp/admin-state.json: no space left")
+	ts := newTestServer(t, fr)
+	cookie := login(t, ts, "secret")
+
+	resp := authedRequest(t, ts, http.MethodPost, "/api/rules", cookie,
+		`{"category":"proxy","rules":["example.com"]}`)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("persist failure must yield 500, got %d", resp.StatusCode)
+	}
+	body := decodeBody(t, resp)
+	msg, _ := body["error"].(string)
+	if !strings.Contains(msg, "persist") {
+		t.Fatalf("error must surface the persist failure, got %q", msg)
 	}
 }
 

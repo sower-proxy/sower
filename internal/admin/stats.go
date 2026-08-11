@@ -45,6 +45,13 @@ const (
 	historyMaxGap = 30 * time.Second
 	// rateWindow is the sliding window used for per-second rates.
 	rateWindow = 60 * time.Second
+
+	// maxErrorEvents bounds the in-memory error event ring exposed to the
+	// console; the ring drops its oldest entry once full.
+	maxErrorEvents = 64
+	// maxErrorDetailLen truncates the per-event detail so a malformed host
+	// cannot bloat the ring or the SSE payload.
+	maxErrorDetailLen = 120
 )
 
 // DomainSort selects the ordering of the domain stats in a snapshot.
@@ -126,6 +133,17 @@ type TrafficSnapshot struct {
 		Direct uint64 `json:"direct"`
 		Proxy  uint64 `json:"proxy"`
 	} `json:"ruleHits"`
+	// Errors aggregates from-start proxy-side failures by kind. Blocked
+	// connections are deliberate routing decisions and are never counted
+	// here; only dial, DNS, and accept failures are.
+	Errors struct {
+		Dial   uint64 `json:"dial"`
+		DNS    uint64 `json:"dns"`
+		Accept uint64 `json:"accept"`
+	} `json:"errors"`
+	// Events is the recent error event ring, newest first, capped at
+	// maxErrorEvents entries. It carries the same kinds as Errors.
+	Events []ErrorEvent `json:"events"`
 	// Blocked is the from-start per-domain block counter, ordered by count.
 	// It is independent of the domain map: blocked connections never carry
 	// traffic, so they would otherwise be invisible to the traffic view.
@@ -181,6 +199,15 @@ type History struct {
 	Samples []HistorySample `json:"samples"`
 }
 
+// ErrorEvent is one recorded proxy-side failure, exposed to the console so
+// service-level problems (unreachable upstream, DNS breakdown, accept
+// pressure) are visible without grepping the system log.
+type ErrorEvent struct {
+	At     time.Time `json:"at"`
+	Kind   string    `json:"kind"`
+	Detail string    `json:"detail"`
+}
+
 // Stats records proxied payload bytes and request/connection counters. It is
 // not packet-level network accounting. Byte direction is relative to the
 // client: reads from the client are uploads, writes to the client downloads.
@@ -204,6 +231,12 @@ type Stats struct {
 	ruleBlock   atomic.Uint64
 	ruleDirect  atomic.Uint64
 	ruleProxy   atomic.Uint64
+	dialFailed  atomic.Uint64
+	dnsFailed   atomic.Uint64
+	acceptFailed atomic.Uint64
+
+	errMu     sync.Mutex
+	errEvents []ErrorEvent
 
 	mu      sync.Mutex
 	domains map[string]*domainStat
@@ -298,6 +331,48 @@ func (s *Stats) RecordDNS(qname string, clientIP string) {
 			dc.conns++
 		}
 	})
+}
+
+// recentErrorEvents returns the error event ring, newest first. The caller
+// must not mutate the returned slice.
+func (s *Stats) recentErrorEvents() []ErrorEvent {
+	s.errMu.Lock()
+	defer s.errMu.Unlock()
+	out := make([]ErrorEvent, len(s.errEvents))
+	for i, ev := range s.errEvents {
+		out[len(s.errEvents)-1-i] = ev
+	}
+	return out
+}
+
+// RecordProxyError counts one proxy-side failure of the given kind (dial,
+// dns, or accept) and appends it to the console event ring. Blocked
+// connections must not call this: a block is a routing decision, not a
+// failure. detail is a short human-readable context (host, DNS server); it
+// is truncated and must never carry query strings or credentials.
+func (s *Stats) RecordProxyError(kind string, detail string) {
+	switch kind {
+	case "dial":
+		s.dialFailed.Add(1)
+	case "dns":
+		s.dnsFailed.Add(1)
+	case "accept":
+		s.acceptFailed.Add(1)
+	default:
+		return
+	}
+	s.metrics.RecordProxyError(kind)
+
+	if len(detail) > maxErrorDetailLen {
+		detail = detail[:maxErrorDetailLen]
+	}
+	ev := ErrorEvent{At: time.Now(), Kind: kind, Detail: detail}
+	s.errMu.Lock()
+	s.errEvents = append(s.errEvents, ev)
+	if len(s.errEvents) > maxErrorEvents {
+		s.errEvents = s.errEvents[len(s.errEvents)-maxErrorEvents:]
+	}
+	s.errMu.Unlock()
 }
 
 // RecordRoute counts one connection routing decision. It is called exactly
