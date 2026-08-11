@@ -115,10 +115,12 @@
       await api.addRules(requestedCategory, [rule])
       if (!requestIsCurrent(id, requestedCategory)) return
       newRule = ''
+      // Feedback first: the reload below can be slow on huge rule sets and
+      // must not delay or swallow the success signal.
+      flashSaved('已添加规则 ', rule)
       await reloadView()
       if (category !== requestedCategory) return
       await refreshChanges()
-      flashSaved(`已添加规则 ${rule}`)
     } catch (e) {
       if (!requestIsCurrent(id, requestedCategory)) return
       if (e instanceof ApiError && e.status === 401) {
@@ -141,13 +143,16 @@
     try {
       await api.removeRules(requestedCategory, [rule])
       if (!requestIsCurrent(id, requestedCategory)) return
-      await reloadView()
-      listRef?.focus()
-      if (category !== requestedCategory) return
-      // The delete is already persisted; offer a short undo window.
+      // The delete is persisted; release the lock and open the undo window
+      // immediately, so a slow or failing reload can neither block the undo
+      // button nor hide that the deletion succeeded.
+      busy = false
       clearTimeout(undoTimer)
       lastRemoved = rule
       undoTimer = setTimeout(() => (lastRemoved = null), 6000)
+      await reloadView()
+      listRef?.focus()
+      if (category !== requestedCategory) return
       await refreshChanges()
     } catch (e) {
       if (!requestIsCurrent(id, requestedCategory)) return
@@ -174,9 +179,9 @@
     error = ''
     try {
       await api.addRules(category, [rule])
+      flashSaved('已恢复规则 ', rule)
       await reloadView()
       await refreshChanges()
-      flashSaved(`已恢复规则 ${rule}`)
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) {
         onUnauthorized()
@@ -195,9 +200,9 @@
     try {
       await api.resetRules(category)
       changesOpen = false
+      flashSaved(`已重置${categoryName(category)}规则`)
       await reloadView()
       await refreshChanges()
-      flashSaved(`已重置${categoryName(category)}规则`)
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) {
         onUnauthorized()
@@ -215,7 +220,9 @@
   let changesOpen = $state(false)
   let lastRemoved = $state<string | null>(null)
   let undoTimer: ReturnType<typeof setTimeout> | undefined
-  let savedMessage = $state<string | null>(null)
+  // savedMessage carries the success feedback; its rule part renders
+  // monospace so rule text matches the rest of the console.
+  let savedMessage = $state<{ action: string; rule?: string } | null>(null)
   let savedTimer: ReturnType<typeof setTimeout> | undefined
 
   const categoryDelta = $derived(category === 'miss' ? undefined : changes?.rules[category])
@@ -230,9 +237,9 @@
     }
   }
 
-  function flashSaved(message: string) {
+  function flashSaved(action: string, rule?: string) {
     clearTimeout(savedTimer)
-    savedMessage = message
+    savedMessage = { action, rule }
     savedTimer = setTimeout(() => (savedMessage = null), 2500)
   }
 
@@ -575,7 +582,9 @@
   {:else if savedMessage}
     <div class="mb-3 flex items-center gap-1.5 px-1 text-sm text-primary" in:fade={{ duration: prefersReducedMotion.current ? 0 : 120 }} role="status">
       <Check class="size-4 shrink-0" />
-      <span class="min-w-0 truncate">{savedMessage}</span>
+      <span class="min-w-0 truncate">
+        {savedMessage.action}{#if savedMessage.rule}<code class="font-mono text-xs">{savedMessage.rule}</code>{/if}
+      </span>
     </div>
   {/if}
   {#if total === 0}
