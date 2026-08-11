@@ -356,11 +356,11 @@ disable = true
 	}
 }
 
-// TestSowerConfigAdminPasswordAcceptsBase64 pins that the admin password
-// field still decodes canonical base64 values from TOML (a deferlog.Password
-// feature), so operators can avoid writing plaintext admin secrets into
-// config files.
-func TestSowerConfigAdminPasswordAcceptsBase64(t *testing.T) {
+// TestSowerConfigAdminPasswordAcceptsTaggedBase64 pins that the admin
+// password field decodes the explicit "b64:" form from TOML (a
+// deferlog.Password feature), so operators can avoid writing plaintext admin
+// secrets into config files. Plain values are always verbatim.
+func TestSowerConfigAdminPasswordAcceptsTaggedBase64(t *testing.T) {
 	t.Parallel()
 
 	path := t.TempDir() + "/sower.toml"
@@ -372,7 +372,7 @@ addr = "example.com"
 [admin]
 disable = false
 addr = "127.0.0.1:19090"
-password = "c2VjcmV0LXBhc3M="
+password = "b64:c2VjcmV0LXBhc3M="
 
 [dns]
 disable = true
@@ -396,6 +396,6 @@ disable = true
 		t.Fatalf("load config: %v", err)
 	}
 	if got := cfg.Admin.Password.Value(); got != "secret-pass" {
-		t.Fatalf("admin base64 password = %q, want secret-pass", got)
+		t.Fatalf("admin tagged base64 password = %q, want secret-pass", got)
 	}
 }

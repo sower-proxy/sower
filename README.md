@@ -280,7 +280,7 @@ addr     = "127.0.0.1:19090"  # 默认仅监听回环
 password = "your_admin_password"  # 示例值；留空则启动时自动生成临时密码
 ```
 
-`admin.password` 接受明文或 canonical base64（如 `echo -n "your_password" | base64`）。注意：明文密码若恰好是合法的 canonical base64 会被解码，这类值请先显式 base64 编码再写入配置。
+`admin.password` 接受明文（按字面值）或显式带 `b64:` 前缀的 canonical base64（如 `echo -n "your_password" | base64` 后写成 `password = "b64:c2VjcmV0..."`）。明文密码永远不会被解码，可以放心写。
 
 启动后打开 `http://127.0.0.1:19090`，输入 admin 密码即可。未配置 `password` 时，登录页会提示使用启动日志中打印的临时密码（每次重启更换；已登录的浏览器通过会话持久化免重新登录）。密码只用于换取会话 cookie，不会保存在浏览器里。
 

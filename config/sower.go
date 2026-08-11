@@ -54,10 +54,10 @@ type SowerConfig struct {
 	Admin struct {
 		Disable bool   `default:"true" usage:"disable admin web server"`
 		Addr    string `default:"127.0.0.1:19090" usage:"admin web server listen address"`
-		// Admin console password. Accepts plain text or canonical base64
-		// (deferlog.Password decodes base64 input at load time). Caution: a
-		// plaintext password that is itself valid canonical base64 is decoded;
-		// base64-encode such values explicitly to keep them verbatim.
+		// Admin console password. Accepts plain text verbatim, or canonical
+		// base64 with an explicit "b64:" prefix (e.g. "b64:c2VjcmV0"). Plain
+		// values are never reinterpreted, so a password that happens to be
+		// valid base64 stays exactly as written.
 		Password                  deferlog.Password `usage:"admin web server password; empty generates a random one at startup"`
 		SessionFile               string            `default:"/etc/sower/sessions.json" usage:"persist admin sessions to this file; one sower process only"`
 		DisableSessionPersistence bool              `default:"false" usage:"disable admin session persistence"`

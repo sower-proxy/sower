@@ -14,7 +14,7 @@ require (
 	github.com/prometheus/client_golang v1.24.1
 	github.com/refraction-networking/utls v1.8.2
 	github.com/sower-proxy/conns v0.1.1
-	github.com/sower-proxy/deferlog/v2 v2.1.4
+	github.com/sower-proxy/deferlog/v2 v2.1.5
 	go.opentelemetry.io/otel v1.45.0
 	go.opentelemetry.io/otel/exporters/prometheus v0.67.0
 	go.opentelemetry.io/otel/metric v1.45.0
