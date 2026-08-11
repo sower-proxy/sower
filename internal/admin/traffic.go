@@ -68,23 +68,26 @@ func (s *Server) streamTrafficSnapshot(sort DomainSort, source Source, client st
 	return s.traffic.snapshot
 }
 
+// sseWriteTimeout bounds each individual SSE write. A client that vanished
+// without closing the TCP connection (asleep laptop, dropped WiFi) would
+// otherwise block the handler forever once the kernel send buffer fills;
+// the deadline turns that into a bounded, detectable failure.
+const sseWriteTimeout = 30 * time.Second
+
 // handleStream pushes status, traffic snapshots, and history to the console.
 // The connection carries the same sort/source/client filters as /api/traffic
 // and revalidates the session on each tick. When a sliding renewal is due it
 // asks the browser to refresh the cookie through /api/session, then closes so
 // EventSource reconnects with the renewed cookie. Expiry sends an auth event.
 // The initial payload is sent immediately so the page renders without waiting
-// for a tick.
+// for a tick. Every write carries a deadline (see sseWriteTimeout); a failed
+// write means the client is gone and the handler exits instead of leaking.
 func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	if s.opts.Stats == nil {
 		writeError(w, http.StatusInternalServerError, "stats unavailable")
 		return
 	}
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		writeError(w, http.StatusInternalServerError, "streaming unsupported")
-		return
-	}
+	rc := http.NewResponseController(w)
 	sort, source, client := parseTrafficQuery(r)
 
 	w.Header().Set("Content-Type", "text/event-stream")
@@ -93,22 +96,39 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Accel-Buffering", "no")
 	fmt.Fprintln(w, "retry: 5000")
 	fmt.Fprintln(w)
-	flusher.Flush()
+	// A writer that cannot flush (buffered proxy, unsupported transport)
+	// cannot carry the stream; the error-returning form also surfaces dead
+	// connections here.
+	if err := rc.Flush(); err != nil {
+		writeError(w, http.StatusInternalServerError, "streaming unsupported")
+		return
+	}
 
-	send := func(event string, v any) {
+	// send writes one event and reports whether the connection is still
+	// usable; the caller tears the stream down on the first failure. A
+	// non-writable transport (HTTP/2) degrades to unbounded writes instead
+	// of failing the stream.
+	send := func(event string, v any) bool {
+		if err := rc.SetWriteDeadline(time.Now().Add(sseWriteTimeout)); err != nil {
+			slog.Debug("set sse write deadline", "error", err)
+		}
 		data, err := json.Marshal(v)
 		if err != nil {
 			slog.Debug("marshal sse event", "error", err)
-			return
+			return true
 		}
-		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, data)
-		flusher.Flush()
+		if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, data); err != nil {
+			return false
+		}
+		return rc.Flush() == nil
 	}
 
-	send("status", s.statusPayload())
-	send("traffic", s.streamTrafficSnapshot(sort, source, client))
-	send("history", s.opts.Stats.History())
-	send("totals", s.opts.Stats.Totals())
+	if !send("status", s.statusPayload()) ||
+		!send("traffic", s.streamTrafficSnapshot(sort, source, client)) ||
+		!send("history", s.opts.Stats.History()) ||
+		!send("totals", s.opts.Stats.Totals()) {
+		return
+	}
 
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
@@ -131,12 +151,17 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 				send("renew", map[string]any{})
 				return
 			}
-			send("status", s.statusPayload())
-			send("traffic", s.streamTrafficSnapshot(sort, source, client))
+			if !send("status", s.statusPayload()) || !send("traffic", s.streamTrafficSnapshot(sort, source, client)) {
+				return
+			}
 		case <-historyTicker.C:
-			send("history", s.opts.Stats.History())
+			if !send("history", s.opts.Stats.History()) {
+				return
+			}
 		case <-totalsTicker.C:
-			send("totals", s.opts.Stats.Totals())
+			if !send("totals", s.opts.Stats.Totals()) {
+				return
+			}
 		}
 	}
 }

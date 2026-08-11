@@ -3,6 +3,7 @@
   import { formatBytes, formatCount, formatTime } from '$lib/format'
   import { rateSeries, ts } from '$lib/history'
   import { connectLive, live } from '$lib/live.svelte.ts'
+  import { onDestroy } from 'svelte'
   import AreaChart from '$lib/components/AreaChart.svelte'
   import * as Card from '$lib/components/ui/card'
   import * as Alert from '$lib/components/ui/alert'
@@ -82,6 +83,12 @@
     if (source !== 'all') params.set('source', source)
     if (client) params.set('client', client)
     connectLive(params.toString())
+  })
+
+  // Leaving the page: drop the page-scoped filters so the shared stream
+  // serves the unfiltered snapshot again (the overview renders it).
+  onDestroy(() => {
+    connectLive('')
   })
 
   const headCell = 'sticky top-0 z-10 bg-card'

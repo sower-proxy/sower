@@ -48,14 +48,16 @@ function reconnectAfterRenewal(source: EventSource, sourceGeneration: number) {
 	generation++;
 	const renewalGeneration = generation;
 	source.close();
-	live.connected = false;
-
+	// Planned reconnection: keep the connected flag set so the page does not
+	// flash a disconnect alert during a routine session renewal; flip it only
+	// if the renewal probe itself fails.
 	void probeSession()
 		.then(() => {
 			if (generation === renewalGeneration && es === null) connectLive(params);
 		})
 		.catch((error) => {
 			if (generation !== renewalGeneration || es !== null) return;
+			live.connected = false;
 			if (error instanceof ApiError && error.status === 401) {
 				unauthorizedHandler?.();
 				return;

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -1532,6 +1534,76 @@ func TestStreamDefaultTrafficSnapshotCache(t *testing.T) {
 	filtered := s.streamTrafficSnapshot(DomainSortRecent, SourceAll, "")
 	if filtered.DNSQueries != refreshed.DNSQueries+1 {
 		t.Fatalf("expected filtered snapshot to bypass cache, got %d", filtered.DNSQueries)
+	}
+}
+
+// failingFlusher is a ResponseWriter whose flush can be made to fail on
+// demand, letting the stream handler's write-failure path be exercised
+// without a real socket. The first flush errors like a dead connection
+// after the initial payload has been delivered.
+type failingFlusher struct {
+	header  http.Header
+	flushed atomic.Int32
+	fail    atomic.Bool
+}
+
+func (f *failingFlusher) Header() http.Header {
+	if f.header == nil {
+		f.header = make(http.Header)
+	}
+	return f.header
+}
+func (*failingFlusher) WriteHeader(int)              {}
+func (*failingFlusher) Write(p []byte) (int, error) { return len(p), nil }
+// FlushError is the error-returning form http.ResponseController.Flush
+// looks for (Go 1.26+); it lets the test fail flushes on demand.
+func (f *failingFlusher) FlushError() error {
+	f.flushed.Add(1)
+	if f.fail.Load() {
+		return errors.New("flush failed")
+	}
+	return nil
+}
+
+// TestStreamHandlerExitsOnWriteFailure pins that a dead connection cannot
+// hold the handler open: once a write fails, the stream is torn down instead
+// of looping forever on a client that vanished without closing the TCP
+// connection.
+func TestStreamHandlerExitsOnWriteFailure(t *testing.T) {
+	s := NewServer(Options{Password: "secret", Rules: newFakeRules(), Stats: newTestStats(t)})
+	s.mu.Lock()
+	s.sessions["token"] = time.Now().Add(time.Hour)
+	s.mu.Unlock()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/stream", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "token"})
+	w := &failingFlusher{}
+
+	done := make(chan struct{})
+	go func() {
+		s.handleStream(w, req)
+		close(done)
+	}()
+
+	// The initial payload goes out while writes succeed.
+	deadline := time.After(2 * time.Second)
+	for w.flushed.Load() < 5 { // retry line + four initial events
+		select {
+		case <-deadline:
+			t.Fatalf("initial payload not flushed after 2s (flushed=%d)", w.flushed.Load())
+		case <-done:
+			t.Fatal("stream exited before the write failure")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+
+	// The next tick write fails, so the handler must return instead of
+	// blocking forever on the dead connection.
+	w.fail.Store(true)
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("stream handler stayed alive after write failures")
 	}
 }
 
