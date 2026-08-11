@@ -636,6 +636,7 @@ func (r *Router) exchangeUDP(req *dns.Msg, addr string) (*dns.Msg, error) {
 	if msg.IsEdns0() == nil {
 		msg.SetEdns0(dnsUDPSize, false)
 	}
+	stripECS(msg)
 
 	client := dns.Client{
 		Net:     "udp",
@@ -647,12 +648,56 @@ func (r *Router) exchangeUDP(req *dns.Msg, addr string) (*dns.Msg, error) {
 }
 
 func (r *Router) exchangeTCP(req *dns.Msg, addr string) (*dns.Msg, error) {
+	msg := req.Copy()
+	stripECS(msg)
 	client := dns.Client{
 		Net:     "tcp",
 		Timeout: dnsTimeout,
 	}
-	resp, _, err := client.Exchange(req.Copy(), addr)
+	resp, _, err := client.Exchange(msg, addr)
 	return resp, err
+}
+
+// ClientIPOf returns the client IP to attribute a DNS query to. Queries
+// forwarded by a local resolver (e.g. dnsmasq --add-subnet) carry the real
+// client address in the EDNS Client Subnet option; when present it takes
+// precedence over the transport source address, which would otherwise be the
+// resolver itself.
+func ClientIPOf(req *dns.Msg, remote net.Addr) string {
+	if opt := req.IsEdns0(); opt != nil {
+		for _, o := range opt.Option {
+			if sub, ok := o.(*dns.EDNS0_SUBNET); ok && sub.Address != nil {
+				if ip := sub.Address.String(); ip != "" {
+					return ip
+				}
+			}
+		}
+	}
+	if remote == nil {
+		return ""
+	}
+	if host, _, err := net.SplitHostPort(remote.String()); err == nil {
+		return host
+	}
+	return remote.String()
+}
+
+// stripECS removes the EDNS Client Subnet option before a query is forwarded
+// upstream. The subnet is added by a forwarding resolver (dnsmasq
+// --add-subnet) and is only meaningful between that resolver and this proxy;
+// forwarding it to public resolvers would leak the real client network.
+func stripECS(msg *dns.Msg) {
+	opt := msg.IsEdns0()
+	if opt == nil {
+		return
+	}
+	kept := opt.Option[:0]
+	for _, o := range opt.Option {
+		if _, isECS := o.(*dns.EDNS0_SUBNET); !isECS {
+			kept = append(kept, o)
+		}
+	}
+	opt.Option = kept
 }
 
 func (r *Router) isServeIP(raw string) bool {
