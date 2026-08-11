@@ -3,50 +3,137 @@ on:
   push:
     tags:
       - "v*.*.*"
+
 jobs:
-  build:
-    name: Build
+  web:
+    name: Build frontend
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+      - name: Build admin console
+        run: |
+          cd web
+          bun install --frozen-lockfile
+          bun run build
+      - uses: actions/upload-artifact@v7
+        with:
+          name: web-dist
+          path: web/dist
+          retention-days: 1
+
+  build:
+    name: Build ${{ matrix.name }}
+    needs: web
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux: cloud servers, x86 NAS (Synology/QNAP/UGREEN/ZSpace...)
+          - name: linux-amd64
+            goos: linux
+            goarch: amd64
+            service: sower.service sowerd.service
+          # Linux: ARM servers (Kunpeng/Graviton), ARM NAS, Raspberry Pi 4/5, routers
+          - name: linux-arm64
+            goos: linux
+            goarch: arm64
+            service: sower.service sowerd.service
+          # Linux: legacy NAS (Synology/QNAP ARM models), Raspberry Pi 2/3
+          - name: linux-arm
+            goos: linux
+            goarch: arm
+            goarm: "7"
+            service: sower.service sowerd.service
+          # Linux: emerging RISC-V boards (Orange Pi RV, VisionFive, SG2042)
+          - name: linux-riscv64
+            goos: linux
+            goarch: riscv64
+            service: sower.service sowerd.service
+          # Linux: LoongArch (Loongson) for the local ecosystem
+          - name: linux-loong64
+            goos: linux
+            goarch: loong64
+            service: sower.service sowerd.service
+          # Linux: legacy routers
+          - name: linux-mips
+            goos: linux
+            goarch: mips
+            service: sower.service sowerd.service
+          - name: linux-mipsle
+            goos: linux
+            goarch: mipsle
+            service: sower.service sowerd.service
+          # macOS: Intel Macs
+          - name: darwin-amd64
+            goos: darwin
+            goarch: amd64
+            service: sower.plist
+          # macOS: Apple Silicon
+          - name: darwin-arm64
+            goos: darwin
+            goarch: arm64
+            service: sower.plist
+          # Windows: mainstream x64
+          - name: windows-amd64
+            goos: windows
+            goarch: amd64
+            ext: .exe
+            service: sower_run.vbs
+          # Windows: ARM (Snapdragon X etc.)
+          - name: windows-arm64
+            goos: windows
+            goarch: arm64
+            ext: .exe
+            service: sower_run.vbs
+
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
           go-version: ^1.26
+      - uses: actions/download-artifact@v8
+        with:
+          name: web-dist
+          path: web/dist
 
-      - name: build matrix
+      - name: Prepare packaging files
         run: |
-          mv .github/* . || true
+          cp .github/sower.toml .
+          cp .github/${{ matrix.service }} .
 
-          make build GO='GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go'
-          tar czvf sower-linux-amd64.tar.gz sower sowerd sower.toml sower.yaml sower.service sowerd.service
-          make clean
-          make build GO='GOOS=linux GOARCH=arm CGO_ENABLED=0 go'
-          tar czvf sower-linux-arm.tar.gz sower sowerd sower.toml sower.yaml sower.service sowerd.service
-          make clean
-          make build GO='GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go'
-          tar czvf sower-linux-arm64.tar.gz sower sowerd sower.toml sower.yaml sower.service sowerd.service
-          make clean
-          make build GO='GOOS=linux GOARCH=mips CGO_ENABLED=0 go'
-          tar czvf sower-linux-mips.tar.gz sower sowerd sower.toml sower.yaml sower.service sowerd.service
-          make clean
-          make build GO='GOOS=linux GOARCH=mipsle CGO_ENABLED=0 go'
-          tar czvf sower-linux-mipsle.tar.gz sower sowerd sower.toml sower.yaml sower.service sowerd.service
-          make clean
+      - name: Build binaries
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm }}
+          CGO_ENABLED: "0"
+        run: |
+          ldflags="-X main.version=$(git describe --tags --always) -X main.date=$(date +%Y-%m-%d)"
+          go build -ldflags "$ldflags" -o sower${{ matrix.ext }} ./cmd/sower
+          go build -ldflags "$ldflags" -o sowerd${{ matrix.ext }} ./cmd/sowerd
+          tar czf sower-${{ matrix.name }}.tar.gz \
+            sower${{ matrix.ext }} sowerd${{ matrix.ext }} sower.toml \
+            ${{ matrix.service }}
 
-          make build GO='GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go'
-          tar czvf sower-darwin-amd64.tar.gz sower sowerd sower.toml sower.yaml sower.plist
-          make clean
-          make build GO='GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go'
-          tar czvf sower-darwin-arm64.tar.gz sower sowerd sower.toml sower.yaml sower.plist
-          make clean
+      - uses: actions/upload-artifact@v7
+        with:
+          name: sower-${{ matrix.name }}.tar.gz
+          path: sower-${{ matrix.name }}.tar.gz
+          retention-days: 1
 
-          make build GO='GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go'
-          mv sower sower.exe
-          mv sowerd sowerd.exe
-          tar czvf sower-windows-amd64.tar.gz sower.exe sowerd.exe sower.toml sower.yaml sower_run.vbs
-          make clean
-
+  release:
+    name: Attach release assets
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+          pattern: sower-*.tar.gz
+          merge-multiple: true
       - uses: ncipollo/release-action@v1
         with:
-          artifacts: "*.tar.gz"
+          artifacts: "artifacts/*.tar.gz"
           token: ${{ secrets.GITHUB_TOKEN }}
