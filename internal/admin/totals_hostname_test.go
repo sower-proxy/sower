@@ -36,8 +36,12 @@ func TestTotalsWithHostnames(t *testing.T) {
 	if resolver.lookups.Load() != before {
 		t.Fatalf("cache miss on second call: lookups %d -> %d", before, resolver.lookups.Load())
 	}
-	if totals.Clients[0].Hostname != "n100.lan" && totals.Clients[1].Hostname != "n100.lan" {
-		t.Fatalf("cached hostname lost: %+v", totals.Clients)
+	got = map[string]string{}
+	for _, c := range totals.Clients {
+		got[c.IP] = c.Hostname
+	}
+	if got["192.168.1.2"] != "n100.lan" {
+		t.Fatalf("cached hostname lost for 192.168.1.2: %q", got["192.168.1.2"])
 	}
 }
 
