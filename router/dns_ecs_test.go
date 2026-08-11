@@ -120,3 +120,51 @@ func TestExchangeStripsECSUpstream(t *testing.T) {
 		t.Fatalf("unexpected answer count: %d", len(resp.Answer))
 	}
 }
+
+func TestExchangeTCPStripsECSUpstream(t *testing.T) {
+	t.Parallel()
+
+	tcpLn, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen tcp: %v", err)
+	}
+
+	var seen atomic.Bool
+	handler := dns.HandlerFunc(func(w dns.ResponseWriter, req *dns.Msg) {
+		if opt := req.IsEdns0(); opt != nil {
+			for _, o := range opt.Option {
+				if _, isECS := o.(*dns.EDNS0_SUBNET); isECS {
+					t.Errorf("upstream received ECS option over TCP")
+				}
+			}
+		}
+		seen.Store(true)
+		m := new(dns.Msg)
+		m.SetReply(req)
+		m.Answer = append(m.Answer, &dns.A{
+			Hdr: dns.RR_Header{Name: req.Question[0].Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 60},
+			A:   net.ParseIP("1.2.3.4"),
+		})
+		_ = w.WriteMsg(m)
+	})
+	tcpServer := &dns.Server{Listener: tcpLn, Handler: handler}
+	go func() { _ = tcpServer.ActivateAndServe() }()
+	t.Cleanup(func() {
+		_ = tcpServer.Shutdown()
+		_ = tcpLn.Close()
+	})
+
+	r := newTestRouter(t, nil, "", "223.5.5.5", "", nil)
+	t.Cleanup(func() { _ = r.Close() })
+
+	resp, err := r.exchangeTCP(ecsMsg("192.168.1.42", 1, 32), tcpLn.Addr().String())
+	if err != nil {
+		t.Fatalf("exchangeTCP: %v", err)
+	}
+	if !seen.Load() {
+		t.Fatal("upstream handler never invoked")
+	}
+	if len(resp.Answer) != 1 {
+		t.Fatalf("unexpected answer count: %d", len(resp.Answer))
+	}
+}
