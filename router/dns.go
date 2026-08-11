@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"strconv"
 	"strings"
 	"time"
 
@@ -38,6 +39,15 @@ func (r *Router) ServeDNS(w dns.ResponseWriter, req *dns.Msg) {
 	// 1. rule_based( block > direct > proxy )
 	routeDomains := dnsRouteDomains(domain, qtype)
 	if dnsRuleMatch(r.BlockRule, routeDomains) {
+		_ = w.WriteMsg(r.dnsFail(req, dns.RcodeNameError))
+		return
+	}
+
+	// Internal reverse lookups (RFC1918, CGNAT, link-local, loopback, ULA)
+	// have no data on public upstream DNS and would leak internal network
+	// layout there. Answer NXDOMAIN locally unless an internal DNS server is
+	// among the upstreams and can answer authoritatively.
+	if arpaIP, ok := parseReverseName(domain); ok && isInternalIP(arpaIP) && !r.dnsUpstreamIsInternal() {
 		_ = w.WriteMsg(r.dnsFail(req, dns.RcodeNameError))
 		return
 	}
@@ -133,6 +143,100 @@ func (r *Router) proxyReplyIP(localAddr net.Addr, qtype uint16) (net.IP, error) 
 
 func isAddressQuestion(qtype uint16) bool {
 	return qtype == dns.TypeA || qtype == dns.TypeAAAA
+}
+
+// parseReverseName resolves an in-addr.arpa or ip6.arpa query name back to
+// the IP it represents. It returns ok=false for incomplete zone names (e.g.
+// "168.192.in-addr.arpa.") and malformed names, which keep the default
+// forwarding behavior.
+func parseReverseName(domain string) (net.IP, bool) {
+	name := strings.ToLower(strings.TrimSuffix(domain, "."))
+
+	switch {
+	case strings.HasSuffix(name, ".in-addr.arpa"):
+		labels := strings.Split(strings.TrimSuffix(name, ".in-addr.arpa"), ".")
+		if len(labels) != net.IPv4len {
+			return nil, false
+		}
+		var octets [net.IPv4len]byte
+		for i := range labels {
+			v, err := strconv.Atoi(labels[net.IPv4len-1-i]) // reversed: name lists least-significant octet first
+			if err != nil || v < 0 || v > 255 {
+				return nil, false
+			}
+			octets[i] = byte(v)
+		}
+		return net.IPv4(octets[0], octets[1], octets[2], octets[3]).To4(), true
+
+	case strings.HasSuffix(name, ".ip6.arpa"):
+		nibbles := strings.Split(strings.TrimSuffix(name, ".ip6.arpa"), ".")
+		if len(nibbles) != net.IPv6len*2 {
+			return nil, false
+		}
+		ip := make(net.IP, net.IPv6len)
+		for i, h := range nibbles {
+			v, err := strconv.ParseUint(h, 16, 8)
+			if err != nil {
+				return nil, false
+			}
+			// Nibbles are ordered least-significant byte first, low nibble
+			// first within each byte (matching dns.ReverseAddr output).
+			n := len(nibbles) - 1 - i
+			if n%2 == 0 {
+				ip[n/2] |= byte(v) << 4
+			} else {
+				ip[n/2] |= byte(v)
+			}
+		}
+		return ip, true
+
+	default:
+		return nil, false
+	}
+}
+
+// isInternalIP reports whether ip belongs to a private or local-only range:
+// RFC1918 / IPv6 ULA (net.IP.IsPrivate), CGNAT shared address space
+// (RFC 6598), link-local unicast, loopback, and the unspecified address.
+func isInternalIP(ip net.IP) bool {
+	if ip == nil {
+		return false
+	}
+	if ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() {
+		return true
+	}
+	if v4 := ip.To4(); v4 != nil {
+		// CGNAT 100.64.0.0/10
+		return v4[0] == 100 && v4[1]&0xC0 == 0x40
+	}
+	return false
+}
+
+// dnsUpstreamIsInternal reports whether any configured or discovered DNS
+// upstream is an internal address. Internal reverse lookups are only
+// forwarded when an internal DNS server can answer them.
+func (r *Router) dnsUpstreamIsInternal() bool {
+	r.dns.Lock()
+	defer r.dns.Unlock()
+
+	if len(r.dns.upstreamAddrs) > 0 {
+		for _, addr := range r.dns.upstreamAddrs {
+			if isInternalHost(addr) {
+				return true
+			}
+		}
+		return false
+	}
+	return isInternalHost(r.dns.upstreamDNS) || isInternalHost(r.dns.fallbackDNS)
+}
+
+// isInternalHost reports whether host (with optional port) is an internal IP.
+func isInternalHost(hostport string) bool {
+	host := hostport
+	if h, _, err := net.SplitHostPort(hostport); err == nil {
+		host = h
+	}
+	return isInternalIP(net.ParseIP(strings.Trim(host, "[]")))
 }
 
 func dnsRuleMatch(rule interface{ Match(string) bool }, domains []string) bool {

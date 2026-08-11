@@ -80,6 +80,7 @@ For non-transport fallback traffic, it can route by TLS SNI to per-domain upstre
    Proxy-routed domains return local A/AAAA records, suppress HTTPS/SVCB and other non-address metadata locally, and never leak proxy-matched names to direct upstream DNS.
    Direct upstream DNS failures fall back only for retryable upstream service errors; when no fallback succeeds, the last upstream DNS response code is returned as-is.
    Service discovery names are matched against both the full query name and the base domain only for service record types.
+   Reverse lookups (PTR) for internal ranges (RFC1918, CGNAT 100.64/10, link-local, loopback, IPv6 ULA) are answered with NXDOMAIN locally unless an internal DNS server is among the upstreams, so internal layout never leaks to public DNS and internal reverse resolution still works when an internal DNS server is configured.
 9. For DNS-mode transparent HTTP traffic, parse the target host from the request line and always forward through the upstream proxy. For DNS-mode transparent HTTPS traffic, peek the TLS ClientHello to extract SNI and always forward through the upstream proxy.
    These transparent `80/443` listeners are second-stage proxy-only handlers for domains already mapped to local proxy IPs by DNS; they do not run smart routing again.
    HTTPS transparent proxying reads only the TLS ClientHello, then replays the untouched bytes to the selected upstream; it must not complete or terminate TLS locally.
