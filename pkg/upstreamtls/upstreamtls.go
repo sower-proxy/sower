@@ -16,6 +16,10 @@ type Options struct {
 	InsecureSkipVerify bool
 }
 
+// defaultHandshakeTimeout bounds the uTLS handshake when the dialer carries
+// no timeout of its own.
+const defaultHandshakeTimeout = 10 * time.Second
+
 func ValidateClientHello(value string) error {
 	_, err := clientHelloID(value)
 	return err
@@ -39,13 +43,17 @@ func Dial(dialer *net.Dialer, network, addr string, options Options) (net.Conn, 
 		return nil, err
 	}
 
-	if timeout := dialer.Timeout; timeout > 0 {
-		if err := rawConn.SetDeadline(time.Now().Add(timeout)); err != nil {
-			rawConn.Close()
-			return nil, fmt.Errorf("set tls deadline: %w", err)
-		}
-		defer rawConn.SetDeadline(time.Time{})
+	timeout := dialer.Timeout
+	if timeout <= 0 {
+		// A zero-timeout dialer must not handshake forever; fall back to a
+		// bounded default so the connection cannot hang open indefinitely.
+		timeout = defaultHandshakeTimeout
 	}
+	if err := rawConn.SetDeadline(time.Now().Add(timeout)); err != nil {
+		rawConn.Close()
+		return nil, fmt.Errorf("set tls deadline: %w", err)
+	}
+	defer rawConn.SetDeadline(time.Time{})
 
 	serverName := options.ServerName
 	if serverName == "" {

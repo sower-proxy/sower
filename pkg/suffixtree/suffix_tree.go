@@ -57,7 +57,9 @@ func (n *node) string(prefix, indent string) (out string) {
 }
 
 func (n *Node) trim(item string) string {
-	return strings.ToLower(strings.TrimSuffix(item, n.sep))
+	// Trim every trailing separator so a rule with repeated dots (dirty
+	// remote rule files) cannot build an unreachable empty-label subtree.
+	return strings.ToLower(strings.TrimRight(item, n.sep))
 }
 
 func (n *Node) Add(item string) {

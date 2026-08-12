@@ -67,8 +67,6 @@ github.com/rogpeppe/go-internal v1.14.1 h1:UQB4HGPB6osV0SQTLymcB4TgvyWu6ZyliaW0t
 github.com/rogpeppe/go-internal v1.14.1/go.mod h1:MaRKkUm5W0goXpeCfT7UZI6fk/L7L7so1lCWt35ZSgc=
 github.com/sower-proxy/conns v0.1.1 h1:9VPVW+sFc/y/IvXbUQTbXNSPF3I+1IG5mbrQTt5bdTE=
 github.com/sower-proxy/conns v0.1.1/go.mod h1:p3ZM/8MolzW4TN0LaiPJnwnhhif3y9sBi2vQEWHvwhg=
-github.com/sower-proxy/deferlog/v2 v2.1.4 h1:Vo/iVWGw3Su625RP2RIy4mE5FlfRdfrgP7kwOWNOyec=
-github.com/sower-proxy/deferlog/v2 v2.1.4/go.mod h1:mdLrL/bxiTNhxeRLtRgKAecQddugI0iJ0ArC3yDwVSw=
 github.com/sower-proxy/deferlog/v2 v2.1.5 h1:3MF21JmCbIOI7ROWqwfBDDX4Y6g3EkDp4p7TZxJFyyg=
 github.com/sower-proxy/deferlog/v2 v2.1.5/go.mod h1:mdLrL/bxiTNhxeRLtRgKAecQddugI0iJ0ArC3yDwVSw=
 github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu7U=

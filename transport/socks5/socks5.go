@@ -57,6 +57,11 @@ func (s *Socks5) ReadRequest(conn net.Conn) (net.Addr, error) {
 			return nil, fmt.Errorf("read auth request: %w", err)
 		}
 		if !auth.IsValid() {
+			// RFC 1928 requires a METHOD=0xFF failure response so the peer
+			// does not hang waiting for a selection it will never get.
+			if err := binary.Write(conn, binary.BigEndian, authResp{VER: 5, METHOD: 0xFF}); err != nil {
+				return nil, fmt.Errorf("write auth failure: %w", err)
+			}
 			return nil, errors.New("no acceptable auth method")
 		}
 

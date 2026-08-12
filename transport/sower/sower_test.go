@@ -47,7 +47,7 @@ func TestUnwrapReadsFullHeader(t *testing.T) {
 	buf := bytes.NewBuffer(nil)
 	if err := binary.Write(buf, binary.BigEndian, &Head{
 		Cmd:      0x80,
-		Checksum: sumChecksum(target, []byte("123")),
+		Checksum: sumChecksum(0x80, 443, target, []byte("123")),
 		Port:     443,
 		TgtAddr:  target,
 	}); err != nil {

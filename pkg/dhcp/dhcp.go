@@ -1,6 +1,7 @@
 package dhcp
 
 import (
+	"bytes"
 	"crypto/rand"
 	"fmt"
 	"net"
@@ -40,19 +41,43 @@ func GetDNSServer() ([]string, error) {
 		}
 	}
 	defer conn.Close()
-	conn.SetDeadline(time.Now().Add(3 * time.Second))
+	// Broadcasting to 255.255.255.255 requires SO_BROADCAST on most stacks.
+	if c, ok := conn.(*net.UDPConn); ok {
+		if raw, err := c.SyscallConn(); err == nil {
+			_ = raw.Control(func(fd uintptr) {
+				_ = setBroadcast(int(fd))
+			})
+		}
+	}
+	_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
 
 	if _, err := conn.WriteTo([]byte(pack), broadcastAddr); err != nil {
 		return nil, fmt.Errorf("write broadcast: %w", err)
 	}
 
+	// The socket may receive packets from other DHCP transactions (the
+	// system dhclient shares port 68 via SO_REUSEPORT) or spoofed LAN
+	// traffic; accept only the OFFER that belongs to this transaction.
 	buf := make([]byte, 1500 /*MTU*/)
-	n, _, err := conn.ReadFrom(buf)
-	if err != nil {
-		return nil, fmt.Errorf("read dhcp offer: %w", err)
+	for {
+		n, _, err := conn.ReadFrom(buf)
+		if err != nil {
+			return nil, fmt.Errorf("read dhcp offer: %w", err)
+		}
+		pack = dhcp4.Packet(buf[:n])
+		if !bytes.Equal(pack.XId(), xid) {
+			continue // another transaction's packet
+		}
+		if pack.OpCode() != dhcp4.BootReply {
+			continue
+		}
+		opts := pack.ParseOptions()
+		if mt := opts[dhcp4.OptionDHCPMessageType]; len(mt) == 0 || mt[0] != byte(dhcp4.Offer) {
+			continue
+		}
+		break
 	}
 
-	pack = dhcp4.Packet(buf[:n])
 	dnsBytes := pack.ParseOptions()[dhcp4.OptionDomainNameServer]
 	if len(dnsBytes) < 4 || len(dnsBytes)%4 != 0 {
 		return nil, errors.New("invalid DNS setting in upstream network device")

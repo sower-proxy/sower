@@ -2,6 +2,7 @@ package sower
 
 import (
 	"bytes"
+	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
@@ -62,8 +63,23 @@ func (s *Sower) Unwrap(conn net.Conn) (net.Addr, error) {
 		return nil, fmt.Errorf("invalid command: %d", h.Cmd)
 	}
 
-	if h.Checksum != sumChecksum(h.TgtAddr, s.password) {
+	if h.Checksum != sumChecksum(h.Cmd, h.Port, h.TgtAddr, s.password) {
 		return nil, errors.New("auth fail")
+	}
+
+	// Reject hosts that could corrupt dialing or logging: empty targets and
+	// control characters are never legitimate.
+	idx := bytes.IndexByte(h.TgtAddr[:], 0)
+	if idx < 0 {
+		idx = len(h.TgtAddr)
+	}
+	if idx == 0 {
+		return nil, errors.New("empty target host")
+	}
+	for _, c := range h.TgtAddr[:idx] {
+		if c < 0x20 || c == 0x7f {
+			return nil, errors.New("target host contains control characters")
+		}
 	}
 
 	return h, nil
@@ -76,11 +92,12 @@ func (s *Sower) Wrap(conn net.Conn, tgtHost string, tgtPort uint16) error {
 
 	tgtAddr := [maxDomainLength]byte{}
 	copy(tgtAddr[:len(tgtHost)], tgtHost)
+	cmd := byte(0x80)
 
 	buf := bytes.NewBuffer(make([]byte, 0, headSize))
 	if err := binary.Write(buf, binary.BigEndian, &Head{
-		Cmd:      0x80,
-		Checksum: sumChecksum(tgtAddr, s.password),
+		Cmd:      cmd,
+		Checksum: sumChecksum(cmd, tgtPort, tgtAddr, s.password),
 		Port:     tgtPort,
 		TgtAddr:  tgtAddr,
 	}); err != nil {
@@ -92,15 +109,17 @@ func (s *Sower) Wrap(conn net.Conn, tgtHost string, tgtPort uint16) error {
 	return nil
 }
 
-func sumChecksum(target [maxDomainLength]byte, password []byte) uint64 {
-	h := sha256.New()
-	h.Write(target[:])
-	h.Write(password)
-	var checksum [sha256.Size]byte
-	h.Sum(checksum[:0])
-	// Take a fixed 64-bit window of the digest. binary.Uvarint would only
-	// consume bytes until the first continuation bit is clear (typically the
-	// first byte, ~50% of the time), collapsing the checksum to 7 bits of
-	// entropy and making the auth check brute-forceable.
-	return binary.BigEndian.Uint64(checksum[:8])
+// sumChecksum authenticates the whole frame: command, port, and target are
+// all covered, so a man-in-the-middle on a plaintext link cannot retarget a
+// captured frame to a different port without breaking the check. HMAC-SHA256
+// keeps the password out of the hashed message (length-extension resistant)
+// and off the wire in a non-invertible form.
+func sumChecksum(cmd byte, port uint16, target [maxDomainLength]byte, password []byte) uint64 {
+	mac := hmac.New(sha256.New, password)
+	mac.Write([]byte{cmd})
+	var portBuf [2]byte
+	binary.BigEndian.PutUint16(portBuf[:], port)
+	mac.Write(portBuf[:])
+	mac.Write(target[:])
+	return binary.BigEndian.Uint64(mac.Sum(nil)[:8])
 }
