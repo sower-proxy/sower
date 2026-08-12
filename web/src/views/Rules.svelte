@@ -1,6 +1,6 @@
 <script lang="ts">
   import { fade } from 'svelte/transition'
-  import { untrack } from 'svelte'
+  import { untrack, onDestroy } from 'svelte'
   import { prefersReducedMotion } from 'svelte/motion'
   import { api, ApiError, type Category, type DomainTest, type RuleChangeSet, type RuleEntry, type RuleHit, type RuleSort, type RuleSortDir } from '$lib/api'
   import { formatCount, formatTime } from '$lib/format'
@@ -39,6 +39,9 @@
   // Rule-less connection stats: domains that matched no block/direct/proxy
   // rule, aggregated per domain with connection count and last access.
   let missSort: 'count' | 'recent' = $state('count')
+  // missRequestID guards the miss list against out-of-order responses: a
+  // slow count query must not overwrite a newer recent result.
+  let missRequestID = 0
   let missDomains = $state<RuleHit[] | null>(null)
   let missError = $state('')
 
@@ -316,6 +319,14 @@
     }
   }
 
+  // Timers outlive the effect that clears them on category switches: destroy
+  // the component without waiting for the next category change.
+  onDestroy(() => {
+    clearTimeout(searchTimer)
+    clearTimeout(undoTimer)
+    clearTimeout(savedTimer)
+  })
+
   // Reset and reload whenever the breadcrumb-driven category changes. The
   // load/refresh calls are untracked: they read query/offset/sortBy, and a
   // tracked $effect would re-run (and reset the list) on every sort or
@@ -354,11 +365,14 @@
   })
 
   async function loadMiss() {
+    const id = ++missRequestID
     try {
       const resp = await api.ruleMiss(missSort, 20)
+      if (id !== missRequestID) return // superseded by a newer request
       missDomains = resp
       missError = ''
     } catch (e) {
+      if (id !== missRequestID) return
       if (e instanceof ApiError && e.status === 401) {
         onUnauthorized()
         return

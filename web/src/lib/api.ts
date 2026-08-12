@@ -175,6 +175,7 @@ export interface ConfigChanges {
 	log_level?: string;
 	dns_upstream?: string;
 	dns_fallback?: string;
+	dns_reverse?: string;
 	remote_type?: string;
 	remote_addr?: string;
 	remote_tls_server_name?: string;

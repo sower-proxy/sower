@@ -94,15 +94,15 @@
   const headCell = 'sticky top-0 z-10 bg-card'
 </script>
 
+{#if !live.connected}
+  <Alert.Alert variant="destructive" class="mb-4">
+    <CircleAlert class="size-4" />
+    <Alert.AlertDescription>实时连接不可用，正在自动重连…</Alert.AlertDescription>
+  </Alert.Alert>
+{/if}
 {#if !live.traffic && !live.totals}
   <Loading />
 {:else}
-  {#if !live.connected}
-    <Alert.Alert variant="destructive" class="mb-4">
-      <CircleAlert class="size-4" />
-      <Alert.AlertDescription>实时连接已断开，正在自动重连…</Alert.AlertDescription>
-    </Alert.Alert>
-  {/if}
   <div class="mb-3 grid gap-2 sm:flex sm:items-center">
     <div class="relative min-w-0 w-full sm:w-64">
       <Search class="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />

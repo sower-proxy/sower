@@ -30,6 +30,10 @@
   // position stable for keyboard users.
   let rowRefs = $state<Record<string, HTMLDivElement>>({})
   let flashTimer: ReturnType<typeof setTimeout> | undefined
+  // restartAbort cancels the post-restart polling loop when the component is
+  // destroyed, so a navigation away cannot leave background probes running
+  // (or let a stale 401 from a dead page trigger a global logout).
+  let restartAbort: AbortController | null = null
 
   const stagedCount = $derived(Object.keys(staged).length)
 
@@ -87,6 +91,7 @@
 
   onDestroy(() => {
     if (flashTimer) clearTimeout(flashTimer)
+    restartAbort?.abort()
   })
 
   // commitEditFor stages the in-progress edit for a key. A value equal to
@@ -184,11 +189,14 @@
     if (!confirm('重启 sower 服务使配置生效？代理连接会短暂中断。')) return
     restarting = true
     restartError = ''
+    restartAbort = new AbortController()
+    const signal = restartAbort.signal
     try {
       await api.restart()
       const deadline = Date.now() + 60_000
       for (;;) {
         await new Promise((r) => setTimeout(r, 1000))
+        if (signal.aborted) return // component destroyed; stop polling
         // The in-place exec restart keeps the old keep-alive sockets alive
         // but unserved; bound each probe so a stale connection cannot hang
         // the poll forever.
@@ -210,6 +218,7 @@
           break
         }
       }
+      if (signal.aborted) return
       if (!restartError) {
         await reload()
         staged = {}
@@ -221,6 +230,7 @@
       if (e instanceof ApiError && e.status === 401) return onUnauthorized()
       restartError = e instanceof Error ? e.message : '重启失败'
     } finally {
+      restartAbort = null
       restarting = false
     }
   }

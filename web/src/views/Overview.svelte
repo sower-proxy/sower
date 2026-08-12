@@ -64,20 +64,20 @@
   })
 </script>
 
+{#if !live.connected}
+  <Alert.Alert variant="destructive" class="mb-4">
+    <CircleAlert class="size-4" />
+    <Alert.AlertDescription>实时连接不可用，正在自动重连…</Alert.AlertDescription>
+  </Alert.Alert>
+{:else if live.stale}
+  <Alert.Alert variant="destructive" class="mb-4">
+    <CircleAlert class="size-4" />
+    <Alert.AlertDescription>连接正常，但数据已停止更新，请刷新页面</Alert.AlertDescription>
+  </Alert.Alert>
+{/if}
 {#if !status || !traffic}
   <Loading />
 {:else}
-  {#if !live.connected}
-    <Alert.Alert variant="destructive" class="mb-4">
-      <CircleAlert class="size-4" />
-      <Alert.AlertDescription>实时连接已断开，正在重连…</Alert.AlertDescription>
-    </Alert.Alert>
-  {:else if live.stale}
-    <Alert.Alert variant="destructive" class="mb-4">
-      <CircleAlert class="size-4" />
-      <Alert.AlertDescription>连接正常，但数据已停止更新，请刷新页面</Alert.AlertDescription>
-    </Alert.Alert>
-  {/if}
   {#if errorActive}
     <Alert.Alert variant="destructive" class="mb-4">
       <CircleAlert class="size-4" />

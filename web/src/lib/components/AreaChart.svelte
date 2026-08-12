@@ -267,6 +267,8 @@
 <div class="relative">
   {#if hasData}
     <div class="relative">
+      <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+      <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
       <svg
         bind:this={svg}
         viewBox={`0 0 ${W} ${H}`}
