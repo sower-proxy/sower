@@ -316,6 +316,44 @@ func TestServeDNSInternalReverseLookup(t *testing.T) {
 		}
 	})
 
+	t.Run("internal upstream failure never degrades onto public fallback", func(t *testing.T) {
+		var fallbackQueries atomic.Int32
+		fallbackAddr := startUDPTestDNSServer(t, dns.HandlerFunc(func(w dns.ResponseWriter, req *dns.Msg) {
+			fallbackQueries.Add(1)
+			resp := new(dns.Msg)
+			resp.SetReply(req)
+			_ = w.WriteMsg(resp)
+		}))
+		// The selected internal upstream answers SERVFAIL (retryable); the
+		// dedicated internal-PTR path must surface the failure instead of
+		// retrying the query on the public fallback behind it.
+		servfailAddr := startUDPTestDNSServer(t, dns.HandlerFunc(func(w dns.ResponseWriter, req *dns.Msg) {
+			m := new(dns.Msg)
+			m.SetRcode(req, dns.RcodeServerFailure)
+			_ = w.WriteMsg(m)
+		}))
+
+		r := newTestRouter(t, []string{"127.0.0.2"}, "", "223.5.5.5", "", nil)
+		r.dns.upstreamAddrs = []string{servfailAddr, fallbackAddr}
+		r.dns.upstreamIndex = 0
+
+		req := new(dns.Msg)
+		req.SetQuestion("1.1.168.192.in-addr.arpa.", dns.TypePTR)
+		writer := &mockDNSWriter{localAddr: &net.UDPAddr{IP: net.ParseIP("127.0.0.2"), Port: 53}}
+
+		r.ServeDNS(writer, req)
+
+		if writer.msg == nil {
+			t.Fatal("expected response")
+		}
+		if writer.msg.Rcode != dns.RcodeServerFailure {
+			t.Fatalf("expected SERVFAIL, got %s", dns.RcodeToString[writer.msg.Rcode])
+		}
+		if fallbackQueries.Load() != 0 {
+			t.Fatalf("internal PTR must not retry on public fallback, got %d queries", fallbackQueries.Load())
+		}
+	})
+
 	t.Run("ipv6 internal reverse with public upstream answers NXDOMAIN locally", func(t *testing.T) {
 		r := newTestRouter(t, []string{"127.0.0.2"}, "", "223.5.5.5", "", nil)
 		r.dns.upstreamAddrs = []string{"8.8.8.8:53"}

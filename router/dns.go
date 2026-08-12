@@ -45,13 +45,27 @@ func (r *Router) ServeDNS(w dns.ResponseWriter, req *dns.Msg) {
 
 	// Internal reverse lookups (RFC1918, CGNAT, link-local, loopback, ULA)
 	// have no data on public upstream DNS and would leak internal network
-	// layout there. Answer NXDOMAIN locally unless the upstream that would
-	// serve the query is an internal DNS server that can answer
-	// authoritatively. Judging the currently selected upstream (not the
-	// whole pool) keeps a degraded mixed pool from forwarding internal PTR
-	// queries to a public fallback.
-	if arpaIP, ok := parseReverseName(domain); ok && isInternalIP(arpaIP) && !r.dnsSelectedUpstreamIsInternal() {
-		_ = w.WriteMsg(r.dnsFail(req, dns.RcodeNameError))
+	// layout there. They are answered with NXDOMAIN locally unless the
+	// upstream that would serve the query is an internal DNS server, and
+	// are then forwarded only to that selected upstream: a degraded mixed
+	// pool must never retry an internal reverse lookup onto a public
+	// fallback.
+	if arpaIP, ok := parseReverseName(domain); ok && isInternalIP(arpaIP) {
+		if !r.dnsSelectedUpstreamIsInternal() {
+			_ = w.WriteMsg(r.dnsFail(req, dns.RcodeNameError))
+			return
+		}
+		addrs, index, _, err := r.currentUpstreamState(time.Now())
+		if err != nil || index < 0 || index >= len(addrs) || !isInternalHost(addrs[index]) {
+			_ = w.WriteMsg(r.dnsFail(req, dns.RcodeServerFailure))
+			return
+		}
+		resp, err := r.exchangeWithRetry(req, addrs[index])
+		if err != nil {
+			_ = w.WriteMsg(r.dnsFail(req, dns.RcodeServerFailure))
+			return
+		}
+		_ = w.WriteMsg(resp)
 		return
 	}
 
@@ -84,6 +98,7 @@ func (r *Router) ServeDNS(w dns.ResponseWriter, req *dns.Msg) {
 func (r *Router) dnsFail(req *dns.Msg, rcode int) *dns.Msg {
 	m := new(dns.Msg)
 	m.SetRcode(req, rcode)
+	m.RecursionAvailable = true
 	if opt := req.IsEdns0(); opt != nil {
 		// RFC 6891: a response to an EDNS query should carry an OPT record,
 		// otherwise strict clients may treat the reply as truncated or
@@ -293,6 +308,7 @@ func stripDNSServicePrefix(domain string) (string, bool) {
 func dnsReply(req *dns.Msg) *dns.Msg {
 	reply := new(dns.Msg)
 	reply.SetReply(req)
+	reply.RecursionAvailable = true
 	if opt := req.IsEdns0(); opt != nil {
 		reply.SetEdns0(opt.UDPSize(), false)
 	}
@@ -351,7 +367,7 @@ func (r *Router) Exchange(req *dns.Msg) (_ *dns.Msg, err error) {
 
 	resp, err := r.exchangeWithRetry(req, addrs[index])
 	if err != nil {
-		nextIndex, switched := r.degradeUpstream(index, gen)
+		nextIndex, switched := r.degradeUpstream(index, gen, len(addrs))
 		if switched {
 			slog.Info("use upstream dns", "ip", addrs[nextIndex])
 			resp, err = r.exchangeWithRetry(req, addrs[nextIndex])
@@ -392,11 +408,15 @@ func (r *Router) currentUpstreamStateWithGeneration(now time.Time) ([]string, in
 	}
 }
 
-func (r *Router) degradeUpstream(index int, gen uint64) (int, bool) {
+func (r *Router) degradeUpstream(index int, gen uint64, snapshotLen int) (int, bool) {
 	r.dns.Lock()
 	defer r.dns.Unlock()
 
-	if gen != r.dns.generation || len(r.dns.upstreamAddrs) == 0 || r.dns.upstreamIndex != index || index >= len(r.dns.upstreamAddrs)-1 {
+	// snapshotLen is the length of the caller's snapshot: the retry indexes
+	// into that snapshot, so an index past it would panic. A concurrent
+	// refresh can grow the live list past the snapshot; in that case the
+	// caller's selection is stale and the retry is skipped.
+	if gen != r.dns.generation || len(r.dns.upstreamAddrs) == 0 || r.dns.upstreamIndex != index || index >= len(r.dns.upstreamAddrs)-1 || index+1 >= snapshotLen {
 		return r.dns.upstreamIndex, false
 	}
 
@@ -624,11 +644,14 @@ func (r *Router) exchangeWithRetry(req *dns.Msg, addr string) (*dns.Msg, error) 
 		return resp, dnsResponseErr(resp)
 	}
 
-	resp, err = r.exchangeTCP(req, addr)
-	if err != nil {
-		return nil, err
+	tcpResp, tcpErr := r.exchangeTCP(req, addr)
+	if tcpErr != nil {
+		// The TCP retry failed (TCP/53 is blocked on some networks). Keep
+		// the truncated UDP response instead of SERVFAIL: it still carries
+		// the rcode and the TC bit lets the client retry over TCP itself.
+		return resp, nil
 	}
-	return resp, dnsResponseErr(resp)
+	return tcpResp, dnsResponseErr(tcpResp)
 }
 
 func dnsResponseErr(resp *dns.Msg) error {

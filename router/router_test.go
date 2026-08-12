@@ -737,7 +737,7 @@ func TestDegradeUpstreamMovesTowardFallback(t *testing.T) {
 	r.dns.upstreamAddrs = []string{"1.1.1.1:53", "9.9.9.9:53"}
 	r.dns.upstreamIndex = 0
 
-	index, switched := r.degradeUpstream(0, r.dns.generation)
+	index, switched := r.degradeUpstream(0, r.dns.generation, len(r.dns.upstreamAddrs))
 	if !switched {
 		t.Fatal("expected upstream switch")
 	}
@@ -746,6 +746,24 @@ func TestDegradeUpstreamMovesTowardFallback(t *testing.T) {
 	}
 	if r.dns.retryAt.IsZero() {
 		t.Fatal("expected retry deadline to be set")
+	}
+}
+
+func TestDegradeUpstreamSkipsRetryPastSnapshot(t *testing.T) {
+	t.Parallel()
+
+	r := newTestRouter(t, []string{"127.0.0.1"}, "1.1.1.1", "9.9.9.9", "", nil)
+	r.dns.upstreamAddrs = []string{"1.1.1.1:53", "9.9.9.9:53"}
+	r.dns.upstreamIndex = 0
+
+	// The caller's snapshot is shorter than the live list (a concurrent
+	// refresh grew it); degrading onto index 1 would index past the
+	// snapshot. The retry must be skipped, not panic.
+	if index, switched := r.degradeUpstream(0, r.dns.generation, 1); switched || index != 0 {
+		t.Fatalf("expected stale snapshot to skip retry, got index=%d switched=%v", index, switched)
+	}
+	if r.dns.upstreamIndex != 0 {
+		t.Fatalf("upstream index must stay 0, got %d", r.dns.upstreamIndex)
 	}
 }
 
