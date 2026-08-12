@@ -11,6 +11,12 @@ import (
 const (
 	protocolProbeTimeout  = time.Second
 	protocolProbeMaxBytes = 512
+	// protocolHeaderTimeout bounds reading the transport header after a
+	// probe match; the probe window itself is too short for a slow client.
+	protocolHeaderTimeout = 5 * time.Second
+	// tlsHandshakeTimeout bounds the explicit TLS handshake before probing;
+	// ACME issuance on first contact can take tens of seconds.
+	tlsHandshakeTimeout = 60 * time.Second
 )
 
 type probeVerdict int

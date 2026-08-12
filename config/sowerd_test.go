@@ -91,9 +91,10 @@ func TestSowerdConfigValidate(t *testing.T) {
 				Password: "secret",
 				FakeSite: "127.0.0.1:8080",
 				Cert: struct {
-					Email string
-					Cert  string
-					Key   string
+					Email   string
+					Cert    string
+					Key     string
+					Domains []string
 				}{
 					Cert: "/tmp/cert.pem",
 				},
@@ -239,6 +240,53 @@ func TestSowerdConfigValidate(t *testing.T) {
 				Password: "secret",
 				FakeSite: "127.0.0.1:8080",
 			},
+		},
+		{
+			name: "valid cert domains",
+			cfg: SowerdConfig{
+				Password: "secret",
+				FakeSite: "127.0.0.1:8080",
+				Cert: struct {
+					Email   string
+					Cert    string
+					Key     string
+					Domains []string
+				}{
+					Domains: []string{"proxy.example.com"},
+				},
+			},
+		},
+		{
+			name: "invalid cert domain rejected",
+			cfg: SowerdConfig{
+				Password: "secret",
+				FakeSite: "127.0.0.1:8080",
+				Cert: struct {
+					Email   string
+					Cert    string
+					Key     string
+					Domains []string
+				}{
+					Domains: []string{"not a domain"},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "duplicate cert domain rejected",
+			cfg: SowerdConfig{
+				Password: "secret",
+				FakeSite: "127.0.0.1:8080",
+				Cert: struct {
+					Email   string
+					Cert    string
+					Key     string
+					Domains []string
+				}{
+					Domains: []string{"proxy.example.com", "proxy.example.com"},
+				},
+			},
+			wantErr: true,
 		},
 	}
 

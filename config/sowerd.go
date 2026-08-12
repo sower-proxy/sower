@@ -38,6 +38,7 @@ fake_site = "/var/www"            # Fallback fake site directory or address (def
 # SSL/TLS certificate configuration
 [cert]
 email = "your-email@example.com" # Email for Let's Encrypt certificate
+# domains = ["proxy.example.com"] # Domains autocert may issue for, in addition to site_routes domains (required for direct connections like the sower client remote addr)
 cert = ""                        # Path to custom certificate file (optional)
 key = ""                         # Path to custom private key file (optional)
 `
@@ -66,6 +67,12 @@ type SowerdConfig struct {
 		Email string
 		Cert  string
 		Key   string
+		// Domains whitelists which names autocert may issue certificates
+		// for, on top of every site_routes domain. A nil HostPolicy would
+		// let anyone trigger issuance for arbitrary SNI names, exhausting
+		// the Let's Encrypt account rate limits. Direct-connection domains
+		// (e.g. the sower client's remote addr) must be listed here.
+		Domains []string
 	}
 }
 
@@ -87,6 +94,18 @@ func (c *SowerdConfig) Validate() error {
 
 	if err := validateSiteRoutes(c.SiteRoutes); err != nil {
 		return err
+	}
+
+	seenCertDomains := make(map[string]struct{}, len(c.Cert.Domains))
+	for _, d := range c.Cert.Domains {
+		d = strings.ToLower(d)
+		if !validExactDomain(d) {
+			return fmt.Errorf("invalid cert domain %q", d)
+		}
+		if _, ok := seenCertDomains[d]; ok {
+			return fmt.Errorf("duplicate cert domain %q", d)
+		}
+		seenCertDomains[d] = struct{}{}
 	}
 
 	if c.Cert.Cert != "" {

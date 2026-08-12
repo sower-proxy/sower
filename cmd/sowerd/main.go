@@ -113,7 +113,7 @@ func run(ctx context.Context, conf config.SowerdConfig) error {
 		return err
 	}
 
-	fakeSite, dirServer, err := prepareFakeSite(conf.FakeSite)
+	fakeSite, dirServer, err := prepareFakeSite(conf.FakeSite, conf.ServeIP)
 	if err != nil {
 		return err
 	}
@@ -203,6 +203,11 @@ func buildTLSConfig(cacheDir string, cfg config.SowerdConfig) (*autocert.Manager
 		Prompt: autocert.AcceptTOS,
 		Email:  cfg.Cert.Email,
 		Cache:  autocert.DirCache(cacheDir),
+		// Only issue for names the operator owns: every site-routed domain
+		// plus the explicit cert.domains whitelist. A nil HostPolicy lets
+		// anyone trigger issuance for arbitrary SNI names, exhausting the
+		// account's order/rate limits and polluting the cache.
+		HostPolicy: autocert.HostWhitelist(certIssueDomains(cfg)...),
 	}
 
 	tlsConf := &tls.Config{
@@ -225,11 +230,42 @@ func buildTLSConfig(cacheDir string, cfg config.SowerdConfig) (*autocert.Manager
 	return certManager, tlsConf, nil
 }
 
-func prepareFakeSite(fakeSite string) (string, http.Handler, error) {
+// certIssueDomains collects the deduplicated domain whitelist for autocert
+// issuance: every site_routes domain plus cert.domains.
+func certIssueDomains(cfg config.SowerdConfig) []string {
+	seen := make(map[string]struct{}, len(cfg.Cert.Domains))
+	domains := make([]string, 0, len(cfg.Cert.Domains))
+	add := func(d string) {
+		d = strings.ToLower(d)
+		if _, ok := seen[d]; ok {
+			return
+		}
+		seen[d] = struct{}{}
+		domains = append(domains, d)
+	}
+	for _, d := range cfg.Cert.Domains {
+		add(d)
+	}
+	for _, route := range cfg.SiteRoutes {
+		for _, d := range route.Domains {
+			add(d)
+		}
+	}
+	return domains
+}
+
+func prepareFakeSite(fakeSite string, serveIP string) (string, http.Handler, error) {
 	si, err := os.Stat(fakeSite)
 	if err == nil && si.IsDir() {
 		slog.Info("serve fake site on http", "dir", fakeSite)
-		return "127.0.0.1:80", http.FileServer(http.Dir(fakeSite)), nil
+		// The directory fake site is served by the loopback HTTP server.
+		// Prefer a concrete serve_ip as the relay target (its :80 listener
+		// exists); otherwise fall back to the loopback address.
+		target := "127.0.0.1:80"
+		if ip := net.ParseIP(serveIP); ip != nil && !ip.IsUnspecified() {
+			target = net.JoinHostPort(serveIP, "80")
+		}
+		return target, http.FileServer(http.Dir(fakeSite)), nil
 	}
 	if err != nil && !os.IsNotExist(err) {
 		return "", nil, fmt.Errorf("stat fake site: %w", err)
@@ -279,6 +315,19 @@ func handleConn(conn net.Conn, fakeSite string, router siteRouter, handlers []pr
 		}
 	}()
 
+	// Complete the TLS handshake explicitly before probing: on first
+	// contact the handshake can take tens of seconds while GetCertificate
+	// drives ACME issuance, and the short probe deadline must not race it
+	// (the first connection to a new domain would otherwise always fail).
+	if tlsConn, ok := conn.(*tls.Conn); ok {
+		handshakeCtx, cancel := context.WithTimeout(context.Background(), tlsHandshakeTimeout)
+		if err := tlsConn.HandshakeContext(handshakeCtx); err != nil {
+			cancel()
+			return
+		}
+		cancel()
+	}
+
 	_ = rereadConn.SetReadDeadline(time.Now().Add(protocolProbeTimeout))
 
 	var (
@@ -301,15 +350,22 @@ func handleConn(conn net.Conn, fakeSite string, router siteRouter, handlers []pr
 		case probeNoMatch, probeNeedMore:
 			continue
 		case probeMatch:
-			_ = rereadConn.SetReadDeadline(time.Time{})
 			rereadConn.Reread()
+			// Bound the header read with its own (longer than the probe)
+			// deadline: the header follows the TLS handshake immediately,
+			// but a slow client needs more than the 1s probe window, and an
+			// attacker that sends only the 0x80 probe byte must not hold
+			// the connection (and its goroutine) forever.
+			_ = rereadConn.SetReadDeadline(time.Now().Add(protocolHeaderTimeout))
 			if addr, err = handler.Unwrap(rereadConn); err == nil {
+				_ = rereadConn.SetReadDeadline(time.Time{})
 				rereadConn.Stop()
 				dur, err = relay.RelayTo(rereadConn, addr.String())
 				return
 			}
 
 			slog.Debug("protocol auth or decode failed, fallback", "protocol", handler.Name(), "error", err)
+			_ = rereadConn.SetReadDeadline(time.Time{})
 			rereadConn.Stop().Reread()
 			dur, err = fallbackConn(rereadConn, conn, fakeSite, router, &hijacked)
 			return
