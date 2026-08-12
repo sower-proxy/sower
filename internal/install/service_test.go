@@ -76,8 +76,8 @@ func TestInstallServiceFreshInstall(t *testing.T) {
 		t.Fatalf("read service file: %v", err)
 	}
 	serviceText := string(serviceContent)
-	if !strings.Contains(serviceText, "ExecStart="+targetBinaryPath+" -c "+configPath) {
-		t.Fatalf("service file missing ExecStart, content = %s", serviceText)
+	if !strings.Contains(serviceText, `ExecStart="`+targetBinaryPath+`" -c "`+configPath+`"`) {
+		t.Fatalf("service file missing quoted ExecStart, content = %s", serviceText)
 	}
 
 	configContent, err := os.ReadFile(configPath)

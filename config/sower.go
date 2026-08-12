@@ -116,6 +116,13 @@ func (c *SowerConfig) Validate() error {
 		return fmt.Errorf("unsupported remote type %q", c.Remote.Type)
 	}
 
+	if c.Remote.Type == "socks5" && c.Remote.Password != "" {
+		// The SOCKS5 client transport only negotiates no-auth (RFC 1928);
+		// a configured password would be silently ignored and the upstream
+		// handshake would fail only when it demands authentication.
+		return fmt.Errorf("remote password is not supported for socks5 upstreams; remove remote.password or use remote.type = \"sower\"")
+	}
+
 	remoteHost, err := validateRemoteAddr(c.Remote.Type, c.Remote.Addr)
 	if err != nil {
 		return err
@@ -234,8 +241,14 @@ func splitRemoteAddr(addr, defaultPort string) (string, string, error) {
 	if strings.HasPrefix(addr, "[") || strings.HasSuffix(addr, "]") {
 		return "", "", fmt.Errorf("invalid address %q", addr)
 	}
-	if strings.Count(addr, ":") == 1 {
-		return "", "", fmt.Errorf("missing or invalid port in %q", addr)
+	// A bare IPv6 literal is a valid host with the default port. Anything
+	// else that still contains a colon is a malformed host:port (e.g. a
+	// bare IPv6 with a port, which needs [addr]:port) or a garbage string.
+	if ip := net.ParseIP(addr); ip != nil {
+		return addr, defaultPort, nil
+	}
+	if strings.Contains(addr, ":") {
+		return "", "", fmt.Errorf("invalid address %q: IPv6 with a port must use [addr]:port", addr)
 	}
 	return addr, defaultPort, nil
 }

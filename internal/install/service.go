@@ -150,8 +150,28 @@ func copyFile(src, dst string, mode os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return fmt.Errorf("create binary directory: %w", err)
 	}
-	if err := os.WriteFile(dst, data, mode); err != nil {
-		return fmt.Errorf("write binary to %s: %w", dst, err)
+	// Write via a temp file and rename so an interrupted update never leaves
+	// a truncated binary behind (the service is stopped at that point and
+	// would otherwise fail to start until the file is rewritten).
+	tmp, err := os.CreateTemp(filepath.Dir(dst), ".sowerd-*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp binary in %s: %w", filepath.Dir(dst), err)
+	}
+	tmpName := tmp.Name()
+	defer func() { _ = os.Remove(tmpName) }()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("write temp binary %s: %w", tmpName, err)
+	}
+	if err := tmp.Chmod(mode); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("chmod temp binary %s: %w", tmpName, err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close temp binary %s: %w", tmpName, err)
+	}
+	if err := os.Rename(tmpName, dst); err != nil {
+		return fmt.Errorf("rename temp binary to %s: %w", dst, err)
 	}
 	return nil
 }
@@ -168,7 +188,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=%s -c %s
+ExecStart="%s" -c "%s"
 Restart=always
 RestartSec=5s
 
@@ -196,7 +216,7 @@ func ensureDefaultFiles(configPath, fakeSiteDir, defaultConfigTOML string) error
 		return fmt.Errorf("stat default config path: %w", err)
 	}
 
-	if err := os.WriteFile(configPath, []byte(defaultConfigTOML), 0o644); err != nil {
+	if err := os.WriteFile(configPath, []byte(defaultConfigTOML), 0o600); err != nil {
 		return fmt.Errorf("write default config: %w", err)
 	}
 	fmt.Printf("  OK default config written to %s\n", configPath)

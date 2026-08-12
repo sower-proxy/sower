@@ -399,3 +399,57 @@ disable = true
 		t.Fatalf("admin tagged base64 password = %q, want secret-pass", got)
 	}
 }
+
+func TestSowerConfigValidateRejectsSocks5Password(t *testing.T) {
+	t.Parallel()
+
+	cfg := SowerConfig{}
+	cfg.Remote.Type = "socks5"
+	cfg.Remote.Addr = "proxy.example.com:1080"
+	cfg.Remote.Password = "secret"
+	cfg.DNS.Disable = true
+
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected validation error for socks5 with password")
+	}
+}
+
+func TestSowerConfigValidateAllowsSocks5WithoutPassword(t *testing.T) {
+	t.Parallel()
+
+	cfg := SowerConfig{}
+	cfg.Remote.Type = "socks5"
+	cfg.Remote.Addr = "proxy.example.com:1080"
+	cfg.DNS.Disable = true
+	cfg.DNS.Fallback = "223.5.5.5"
+	cfg.Socks5.Disable = true
+
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("validate config: %v", err)
+	}
+}
+
+func TestSplitRemoteAddrBareIPv6(t *testing.T) {
+	t.Parallel()
+
+	host, port, err := splitRemoteAddr("2001:db8::1", "443")
+	if err != nil || host != "2001:db8::1" || port != "443" {
+		t.Fatalf("bare ipv6: host=%q port=%q err=%v", host, port, err)
+	}
+
+	if _, _, err := splitRemoteAddr(":::", "443"); err == nil {
+		t.Fatal("garbage multi-colon address must be rejected")
+	}
+	if _, _, err := splitRemoteAddr("1:2:3:4:5:6:7:8:9", "443"); err == nil {
+		t.Fatal("overlong ipv6-like address must be rejected")
+	}
+
+	host, port, err = splitRemoteAddr("[2001:db8::1]:8443", "443")
+	if err != nil || host != "2001:db8::1" || port != "8443" {
+		t.Fatalf("bracketed ipv6: host=%q port=%q err=%v", host, port, err)
+	}
+
+	if _, _, err := splitRemoteAddr("::::", "443"); err == nil {
+		t.Fatal("garbage address must be rejected")
+	}
+}
