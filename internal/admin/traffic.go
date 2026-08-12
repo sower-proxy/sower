@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"time"
 )
 
@@ -62,6 +63,10 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 
 // streamTrafficSnapshot caches the unfiltered live view for one stream tick.
 // Filtered views remain immediate to avoid an unbounded per-client cache.
+// Hostname decoration runs on a private copy of the cached Clients slice
+// outside the lock: the cached snapshot is shared across streams, and a
+// stalled resolver must not block other traffic-view readers, so decoration
+// must neither hold the lock nor race on the shared backing array.
 func (s *Server) streamTrafficSnapshot(sort DomainSort, source Source, client string) TrafficSnapshot {
 	var snap TrafficSnapshot
 	if sort != DomainSortBytes || source != SourceAll || client != "" {
@@ -69,14 +74,21 @@ func (s *Server) streamTrafficSnapshot(sort DomainSort, source Source, client st
 	} else {
 		now := time.Now()
 		s.trafficMu.Lock()
-		defer s.trafficMu.Unlock()
 		if !s.traffic.at.IsZero() && now.Sub(s.traffic.at) < trafficCacheTTL {
-			return s.traffic.snapshot
+			snap = s.traffic.snapshot
+		} else {
+			s.traffic.snapshot = s.opts.Stats.Snapshot(sort, source, client)
+			s.traffic.at = now
+			snap = s.traffic.snapshot
 		}
-		s.traffic.snapshot = s.opts.Stats.Snapshot(sort, source, client)
-		s.traffic.at = now
-		snap = s.traffic.snapshot
+		s.trafficMu.Unlock()
+
+		// The cached snapshot's Clients slice is shared across streams;
+		// decorate a private copy so concurrent readers never race on the
+		// shared backing array.
+		snap.Clients = slices.Clone(snap.Clients)
 	}
+
 	s.attachHostnames(snap.Clients)
 	return snap
 }

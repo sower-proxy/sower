@@ -81,37 +81,84 @@ func TestIsInternalIP(t *testing.T) {
 	}
 }
 
-func TestDNSUpstreamIsInternal(t *testing.T) {
+func TestDNSSelectedUpstreamIsInternal(t *testing.T) {
 	t.Parallel()
 
 	r := newTestRouter(t, nil, "", "", "", nil)
 
+	// The gate judges the currently selected upstream, not the pool: a
+	// degraded mixed pool must not forward internal PTR queries to the
+	// public fallback it degraded onto.
 	r.dns.upstreamAddrs = []string{"8.8.8.8:53", "223.5.5.5:53"}
-	if r.dnsUpstreamIsInternal() {
-		t.Fatal("public upstreams reported as internal")
+	r.dns.upstreamIndex = 0
+	if r.dnsSelectedUpstreamIsInternal() {
+		t.Fatal("public selected upstream reported as internal")
 	}
 
-	r.dns.upstreamAddrs = []string{"8.8.8.8:53", "192.168.1.1:53"}
-	if !r.dnsUpstreamIsInternal() {
-		t.Fatal("internal upstream not reported")
+	r.dns.upstreamAddrs = []string{"192.168.1.1:53"}
+	r.dns.upstreamIndex = 0
+	if !r.dnsSelectedUpstreamIsInternal() {
+		t.Fatal("internal selected upstream not reported")
+	}
+
+	// Same pool, different selection: internal at index 0, public after
+	// degradation at index 1 must not count as internal.
+	r.dns.upstreamAddrs = []string{"192.168.1.1:53", "8.8.8.8:53"}
+	r.dns.upstreamIndex = 1
+	if r.dnsSelectedUpstreamIsInternal() {
+		t.Fatal("degraded public upstream reported as internal")
+	}
+
+	// Out-of-range index degrades to the configured/fallback judgment.
+	r.dns.upstreamAddrs = []string{"192.168.1.1:53"}
+	r.dns.upstreamIndex = 5
+	if r.dnsSelectedUpstreamIsInternal() {
+		t.Fatal("out-of-range index must fall back to configured judgment")
 	}
 
 	r.dns.upstreamAddrs = []string{"[::1]:53"}
-	if !r.dnsUpstreamIsInternal() {
+	r.dns.upstreamIndex = 0
+	if !r.dnsSelectedUpstreamIsInternal() {
 		t.Fatal("ipv6 loopback upstream not reported")
 	}
 
 	r.dns.upstreamAddrs = nil
 	r.dns.upstreamDNS = "192.168.1.1"
 	r.dns.fallbackDNS = "223.5.5.5"
-	if !r.dnsUpstreamIsInternal() {
+	if !r.dnsSelectedUpstreamIsInternal() {
 		t.Fatal("internal configured upstream not reported")
 	}
 
 	r.dns.upstreamDNS = ""
 	r.dns.fallbackDNS = "223.5.5.5"
-	if r.dnsUpstreamIsInternal() {
+	if r.dnsSelectedUpstreamIsInternal() {
 		t.Fatal("public fallback reported as internal")
+	}
+}
+
+func TestLocalNXDOMAINCarriesOPTForEDNSQueries(t *testing.T) {
+	t.Parallel()
+
+	r := newTestRouter(t, []string{"127.0.0.2"}, "", "223.5.5.5", "", nil)
+	r.dns.upstreamAddrs = []string{"8.8.8.8:53"}
+	r.dns.upstreamIndex = 0
+
+	// ecsMsg builds a query with an EDNS0 OPT record; RFC 6891 requires the
+	// response to an EDNS query to carry an OPT record as well.
+	req := ecsMsg("192.168.1.42", 1, 32)
+	req.SetQuestion("1.1.168.192.in-addr.arpa.", dns.TypePTR)
+	writer := &mockDNSWriter{localAddr: &net.UDPAddr{IP: net.ParseIP("127.0.0.2"), Port: 53}}
+
+	r.ServeDNS(writer, req)
+
+	if writer.msg == nil {
+		t.Fatal("expected response")
+	}
+	if writer.msg.Rcode != dns.RcodeNameError {
+		t.Fatalf("expected NXDOMAIN, got %s", dns.RcodeToString[writer.msg.Rcode])
+	}
+	if writer.msg.IsEdns0() == nil {
+		t.Fatal("NXDOMAIN reply to an EDNS query must carry an OPT record")
 	}
 }
 
@@ -219,6 +266,53 @@ func TestServeDNSInternalReverseLookup(t *testing.T) {
 
 		if upstreamQueries.Load() != 1 {
 			t.Fatalf("expected public reverse lookup forwarded, got %d queries", upstreamQueries.Load())
+		}
+	})
+
+	t.Run("degraded mixed pool does not forward internal reverse", func(t *testing.T) {
+		r := newTestRouter(t, []string{"127.0.0.2"}, "", "223.5.5.5", "", nil)
+		// The pool contains an internal server, but the current selection
+		// degraded onto the public fallback: internal PTR must not reach it.
+		r.dns.upstreamAddrs = []string{"192.168.1.1:53", "8.8.8.8:53"}
+		r.dns.upstreamIndex = 1
+
+		req := new(dns.Msg)
+		req.SetQuestion("1.1.168.192.in-addr.arpa.", dns.TypePTR)
+		writer := &mockDNSWriter{localAddr: &net.UDPAddr{IP: net.ParseIP("127.0.0.2"), Port: 53}}
+
+		r.ServeDNS(writer, req)
+
+		if writer.msg == nil {
+			t.Fatal("expected response")
+		}
+		if writer.msg.Rcode != dns.RcodeNameError {
+			t.Fatalf("expected NXDOMAIN, got %s", dns.RcodeToString[writer.msg.Rcode])
+		}
+	})
+
+	t.Run("selected internal upstream in mixed pool forwards", func(t *testing.T) {
+		var upstreamQueries atomic.Int32
+		upstreamAddr := startUDPTestDNSServer(t, dns.HandlerFunc(func(w dns.ResponseWriter, req *dns.Msg) {
+			upstreamQueries.Add(1)
+			resp := new(dns.Msg)
+			resp.SetReply(req)
+			_ = w.WriteMsg(resp)
+		}))
+
+		r := newTestRouter(t, []string{"127.0.0.2"}, "", "223.5.5.5", "", nil)
+		// Internal server selected first: forward even though a public
+		// fallback sits behind it.
+		r.dns.upstreamAddrs = []string{upstreamAddr, "8.8.8.8:53"}
+		r.dns.upstreamIndex = 0
+
+		req := new(dns.Msg)
+		req.SetQuestion("1.1.168.192.in-addr.arpa.", dns.TypePTR)
+		writer := &mockDNSWriter{localAddr: &net.UDPAddr{IP: net.ParseIP("127.0.0.2"), Port: 53}}
+
+		r.ServeDNS(writer, req)
+
+		if upstreamQueries.Load() != 1 {
+			t.Fatalf("expected forward to selected internal upstream, got %d queries", upstreamQueries.Load())
 		}
 	})
 

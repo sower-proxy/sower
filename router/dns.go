@@ -45,9 +45,12 @@ func (r *Router) ServeDNS(w dns.ResponseWriter, req *dns.Msg) {
 
 	// Internal reverse lookups (RFC1918, CGNAT, link-local, loopback, ULA)
 	// have no data on public upstream DNS and would leak internal network
-	// layout there. Answer NXDOMAIN locally unless an internal DNS server is
-	// among the upstreams and can answer authoritatively.
-	if arpaIP, ok := parseReverseName(domain); ok && isInternalIP(arpaIP) && !r.dnsUpstreamIsInternal() {
+	// layout there. Answer NXDOMAIN locally unless the upstream that would
+	// serve the query is an internal DNS server that can answer
+	// authoritatively. Judging the currently selected upstream (not the
+	// whole pool) keeps a degraded mixed pool from forwarding internal PTR
+	// queries to a public fallback.
+	if arpaIP, ok := parseReverseName(domain); ok && isInternalIP(arpaIP) && !r.dnsSelectedUpstreamIsInternal() {
 		_ = w.WriteMsg(r.dnsFail(req, dns.RcodeNameError))
 		return
 	}
@@ -81,6 +84,12 @@ func (r *Router) ServeDNS(w dns.ResponseWriter, req *dns.Msg) {
 func (r *Router) dnsFail(req *dns.Msg, rcode int) *dns.Msg {
 	m := new(dns.Msg)
 	m.SetRcode(req, rcode)
+	if opt := req.IsEdns0(); opt != nil {
+		// RFC 6891: a response to an EDNS query should carry an OPT record,
+		// otherwise strict clients may treat the reply as truncated or
+		// downgrade their retry behavior.
+		m.SetEdns0(opt.UDPSize(), false)
+	}
 	return m
 }
 
@@ -215,20 +224,20 @@ func isInternalIP(ip net.IP) bool {
 	return false
 }
 
-// dnsUpstreamIsInternal reports whether any configured or discovered DNS
-// upstream is an internal address. Internal reverse lookups are only
-// forwarded when an internal DNS server can answer them.
-func (r *Router) dnsUpstreamIsInternal() bool {
+// dnsSelectedUpstreamIsInternal reports whether the upstream that would
+// serve the next query is an internal address. Internal reverse lookups are
+// only forwarded when they can reach an internal DNS server; judging the
+// currently selected upstream rather than the whole pool keeps a degraded
+// mixed pool from forwarding internal PTR queries to a public fallback.
+func (r *Router) dnsSelectedUpstreamIsInternal() bool {
 	r.dns.Lock()
 	defer r.dns.Unlock()
 
 	if len(r.dns.upstreamAddrs) > 0 {
-		for _, addr := range r.dns.upstreamAddrs {
-			if isInternalHost(addr) {
-				return true
-			}
+		idx := r.dns.upstreamIndex
+		if idx >= 0 && idx < len(r.dns.upstreamAddrs) {
+			return isInternalHost(r.dns.upstreamAddrs[idx])
 		}
-		return false
 	}
 	return isInternalHost(r.dns.upstreamDNS) || isInternalHost(r.dns.fallbackDNS)
 }
@@ -284,6 +293,9 @@ func stripDNSServicePrefix(domain string) (string, bool) {
 func dnsReply(req *dns.Msg) *dns.Msg {
 	reply := new(dns.Msg)
 	reply.SetReply(req)
+	if opt := req.IsEdns0(); opt != nil {
+		reply.SetEdns0(opt.UDPSize(), false)
+	}
 	return reply
 }
 
@@ -660,13 +672,18 @@ func (r *Router) exchangeTCP(req *dns.Msg, addr string) (*dns.Msg, error) {
 
 // ClientIPOf returns the client IP to attribute a DNS query to. Queries
 // forwarded by a local resolver (e.g. dnsmasq --add-subnet) carry the real
-// client address in the EDNS Client Subnet option; when present it takes
-// precedence over the transport source address, which would otherwise be the
-// resolver itself.
+// client address in the EDNS Client Subnet option; when present with a
+// full-length source prefix it takes precedence over the transport source
+// address, which would otherwise be the resolver itself. A truncated prefix
+// (e.g. --add-subnet=24) carries only the subnet base, which is not a
+// usable client identity, so it is ignored. ECS is trusted only from the
+// local forwarding resolver: a client that reaches the listener directly
+// can spoof the option, but that only affects console attribution because
+// ECS is stripped before any query is forwarded upstream.
 func ClientIPOf(req *dns.Msg, remote net.Addr) string {
 	if opt := req.IsEdns0(); opt != nil {
 		for _, o := range opt.Option {
-			if sub, ok := o.(*dns.EDNS0_SUBNET); ok && sub.Address != nil {
+			if sub, ok := o.(*dns.EDNS0_SUBNET); ok && fullLengthECS(sub) {
 				if ip := sub.Address.String(); ip != "" {
 					return ip
 				}
@@ -680,6 +697,20 @@ func ClientIPOf(req *dns.Msg, remote net.Addr) string {
 		return host
 	}
 	return remote.String()
+}
+
+// fullLengthECS reports whether the subnet option carries the complete
+// client address: source prefix length 32 for IPv4 (family 1) or 128 for
+// IPv6 (family 2). Truncated prefixes only identify a network, not a client.
+func fullLengthECS(sub *dns.EDNS0_SUBNET) bool {
+	switch sub.Family {
+	case 1:
+		return sub.SourceNetmask == 32
+	case 2:
+		return sub.SourceNetmask == 128
+	default:
+		return false
+	}
 }
 
 // stripECS removes the EDNS Client Subnet option before a query is forwarded

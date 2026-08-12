@@ -39,6 +39,16 @@ func TestClientIPOfPrefersECS(t *testing.T) {
 		t.Fatalf("ECS v6: got %q", got)
 	}
 
+	// Truncated prefixes (--add-subnet=24) carry only the subnet base,
+	// which is not a usable client identity: fall back to the transport
+	// address instead of attributing the /24 base.
+	if got := ClientIPOf(ecsMsg("192.168.1.0", 1, 24), remote); got != "127.0.0.1" {
+		t.Fatalf("truncated v4 ECS must fall back, got %q", got)
+	}
+	if got := ClientIPOf(ecsMsg("fd00::", 2, 64), remote); got != "127.0.0.1" {
+		t.Fatalf("truncated v6 ECS must fall back, got %q", got)
+	}
+
 	// No ECS: fall back to the transport remote address.
 	plain := new(dns.Msg)
 	plain.SetQuestion("example.com.", dns.TypeA)

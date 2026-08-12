@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 type fakeHostnameResolver struct {
@@ -87,5 +88,76 @@ func TestAttachHostnamesConcurrent(t *testing.T) {
 	}
 	for range 8 {
 		<-done
+	}
+}
+
+func TestAttachHostnamesDeduplicatesBatch(t *testing.T) {
+	t.Parallel()
+
+	resolver := &fakeHostnameResolver{byIP: map[string]string{"192.168.1.2": "phone.lan"}}
+	cache := newHostnameCache(resolver)
+
+	// The same IP can appear several times in one batch (per-domain
+	// breakdown plus cumulative totals); one lookup must cover them all.
+	clients := []ClientStat{{IP: "192.168.1.2"}, {IP: "192.168.1.2"}, {IP: "192.168.1.2"}}
+	cache.attach(clients)
+	if resolver.lookups.Load() != 1 {
+		t.Fatalf("duplicate IPs must resolve once, lookups=%d", resolver.lookups.Load())
+	}
+	for i := range clients {
+		if clients[i].Hostname != "phone.lan" {
+			t.Fatalf("entry %d hostname: %q", i, clients[i].Hostname)
+		}
+	}
+}
+
+func TestAttachHostnamesNegativeTTLExpires(t *testing.T) {
+	t.Parallel()
+
+	resolver := &fakeHostnameResolver{} // no PTR data for any IP
+	cache := newHostnameCache(resolver)
+	now := time.Now()
+	cache.now = func() time.Time { return now }
+
+	clients := []ClientStat{{IP: "1.2.3.4"}}
+	cache.attach(clients)
+	if resolver.lookups.Load() != 1 {
+		t.Fatalf("expected 1 lookup, got %d", resolver.lookups.Load())
+	}
+
+	// Within the negative TTL the failed lookup is remembered.
+	now = now.Add(hostnameNegativeTTL - time.Minute)
+	cache.attach(clients)
+	if resolver.lookups.Load() != 1 {
+		t.Fatalf("negative result should be cached, lookups=%d", resolver.lookups.Load())
+	}
+
+	// Past the negative TTL the IP is queried again.
+	now = now.Add(2 * time.Minute)
+	cache.attach(clients)
+	if resolver.lookups.Load() != 2 {
+		t.Fatalf("negative result should expire, lookups=%d", resolver.lookups.Load())
+	}
+}
+
+func TestAttachHostnamesPositiveTTLKeepsResolved(t *testing.T) {
+	t.Parallel()
+
+	resolver := &fakeHostnameResolver{byIP: map[string]string{"192.168.1.2": "phone.lan"}}
+	cache := newHostnameCache(resolver)
+	now := time.Now()
+	cache.now = func() time.Time { return now }
+
+	clients := []ClientStat{{IP: "192.168.1.2"}}
+	cache.attach(clients)
+	if resolver.lookups.Load() != 1 {
+		t.Fatalf("expected 1 lookup, got %d", resolver.lookups.Load())
+	}
+
+	// A resolved hostname stays cached for the positive TTL.
+	now = now.Add(hostnameTTL - time.Minute)
+	cache.attach(clients)
+	if resolver.lookups.Load() != 1 {
+		t.Fatalf("resolved hostname should stay cached, lookups=%d", resolver.lookups.Load())
 	}
 }
