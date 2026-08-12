@@ -61,7 +61,7 @@ For non-transport fallback traffic, it can route by TLS SNI to per-domain upstre
 
 `pkg/dhcp`
 
-- DHCP-based upstream DNS discovery for the client side
+- DHCP-based upstream DNS discovery for the client side; the received OFFER is validated (matching transaction id, BOOTREPLY opcode, message type OFFER) so unrelated or spoofed LAN packets cannot inject DNS servers.
 
 ## sower Data Flow
 
@@ -101,9 +101,9 @@ For non-transport fallback traffic, it can route by TLS SNI to per-domain upstre
 6. Redirect normal HTTP traffic to HTTPS.
 7. If `fakeSite` is a local directory, serve it only for loopback fallback traffic through `127.0.0.1:80`.
 8. Start `:443` TLS listener with HTTP/1.1 ALPN only.
-9. For each accepted connection, apply a short read deadline for protocol probing.
+9. Complete the TLS handshake explicitly (60s budget; first contact can drive synchronous ACME issuance) before applying the short probe read deadline.
 10. Probe the connection's first bytes to identify the `sower` transport.
-11. If matched, authenticate and relay traffic to the decoded target.
+11. If matched, authenticate (the frame checksum covers command, port, and target via HMAC-SHA256; empty or control-character targets are rejected) and relay traffic to the decoded target. The header read is bounded by its own deadline so a connection that sends only the probe byte cannot hold a goroutine and fd forever.
 12. If authentication fails or no transport matches, read the TLS SNI from the terminated TLS connection.
 13. If the SNI exactly matches a configured `site_routes` domain, reverse-proxy the decrypted HTTP/1.1 request to that route's `http://` or `https://` upstream URL.
 14. If the SNI has no route, relay to `fakeSite`.
@@ -125,7 +125,7 @@ For non-transport fallback traffic, it can route by TLS SNI to per-domain upstre
 - Local listeners use explicit shutdown hooks instead of blocking forever with unmanaged goroutines.
 - Network operations use timeouts and `context` to limit hangs during dialing and remote rule downloads.
 - The admin console persists rule changes as bounded deltas in `admin.state_file`, without rewriting TOML or rule sources. It also exposes a sanitized effective-config view and persists whitelisted overrides: `log_level` and the DNS upstreams apply immediately, every other whitelisted field (remote, listeners, rule sources) takes effect on the next restart. Clearing an override reverts the field to the file/flag configuration. `--ignore-admin-state` is the startup escape hatch for a bad state file or override.
-- The admin server is disabled by default, binds to loopback by default, and requires a password when enabled; an empty password falls back to a startup-generated random one printed once in the log, and the login page tells the user where to find it. The frontend never stores the password (HttpOnly session cookie only).
+- The admin server is disabled by default, binds to loopback by default, and requires a password when enabled; an empty password falls back to a startup-generated random one printed once in the log, and the login page tells the user where to find it. Login is rate-limited per remote IP (five failures lock for fifteen minutes). The frontend never stores the password (HttpOnly session cookie only).
 - The admin restart endpoint replaces the process image in place (`exec` on Unix, same PID) so systemd stays unaware; on platforms without in-place restart the endpoint reports an error instead of acknowledging a restart that would fail. Sessions persist to `admin.session_file` (atomic write, 0600) so a restart keeps the browser logged in; `admin.disable_session_persistence` and `admin.cookie_secure` tune that behavior. Session persistence is best-effort: a disk write failure never blocks login or leaves a revoked session valid in memory — the in-memory state stays authoritative and the failure is logged.
 - Rule hit statistics (per matched rule, per category) and rule-miss statistics (per domain for connections that matched no rule) are tracked in bounded in-memory maps fed by router observers; rule mutations invalidate the hit domain cache so counts stay attributable to the current rule set.
 - The admin console can share the DNS HTTP proxy listener on port 80 when `admin.addr` equals `dns.serve:80`; classification is Host-based (origin-form requests with the listener IP as Host are admin traffic), so proxying a target whose Host equals the listener IP is inherently ambiguous and routes to admin. The HTTPS and DNS listeners speak different protocols and cannot be shared.
@@ -144,7 +144,7 @@ For non-transport fallback traffic, it can route by TLS SNI to per-domain upstre
 - `sowerd` site routing rejects HTTP upgrade requests instead of hijacking the fallback connection; fallback sites are intended for normal HTTP/1.1 decoy traffic.
 - `sowerd` site routing applies bounded client header, upstream dial, TLS handshake, and upstream response-header timeouts.
 - `sowerd` advertises only HTTP/1.1 over TLS because fallback site routing and fake-site serving are HTTP/1.1 paths.
-- In autocert mode, `sowerd` can obtain certificates for multiple SNI names on demand. In custom certificate mode, the configured certificate must cover every routed domain through SANs.
+- In autocert mode, `sowerd` obtains certificates only for configured domains: every `site_routes` domain plus the `cert.domains` whitelist (autocert HostPolicy), so an arbitrary SNI cannot drive ACME issuance and exhaust the account's rate limits. Direct-connection domains (e.g. the sower client's remote addr) must be listed in `cert.domains`. In custom certificate mode, the configured certificate must cover every routed domain through SANs.
 
 ## Operational Notes
 
