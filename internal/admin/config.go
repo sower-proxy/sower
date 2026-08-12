@@ -120,6 +120,9 @@ func (c ConfigChanges) Validate() error {
 	if c.DNSFallback != nil && *c.DNSFallback != "" && net.ParseIP(*c.DNSFallback) == nil {
 		return fmt.Errorf("invalid dns_fallback %q", *c.DNSFallback)
 	}
+	if c.DNSReverse != nil && *c.DNSReverse != "" && net.ParseIP(*c.DNSReverse) == nil {
+		return fmt.Errorf("invalid dns_reverse %q", *c.DNSReverse)
+	}
 	if c.DNSServe != nil && *c.DNSServe != "" && net.ParseIP(*c.DNSServe) == nil {
 		return fmt.Errorf("invalid dns_serve %q", *c.DNSServe)
 	}
@@ -132,6 +135,14 @@ func (c ConfigChanges) Validate() error {
 		default:
 			return fmt.Errorf("invalid remote_type %q", *c.RemoteType)
 		}
+	}
+	if c.RemoteAddr != nil && *c.RemoteAddr != "" && !validRemoteAddr(*c.RemoteAddr) {
+		// An invalid remote address would persist and crash-loop the next
+		// startup (the dialer is built from it before listeners come up).
+		return fmt.Errorf("invalid remote_addr %q", *c.RemoteAddr)
+	}
+	if c.RemoteTLSServerName != nil && *c.RemoteTLSServerName != "" && !validHostname(*c.RemoteTLSServerName) {
+		return fmt.Errorf("invalid remote_tls_server_name %q", *c.RemoteTLSServerName)
 	}
 	if c.RemoteTLSClientHello != nil && *c.RemoteTLSClientHello != "" {
 		if err := upstreamtls.ValidateClientHello(*c.RemoteTLSClientHello); err != nil {
@@ -158,7 +169,75 @@ func (c ConfigChanges) Validate() error {
 			return fmt.Errorf("invalid admin_cookie_secure %q", *c.AdminCookieSecure)
 		}
 	}
+
+	// Rule and skip-rule lists: entries must be single-line and bounded so a
+	// malformed override cannot inject newlines into the rule files.
+	validateRuleList := func(name string, rules *[]string) error {
+		if rules == nil {
+			return nil
+		}
+		for _, r := range *rules {
+			if r == "" || len(r) > maxRuleLength || strings.ContainsAny(r, "\r\n") {
+				return fmt.Errorf("invalid %s entry %q", name, r)
+			}
+		}
+		return nil
+	}
+	for name, rules := range map[string]*[]string{
+		"router_block_file_skip_rules":  c.RouterBlockFileSkipRules,
+		"router_block_rules":            c.RouterBlockRules,
+		"router_direct_file_skip_rules": c.RouterDirectFileSkipRules,
+		"router_direct_rules":           c.RouterDirectRules,
+		"router_proxy_file_skip_rules":  c.RouterProxyFileSkipRules,
+		"router_proxy_rules":            c.RouterProxyRules,
+		"router_country_rules":          c.RouterCountryRules,
+	} {
+		if err := validateRuleList(name, rules); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+// validRemoteAddr mirrors the dialer's upstream address acceptance: host:port
+// with both parts present, a bare hostname, or a bare IPv6 literal. Anything
+// the dialer would reject at startup (and thus crash-loop the process after a
+// persisted override) is rejected here.
+func validRemoteAddr(addr string) bool {
+	if host, port, err := net.SplitHostPort(addr); err == nil {
+		return host != "" && port != "" && validHostname(strings.Trim(host, "[]"))
+	}
+	if addr == "" || strings.HasPrefix(addr, "[") || strings.HasSuffix(addr, "]") {
+		return false
+	}
+	if strings.Count(addr, ":") == 1 {
+		return false
+	}
+	if net.ParseIP(addr) != nil {
+		return true
+	}
+	return validHostname(addr)
+}
+
+// validHostname accepts a domain or bare host label: letters, digits, '-',
+// '_' and '.', with bounded label and total lengths. Underscores are allowed
+// because internal hosts commonly carry them.
+func validHostname(s string) bool {
+	if s == "" || len(s) > 253 {
+		return false
+	}
+	for _, label := range strings.Split(s, ".") {
+		if label == "" || len(label) > 63 {
+			return false
+		}
+		for i := 0; i < len(label); i++ {
+			c := label[i]
+			if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_') {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // ConfigManager is the config display/edit surface the admin server needs.

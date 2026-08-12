@@ -108,6 +108,7 @@ type Server struct {
 	trafficMu   sync.Mutex
 	traffic     cachedTraffic
 	hostnames   *hostnameCache
+	throttle    *loginThrottle
 	http        *http.Server
 }
 
@@ -121,6 +122,7 @@ func NewServer(opts Options) *Server {
 		opts:        opts,
 		sessions:    make(map[string]time.Time),
 		sessionFile: opts.SessionFile,
+		throttle:    newLoginThrottle(),
 	}
 	if opts.Hostnames != nil {
 		s.hostnames = newHostnameCache(opts.Hostnames)
@@ -128,7 +130,10 @@ func NewServer(opts Options) *Server {
 	s.loadSessions()
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/session", s.handleLogin)
+	// The login endpoint carries the same Origin guard as the other
+	// mutating endpoints so a cross-site page cannot drive password
+	// guessing through the victim's browser.
+	mux.HandleFunc("POST /api/session", s.mutateGuard(s.handleLogin))
 	mux.HandleFunc("GET /api/session", s.mutateGuard(s.auth(s.handleSession)))
 	mux.HandleFunc("DELETE /api/session", s.handleLogout)
 	mux.HandleFunc("GET /api/login-info", s.handleLoginInfo)
@@ -159,6 +164,12 @@ func NewServer(opts Options) *Server {
 	s.http = &http.Server{
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
+		// IdleTimeout bounds keep-alive connections between requests; the
+		// SSE stream is an active response and is unaffected. MaxHeaderBytes
+		// bounds the request head so a hostile client cannot grow memory
+		// with oversized headers.
+		IdleTimeout:    120 * time.Second,
+		MaxHeaderBytes: 64 << 10,
 	}
 	return s
 }

@@ -390,6 +390,59 @@ func TestLoginWrongPassword(t *testing.T) {
 	}
 }
 
+func TestLoginThrottlesRepeatedFailures(t *testing.T) {
+	ts := newTestServer(t, newFakeRules())
+
+	// Each wrong attempt counts; after loginMaxFails the IP is locked out
+	// with 429 even for the correct password.
+	for i := 0; i < loginMaxFails; i++ {
+		resp, err := http.Post(ts.URL+"/api/session", "application/json", strings.NewReader(`{"password":"wrong"}`))
+		if err != nil {
+			t.Fatalf("login %d: %v", i, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("attempt %d: expected 401, got %d", i, resp.StatusCode)
+		}
+	}
+
+	resp, err := http.Post(ts.URL+"/api/session", "application/json", strings.NewReader(`{"password":"secret"}`))
+	if err != nil {
+		t.Fatalf("locked login: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 after repeated failures, got %d", resp.StatusCode)
+	}
+}
+
+func TestLoginSuccessResetsThrottle(t *testing.T) {
+	ts := newTestServer(t, newFakeRules())
+
+	// A success clears the failure state, so a later failure starts over.
+	for i := 0; i < loginMaxFails-1; i++ {
+		resp, err := http.Post(ts.URL+"/api/session", "application/json", strings.NewReader(`{"password":"wrong"}`))
+		if err != nil {
+			t.Fatalf("login %d: %v", i, err)
+		}
+		resp.Body.Close()
+	}
+	resp, err := http.Post(ts.URL+"/api/session", "application/json", strings.NewReader(`{"password":"secret"}`))
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	resp.Body.Close()
+
+	resp, err = http.Post(ts.URL+"/api/session", "application/json", strings.NewReader(`{"password":"wrong"}`))
+	if err != nil {
+		t.Fatalf("login after reset: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401 after reset, got %d", resp.StatusCode)
+	}
+}
+
 func TestLoginRejectsMalformedJSON(t *testing.T) {
 	ts := newTestServer(t, newFakeRules())
 	resp, err := http.Post(ts.URL+"/api/session", "application/json", strings.NewReader(`{invalid`))

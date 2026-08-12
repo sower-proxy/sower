@@ -9,11 +9,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -101,7 +103,72 @@ func purgeExpired(sessions map[string]time.Time, now time.Time) {
 	}
 }
 
+// remoteIP extracts the host part of a remote address for login throttling.
+// X-Forwarded-For is not trusted: the admin listener is typically loopback,
+// and a reverse-proxied deployment throttles per-proxy instead.
+func remoteIP(remoteAddr string) string {
+	if host, _, err := net.SplitHostPort(remoteAddr); err == nil {
+		return host
+	}
+	return remoteAddr
+}
+
+// Login throttling bounds password guessing when the admin listener is not
+// loopback-only (the console can be bound to a LAN address or share port 80).
+// Consecutive failures from one remote IP are rejected with 429 for a backoff
+// window; a success clears the entry.
+const (
+	loginMaxFails     = 5
+	loginLockDuration = 15 * time.Minute
+)
+
+type loginFail struct {
+	count int
+	until time.Time
+}
+
+type loginThrottle struct {
+	mu    sync.Mutex
+	fails map[string]loginFail
+}
+
+func newLoginThrottle() *loginThrottle {
+	return &loginThrottle{fails: make(map[string]loginFail)}
+}
+
+func (t *loginThrottle) allow(ip string) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	f, ok := t.fails[ip]
+	return !ok || time.Now().After(f.until)
+}
+
+func (t *loginThrottle) fail(ip string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	now := time.Now()
+	f := t.fails[ip]
+	f.count++
+	if f.count >= loginMaxFails {
+		f.until = now.Add(loginLockDuration)
+		f.count = 0
+	}
+	t.fails[ip] = f
+}
+
+func (t *loginThrottle) success(ip string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	delete(t.fails, ip)
+}
+
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	ip := remoteIP(r.RemoteAddr)
+	if !s.throttle.allow(ip) {
+		writeError(w, http.StatusTooManyRequests, "too many login attempts, try again later")
+		return
+	}
+
 	var body struct {
 		Password string `json:"password"`
 	}
@@ -109,9 +176,11 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !secureEqual(body.Password, s.opts.Password) {
+		s.throttle.fail(ip)
 		writeError(w, http.StatusUnauthorized, "invalid password")
 		return
 	}
+	s.throttle.success(ip)
 	if !s.issueSession(w, r) {
 		return
 	}
@@ -168,6 +237,14 @@ func (s *Server) issueSession(w http.ResponseWriter, r *http.Request) bool {
 	s.mu.Lock()
 	if len(s.sessions) >= maxSessionPurge {
 		purgeExpired(s.sessions, time.Now())
+	}
+	if len(s.sessions) >= maxSessionPurge {
+		// Every retained session is still live; issuing another would grow
+		// the map unboundedly. Refuse instead of evicting a valid session.
+		s.mu.Unlock()
+		slog.Warn("admin session limit reached, login rejected")
+		writeError(w, http.StatusServiceUnavailable, "session limit reached, try later")
+		return false
 	}
 	s.sessions[value] = time.Now().Add(sessionTTL)
 	if err := s.persistLocked(s.sessions); err != nil {

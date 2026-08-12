@@ -199,7 +199,8 @@ func handleHTTPConn(conn net.Conn, r *router.Router, stats *admin.Stats) {
 	defer rereadConn.Close()
 
 	_ = rereadConn.SetDeadline(time.Now().Add(proxyReadTimeout))
-	req, err := http.ReadRequest(bufio.NewReader(rereadConn))
+	br := bufio.NewReader(rereadConn)
+	req, err := http.ReadRequest(br)
 	if err != nil {
 		slog.Error("read http request", "error", err)
 		return
@@ -225,6 +226,16 @@ func handleHTTPConn(conn net.Conn, r *router.Router, stats *admin.Stats) {
 		// Acknowledge CONNECT before tunneling raw bytes; the request head
 		// must not be replayed to the target, which expects TLS data.
 		rereadConn.Stop().Reset()
+		// The bufio reader may already have pulled bytes past the request
+		// head (a client that pipelines tunnel data without waiting for the
+		// 200). Replay those before relaying, or the tunnel's first bytes
+		// would be lost and the target would see a truncated TLS stream.
+		if buffered := br.Buffered(); buffered > 0 {
+			if _, err := io.CopyN(rc, br, int64(buffered)); err != nil {
+				slog.Debug("flush pipelined connect bytes", "error", err, "host", host, "port", port)
+				return
+			}
+		}
 		if _, err := rereadConn.Write([]byte("HTTP/1.1 200 Connection established\r\n\r\n")); err != nil {
 			slog.Debug("write connect response", "error", err, "host", host, "port", port)
 			return
@@ -340,7 +351,6 @@ func handleSocks5Conn(conn net.Conn, r *router.Router, stats *admin.Stats) {
 		return
 	}
 	rereadConn.Reread()
-	_ = rereadConn.SetDeadline(time.Time{})
 
 	if byte1[0] == 5 {
 		rereadConn.Stop()
@@ -350,6 +360,10 @@ func handleSocks5Conn(conn net.Conn, r *router.Router, stats *admin.Stats) {
 			slog.Error("read socks5 request", "error", err)
 			return
 		}
+		// The handshake is complete: clear the deadline before dialing and
+		// relaying. Keeping it through the handshake bounds slowloris
+		// clients that stall mid-negotiation.
+		_ = rereadConn.SetDeadline(time.Time{})
 
 		host, port := addr.(*socks5.AddrHead).Addr()
 		stats.BindConn(conn, host)
@@ -373,11 +387,14 @@ func handleSocks5Conn(conn net.Conn, r *router.Router, stats *admin.Stats) {
 		return
 	}
 
-	req, err := http.ReadRequest(bufio.NewReader(rereadConn))
+	br := bufio.NewReader(rereadConn)
+	req, err := http.ReadRequest(br)
 	if err != nil {
 		slog.Error("read http request", "error", err)
 		return
 	}
+	// Handshake complete; clear the deadline before dialing.
+	_ = rereadConn.SetDeadline(time.Time{})
 
 	host, port, err := router.ParseHostPort(req.Host, req.URL)
 	if err != nil {
@@ -398,6 +415,14 @@ func handleSocks5Conn(conn net.Conn, r *router.Router, stats *admin.Stats) {
 
 	if req.Method == http.MethodConnect {
 		rereadConn.Stop().Reset()
+		// Replay bytes the bufio reader already pulled past the request
+		// head (pipelined tunnel data) before relaying raw bytes.
+		if buffered := br.Buffered(); buffered > 0 {
+			if _, err := io.CopyN(rc, br, int64(buffered)); err != nil {
+				slog.Debug("flush pipelined connect bytes", "error", err, "host", host, "port", port)
+				return
+			}
+		}
 		if _, err := rereadConn.Write([]byte("HTTP/1.1 200 Connection established\r\n\r\n")); err != nil {
 			slog.Debug("write connect response", "error", err, "host", host, "port", port)
 			return
