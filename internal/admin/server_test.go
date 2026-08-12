@@ -1580,8 +1580,9 @@ func (f *failingFlusher) Header() http.Header {
 	}
 	return f.header
 }
-func (*failingFlusher) WriteHeader(int)              {}
+func (*failingFlusher) WriteHeader(int)             {}
 func (*failingFlusher) Write(p []byte) (int, error) { return len(p), nil }
+
 // FlushError is the error-returning form http.ResponseController.Flush
 // looks for (Go 1.26+); it lets the test fail flushes on demand.
 func (f *failingFlusher) FlushError() error {
