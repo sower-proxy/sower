@@ -120,6 +120,10 @@ func remoteIP(remoteAddr string) string {
 const (
 	loginMaxFails     = 5
 	loginLockDuration = 15 * time.Minute
+	// loginThrottleMaxEntries bounds the failure map so rotating or spoofed
+	// source IPs cannot grow it without bound; stale entries are purged when
+	// the map is full.
+	loginThrottleMaxEntries = 4096
 )
 
 type loginFail struct {
@@ -147,6 +151,19 @@ func (t *loginThrottle) fail(ip string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	now := time.Now()
+	// Bound the map: when full, drop entries whose lock window already
+	// expired. If it is still full, stop tracking the new IP (it cannot be
+	// locked, but the map stays bounded).
+	if len(t.fails) >= loginThrottleMaxEntries {
+		for k, f := range t.fails {
+			if now.After(f.until) {
+				delete(t.fails, k)
+			}
+		}
+	}
+	if len(t.fails) >= loginThrottleMaxEntries {
+		return
+	}
 	f := t.fails[ip]
 	f.count++
 	if f.count >= loginMaxFails {

@@ -227,6 +227,7 @@
         flashTimer = setTimeout(() => (appliedFlash = false), 2500)
       }
     } catch (e) {
+      if (signal.aborted) return // component destroyed; ignore late failures
       if (e instanceof ApiError && e.status === 401) return onUnauthorized()
       restartError = e instanceof Error ? e.message : '重启失败'
     } finally {

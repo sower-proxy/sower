@@ -205,7 +205,11 @@ func (c ConfigChanges) Validate() error {
 // persisted override) is rejected here.
 func validRemoteAddr(addr string) bool {
 	if host, port, err := net.SplitHostPort(addr); err == nil {
-		return host != "" && port != "" && validHostname(strings.Trim(host, "[]"))
+		if host == "" || port == "" {
+			return false
+		}
+		h := strings.Trim(host, "[]")
+		return net.ParseIP(h) != nil || validHostname(h)
 	}
 	if addr == "" || strings.HasPrefix(addr, "[") || strings.HasSuffix(addr, "]") {
 		return false

@@ -44,9 +44,12 @@ func TestSanitizeConfig(t *testing.T) {
 	}
 }
 
-func TestIsLoopbackRemoteAddr(t *testing.T) {
+func TestIsLocalRemoteAddr(t *testing.T) {
 	t.Parallel()
 
+	// localAddrIsLocal reports whether an address is loopback; it can only
+	// test the loopback half of isLocalRemoteAddr without knowing the test
+	// host's interface addresses.
 	tests := []struct {
 		addr string
 		want bool
@@ -61,8 +64,8 @@ func TestIsLoopbackRemoteAddr(t *testing.T) {
 		tt := tt
 		t.Run(tt.addr, func(t *testing.T) {
 			t.Parallel()
-			if got := isLoopbackRemoteAddr(tt.addr); got != tt.want {
-				t.Fatalf("isLoopbackRemoteAddr(%q) = %v, want %v", tt.addr, got, tt.want)
+			if got := isLocalRemoteAddr(tt.addr); got != tt.want {
+				t.Fatalf("isLocalRemoteAddr(%q) = %v, want %v", tt.addr, got, tt.want)
 			}
 		})
 	}

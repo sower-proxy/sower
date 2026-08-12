@@ -1732,6 +1732,22 @@ func TestConfigPatchValidationAndRevision(t *testing.T) {
 	}
 	resp.Body.Close()
 
+	// valid IPv6 remote addresses must pass (bracketed host:port and bare literal)
+	resp = authedRequest(t, ts, http.MethodPatch, "/api/config", cookie,
+		`{"revision":0,"changes":{"remote_addr":"[2001:db8::1]:8443"}}`)
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusConflict {
+		t.Fatalf("expected bracketed ipv6 remote_addr to validate, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	// malformed remote address rejected
+	resp = authedRequest(t, ts, http.MethodPatch, "/api/config", cookie,
+		`{"revision":0,"changes":{"remote_addr":"::::"}}`)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 for garbage remote_addr, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+
 	// unknown fields are rejected by the strict decoder
 	resp = authedRequest(t, ts, http.MethodPatch, "/api/config", cookie,
 		`{"revision":0,"changes":{"remote_password":"x"}}`)
@@ -1750,10 +1766,10 @@ func TestConfigPatchValidationAndRevision(t *testing.T) {
 
 	// happy path: revision bumps, override persisted
 	resp = authedRequest(t, ts, http.MethodPatch, "/api/config", cookie,
-		`{"revision":0,"changes":{"log_level":"debug","dns_upstream":"1.1.1.1"}}`)
+		`{"revision":1,"changes":{"log_level":"debug","dns_upstream":"1.1.1.1"}}`)
 	body := decodeBody(t, resp)
-	if rev, _ := body["revision"].(float64); rev != 1 {
-		t.Fatalf("expected revision 1 after patch, got %v", body["revision"])
+	if rev, _ := body["revision"].(float64); rev != 2 {
+		t.Fatalf("expected revision 2 after patch, got %v", body["revision"])
 	}
 	if got := fake.state.ConfigOverrides(); got.LogLevel == nil || *got.LogLevel != "debug" || got.DNSUpstream == nil || *got.DNSUpstream != "1.1.1.1" {
 		t.Fatalf("overrides not persisted: %+v", got)
@@ -1761,7 +1777,7 @@ func TestConfigPatchValidationAndRevision(t *testing.T) {
 
 	// clearing an override with an empty string is valid
 	resp = authedRequest(t, ts, http.MethodPatch, "/api/config", cookie,
-		`{"revision":1,"changes":{"dns_upstream":""}}`)
+		`{"revision":2,"changes":{"dns_upstream":""}}`)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 for clearing override, got %d", resp.StatusCode)
 	}

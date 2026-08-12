@@ -275,7 +275,7 @@ func prepareFakeSite(fakeSite string, serveIP string) (string, http.Handler, err
 
 func fakeSiteHandler(dirServer http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if dirServer != nil && isLoopbackRemoteAddr(r.RemoteAddr) {
+		if dirServer != nil && isLocalRemoteAddr(r.RemoteAddr) {
 			dirServer.ServeHTTP(w, r)
 			return
 		}
@@ -419,7 +419,13 @@ func stdinConfirm(label string) bool {
 	return answer == "y" || answer == "yes"
 }
 
-func isLoopbackRemoteAddr(remoteAddr string) bool {
+// isLocalRemoteAddr reports whether the connection originated on this host:
+// loopback or an address bound to a local interface. Directory fake sites
+// relay fallback traffic from this process; the relay's source address
+// follows the target (loopback for the default 0.0.0.0 serve_ip, the
+// serve_ip itself for a concrete bind), so a loopback-only check would
+// wrongly redirect concrete serve_ip deployments.
+func isLocalRemoteAddr(remoteAddr string) bool {
 	host, _, err := net.SplitHostPort(remoteAddr)
 	if err != nil {
 		host = remoteAddr
@@ -427,7 +433,23 @@ func isLoopbackRemoteAddr(remoteAddr string) bool {
 	host = strings.Trim(host, "[]")
 
 	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
+	if ip == nil {
+		return false
+	}
+	if ip.IsLoopback() {
+		return true
+	}
+
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return false
+	}
+	for _, a := range addrs {
+		if ipn, ok := a.(*net.IPNet); ok && ipn.IP.Equal(ip) {
+			return true
+		}
+	}
+	return false
 }
 
 func setLogger(level slog.Level) {
