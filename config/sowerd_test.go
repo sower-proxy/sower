@@ -113,6 +113,68 @@ func TestSowerdConfigValidate(t *testing.T) {
 			},
 		},
 		{
+			name: "valid path routes",
+			cfg: SowerdConfig{
+				Password: "secret",
+				FakeSite: "127.0.0.1:8080",
+				SiteRoutes: []SiteRoute{
+					{
+						Domains:  []string{"a.example.com"},
+						Upstream: "http://127.0.0.1:9000",
+						Routes: map[string]string{
+							"/ws":     "http://127.0.0.1:9002",
+							"/admin/": "http://127.0.0.1:9003",
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "path route without leading slash",
+			cfg: SowerdConfig{
+				Password: "secret",
+				FakeSite: "127.0.0.1:8080",
+				SiteRoutes: []SiteRoute{
+					{
+						Domains:  []string{"a.example.com"},
+						Upstream: "http://127.0.0.1:9000",
+						Routes:   map[string]string{"ws": "http://127.0.0.1:9002"},
+					},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "path route with query",
+			cfg: SowerdConfig{
+				Password: "secret",
+				FakeSite: "127.0.0.1:8080",
+				SiteRoutes: []SiteRoute{
+					{
+						Domains:  []string{"a.example.com"},
+						Upstream: "http://127.0.0.1:9000",
+						Routes:   map[string]string{"/ws?x=1": "http://127.0.0.1:9002"},
+					},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "path route invalid upstream scheme",
+			cfg: SowerdConfig{
+				Password: "secret",
+				FakeSite: "127.0.0.1:8080",
+				SiteRoutes: []SiteRoute{
+					{
+						Domains:  []string{"a.example.com"},
+						Upstream: "http://127.0.0.1:9000",
+						Routes:   map[string]string{"/ws": "ftp://127.0.0.1:21"},
+					},
+				},
+			},
+			wantErr: true,
+		},
+		{
 			name: "empty domains",
 			cfg: SowerdConfig{
 				Password: "secret",

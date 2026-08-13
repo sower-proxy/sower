@@ -177,8 +177,8 @@ func TestSiteRouterLookup(t *testing.T) {
 			if u == nil {
 				t.Fatalf("lookup(%q) = nil, want host %q", tt.sni, tt.want)
 			}
-			if u.Host != tt.want {
-				t.Fatalf("lookup(%q).Host = %q, want %q", tt.sni, u.Host, tt.want)
+			if u.upstream.Host != tt.want {
+				t.Fatalf("lookup(%q).upstream.Host = %q, want %q", tt.sni, u.upstream.Host, tt.want)
 			}
 		})
 	}
@@ -246,7 +246,7 @@ func TestReverseProxyConnHTTP(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- reverseProxyConn(serverConn, upstreamURL, &atomic.Bool{})
+		errCh <- reverseProxyConn(serverConn, &siteEntry{upstream: upstreamURL}, &atomic.Bool{})
 	}()
 
 	// net.Pipe is synchronous; write and read must run concurrently.
@@ -331,6 +331,179 @@ func TestHandleConnRoutesFallbackBySNI(t *testing.T) {
 	}
 }
 
+func TestSiteRouterResolvePathRoutes(t *testing.T) {
+	router := newSiteRouter([]config.SiteRoute{
+		{
+			Domains:  []string{"site.example.com"},
+			Upstream: "http://127.0.0.1:8080",
+			Routes: map[string]string{
+				"/ws":   "http://127.0.0.1:8082",
+				"/wss/": "http://127.0.0.1:8083",
+				"/":     "http://127.0.0.1:8084",
+			},
+		},
+		{Domains: []string{"plain.example.com"}, Upstream: "http://127.0.0.1:8080"},
+	})
+
+	entry := router.lookup("SITE.example.com")
+	if entry == nil {
+		t.Fatal("lookup returned nil for routed domain")
+	}
+
+	tests := []struct {
+		path     string
+		wantHost string
+	}{
+		{"/ws", "127.0.0.1:8082"},
+		{"/ws/", "127.0.0.1:8082"},
+		{"/ws/extra", "127.0.0.1:8082"},
+		{"/wss/other", "127.0.0.1:8083"},
+		{"/wsish", "127.0.0.1:8084"}, // longest prefix match, not substring
+		{"/other", "127.0.0.1:8084"},
+		{"/", "127.0.0.1:8084"},
+	}
+	for _, tt := range tests {
+		if got := entry.resolve(tt.path); got.Host != tt.wantHost {
+			t.Errorf("resolve(%q) = %q, want %q", tt.path, got.Host, tt.wantHost)
+		}
+	}
+
+	plain := router.lookup("plain.example.com")
+	if plain == nil {
+		t.Fatal("lookup returned nil for plain domain")
+	}
+	if got := plain.resolve("/anything"); got.Host != "127.0.0.1:8080" {
+		t.Errorf("plain resolve = %q, want default upstream 127.0.0.1:8080", got.Host)
+	}
+
+	if entry := router.lookup("unknown.example.com"); entry != nil {
+		t.Error("lookup returned entry for unrouted domain")
+	}
+}
+
+func TestReverseProxyConnPathRouting(t *testing.T) {
+	defaultUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("default-upstream"))
+	}))
+	defer defaultUpstream.Close()
+
+	wsUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("ws-upstream"))
+	}))
+	defer wsUpstream.Close()
+
+	defaultURL, _ := url.Parse(defaultUpstream.URL)
+	wsURL, _ := url.Parse(wsUpstream.URL)
+	entry := &siteEntry{
+		upstream: defaultURL,
+		paths:    []pathRoute{{path: "/ws", upstream: wsURL}},
+	}
+
+	for _, tt := range []struct {
+		path string
+		want string
+	}{
+		{"/ws", "ws-upstream"},
+		{"/ws/extra", "ws-upstream"},
+		{"/other", "default-upstream"},
+	} {
+		serverConn, clientConn := net.Pipe()
+		errCh := make(chan error, 1)
+		go func() {
+			errCh <- reverseProxyConn(serverConn, entry, &atomic.Bool{})
+		}()
+		go func() {
+			_, _ = clientConn.Write([]byte("GET " + tt.path + " HTTP/1.1\r\nHost: a.example.com\r\n\r\n"))
+		}()
+
+		_ = clientConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		buf := make([]byte, 4096)
+		n, _ := clientConn.Read(buf)
+		_ = clientConn.Close()
+
+		if resp := string(buf[:n]); !strings.Contains(resp, tt.want) {
+			t.Errorf("GET %s response %q does not contain %q", tt.path, resp, tt.want)
+		}
+
+		select {
+		case err := <-errCh:
+			if err != nil && !errors.Is(err, net.ErrClosed) {
+				t.Fatalf("reverseProxyConn error: %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("reverseProxyConn timed out")
+		}
+	}
+}
+
+func TestReverseProxyConnPathRoutedWebSocket(t *testing.T) {
+	upstreamHit := make(chan string, 1)
+	wsUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamHit <- r.URL.Path
+		key := r.Header.Get("Sec-WebSocket-Key")
+		if key == "" {
+			t.Errorf("missing Sec-WebSocket-Key")
+			return
+		}
+		w.Header().Set("Upgrade", "websocket")
+		w.Header().Set("Connection", "Upgrade")
+		w.Header().Set("Sec-WebSocket-Accept", websocketAcceptKey(key))
+		w.WriteHeader(http.StatusSwitchingProtocols)
+	}))
+	defer wsUpstream.Close()
+
+	defaultURL, _ := url.Parse("http://127.0.0.1:1") // must never be dialed
+	wsURL, _ := url.Parse(wsUpstream.URL)
+	entry := &siteEntry{
+		upstream: defaultURL,
+		paths:    []pathRoute{{path: "/ws", upstream: wsURL}},
+	}
+
+	serverConn, clientConn := net.Pipe()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- reverseProxyConn(serverConn, entry, &atomic.Bool{})
+	}()
+
+	go func() {
+		req := "GET /ws HTTP/1.1\r\n" +
+			"Host: a.example.com\r\n" +
+			"Connection: Upgrade\r\n" +
+			"Upgrade: websocket\r\n" +
+			"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n" +
+			"Sec-WebSocket-Version: 13\r\n\r\n"
+		_, _ = clientConn.Write([]byte(req))
+	}()
+
+	_ = clientConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	buf := make([]byte, 4096)
+	n, _ := clientConn.Read(buf)
+	_ = clientConn.Close()
+
+	resp := string(buf[:n])
+	if !strings.Contains(resp, "101 Switching Protocols") {
+		t.Fatalf("upgrade response = %q, want 101 Switching Protocols", resp)
+	}
+
+	select {
+	case path := <-upstreamHit:
+		if path != "/ws" {
+			t.Fatalf("upstream path = %q, want /ws", path)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("upstream did not receive upgrade request")
+	}
+
+	select {
+	case err := <-errCh:
+		if err != nil && !errors.Is(err, net.ErrClosed) {
+			t.Fatalf("reverseProxyConn error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("reverseProxyConn timed out")
+	}
+}
+
 func TestReverseProxyConnWebSocket(t *testing.T) {
 	upstreamHit := make(chan *http.Request, 1)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -364,7 +537,7 @@ func TestReverseProxyConnWebSocket(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- reverseProxyConn(serverConn, upstreamURL, &atomic.Bool{})
+		errCh <- reverseProxyConn(serverConn, &siteEntry{upstream: upstreamURL}, &atomic.Bool{})
 	}()
 
 	go func() {

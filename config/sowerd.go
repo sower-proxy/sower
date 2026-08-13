@@ -31,6 +31,9 @@ fake_site = "/var/www"            # Fallback fake site directory or address (def
 # domains = ["a.example.com", "b.example.com"]
 # upstream = "http://127.0.0.1:8080"
 #
+# [site_routes.routes]
+# "/ws" = "http://127.0.0.1:8082"
+#
 # [[site_routes]]
 # domains = ["c.example.com"]
 # upstream = "https://backend.example.com"
@@ -45,10 +48,12 @@ key = ""                         # Path to custom private key file (optional)
 
 // SiteRoute maps a set of exact domain names to an upstream URL.
 // When a TLS connection's SNI matches one of the domains, fallback traffic
-// is reverse-proxied to Upstream instead of going to fake_site.
+// is reverse-proxied to Upstream instead of going to fake_site. Routes
+// override Upstream for requests whose path matches a configured prefix.
 type SiteRoute struct {
-	Domains  []string `usage:"exact domain names for this route"`
-	Upstream string   `usage:"upstream URL (http:// or https://)"`
+	Domains  []string          `usage:"exact domain names for this route"`
+	Upstream string            `usage:"upstream URL (http:// or https://)"`
+	Routes   map[string]string `usage:"path-prefix to upstream URL overrides (e.g. /ws = http://127.0.0.1:8082)"`
 }
 
 // SowerdConfig represents the configuration for sowerd daemon
@@ -144,15 +149,23 @@ func validateSiteRoutes(routes []SiteRoute) error {
 			return fmt.Errorf("site_routes[%d]: upstream is empty", i)
 		}
 
-		u, err := url.Parse(r.Upstream)
-		if err != nil {
-			return fmt.Errorf("site_routes[%d]: parse upstream: %w", i, err)
+		if err := validateUpstreamURL(r.Upstream); err != nil {
+			return fmt.Errorf("site_routes[%d]: %w", i, err)
 		}
-		if u.Scheme != "http" && u.Scheme != "https" {
-			return fmt.Errorf("site_routes[%d]: upstream scheme must be http or https, got %q", i, u.Scheme)
-		}
-		if u.Host == "" {
-			return fmt.Errorf("site_routes[%d]: upstream must have a host", i)
+
+		for path, upstream := range r.Routes {
+			if !strings.HasPrefix(path, "/") {
+				return fmt.Errorf("site_routes[%d].routes: path %q must start with /", i, path)
+			}
+			if path != strings.TrimSpace(path) {
+				return fmt.Errorf("site_routes[%d].routes: path %q must not contain surrounding whitespace", i, path)
+			}
+			if strings.ContainsAny(path, "?#") {
+				return fmt.Errorf("site_routes[%d].routes: path %q must not contain query or fragment", i, path)
+			}
+			if err := validateUpstreamURL(upstream); err != nil {
+				return fmt.Errorf("site_routes[%d].routes[%q]: %w", i, path, err)
+			}
 		}
 
 		for _, d := range r.Domains {
@@ -171,6 +184,20 @@ func validateSiteRoutes(routes []SiteRoute) error {
 			}
 			seen[d] = r.Upstream
 		}
+	}
+	return nil
+}
+
+func validateUpstreamURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("parse upstream: %w", err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("upstream scheme must be http or https, got %q", u.Scheme)
+	}
+	if u.Host == "" {
+		return fmt.Errorf("upstream must have a host")
 	}
 	return nil
 }

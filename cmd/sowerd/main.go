@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -379,8 +380,8 @@ func handleConn(conn net.Conn, fakeSite string, router siteRouter, handlers []pr
 
 func fallbackConn(conn net.Conn, tlsConn net.Conn, fakeSite string, router siteRouter, hijacked *atomic.Bool) (time.Duration, error) {
 	start := time.Now()
-	if upstream := router.lookup(sniFromConn(tlsConn)); upstream != nil {
-		return time.Since(start), reverseProxyConn(conn, upstream, hijacked)
+	if entry := router.lookup(sniFromConn(tlsConn)); entry != nil {
+		return time.Since(start), reverseProxyConn(conn, entry, hijacked)
 	}
 	return relay.RelayTo(conn, fakeSite)
 }
@@ -469,24 +470,70 @@ func shutdownHTTP(ctx context.Context, server *http.Server) error {
 	return nil
 }
 
-// siteRouter maps TLS SNI to an upstream URL for fallback traffic.
+// pathRoute maps a URL path prefix to an upstream URL, overriding the site
+// entry default. Paths are normalized without a trailing slash and matched
+// longest-prefix first.
+type pathRoute struct {
+	path     string
+	upstream *url.URL
+}
+
+// siteEntry is the routing target for one site route: a default upstream plus
+// optional path-prefix overrides.
+type siteEntry struct {
+	upstream *url.URL
+	paths    []pathRoute
+}
+
+// resolve returns the upstream URL for the given request path. A configured
+// root path "/" matches every request, acting as a catch-all override.
+func (e *siteEntry) resolve(path string) *url.URL {
+	for _, pr := range e.paths {
+		if pr.path == "/" || path == pr.path || strings.HasPrefix(path, pr.path+"/") {
+			return pr.upstream
+		}
+	}
+	return e.upstream
+}
+
+// siteRouter maps TLS SNI to the site entry for fallback traffic.
 type siteRouter struct {
-	routes map[string]*url.URL
+	routes map[string]*siteEntry
 }
 
 func newSiteRouter(routes []config.SiteRoute) siteRouter {
-	m := make(map[string]*url.URL)
+	m := make(map[string]*siteEntry)
 	for _, r := range routes {
 		u, _ := url.Parse(r.Upstream) // validated in config.Validate
+		entry := &siteEntry{upstream: u}
+		for path, upstream := range r.Routes {
+			pu, _ := url.Parse(upstream) // validated in config.Validate
+			entry.paths = append(entry.paths, pathRoute{
+				path:     normalizeRoutePath(path),
+				upstream: pu,
+			})
+		}
+		sort.Slice(entry.paths, func(i, j int) bool {
+			return len(entry.paths[i].path) > len(entry.paths[j].path)
+		})
 		for _, d := range r.Domains {
-			m[strings.ToLower(d)] = u
+			m[strings.ToLower(d)] = entry
 		}
 	}
 	return siteRouter{routes: m}
 }
 
-// lookup returns the upstream URL for the given SNI, or nil if no route matches.
-func (r siteRouter) lookup(sni string) *url.URL {
+// normalizeRoutePath trims a single trailing slash so that "/a" and "/a/"
+// route identically; "/" is kept as-is.
+func normalizeRoutePath(path string) string {
+	if path != "/" {
+		path = strings.TrimSuffix(path, "/")
+	}
+	return path
+}
+
+// lookup returns the site entry for the given SNI, or nil if no route matches.
+func (r siteRouter) lookup(sni string) *siteEntry {
 	return r.routes[strings.ToLower(sni)]
 }
 
@@ -499,33 +546,56 @@ func sniFromConn(conn net.Conn) string {
 	return tlsConn.ConnectionState().ServerName
 }
 
-// reverseProxyConn serves the decrypted HTTP connection through a reverse proxy
-// to the given upstream URL.
-func reverseProxyConn(conn net.Conn, upstream *url.URL, hijacked *atomic.Bool) error {
-	proxy := httputil.NewSingleHostReverseProxy(upstream)
-	baseDirector := proxy.Director
-	proxy.Director = func(req *http.Request) {
-		baseDirector(req)
-		req.Host = upstream.Host
+// reverseProxyConn serves the decrypted HTTP connection through a reverse
+// proxy to the upstream selected per request by the site entry's path routes.
+// Reverse proxies and their transports are created lazily per upstream and
+// closed together when the connection ends.
+func reverseProxyConn(conn net.Conn, entry *siteEntry, hijacked *atomic.Bool) error {
+	proxies := make(map[string]*httputil.ReverseProxy, 1+len(entry.paths))
+	transports := make([]*http.Transport, 0, 1+len(entry.paths))
+
+	proxyFor := func(upstream *url.URL) *httputil.ReverseProxy {
+		key := upstream.String()
+		if proxy, ok := proxies[key]; ok {
+			return proxy
+		}
+		proxy := httputil.NewSingleHostReverseProxy(upstream)
+		baseDirector := proxy.Director
+		proxy.Director = func(req *http.Request) {
+			baseDirector(req)
+			req.Host = upstream.Host
+		}
+		transport := &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
+			DialContext: (&net.Dialer{
+				Timeout:   upstreamDialTimeout,
+				KeepAlive: upstreamResponseTimeout,
+			}).DialContext,
+			TLSHandshakeTimeout:   upstreamDialTimeout,
+			ResponseHeaderTimeout: upstreamResponseTimeout,
+			IdleConnTimeout:       reverseProxyIdleTimeout,
+			ExpectContinueTimeout: time.Second,
+		}
+		transports = append(transports, transport)
+		proxy.Transport = transport
+		proxy.ErrorLog = slog.NewLogLogger(slog.Default().Handler(), slog.LevelWarn)
+		proxies[key] = proxy
+		return proxy
 	}
-	transport := &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
-		DialContext: (&net.Dialer{
-			Timeout:   upstreamDialTimeout,
-			KeepAlive: upstreamResponseTimeout,
-		}).DialContext,
-		TLSHandshakeTimeout:   upstreamDialTimeout,
-		ResponseHeaderTimeout: upstreamResponseTimeout,
-		IdleConnTimeout:       reverseProxyIdleTimeout,
-		ExpectContinueTimeout: time.Second,
-	}
-	defer transport.CloseIdleConnections()
-	proxy.Transport = transport
-	proxy.ErrorLog = slog.NewLogLogger(slog.Default().Handler(), slog.LevelWarn)
+
+	defer func() {
+		for _, t := range transports {
+			t.CloseIdleConnections()
+		}
+	}()
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		proxyFor(entry.resolve(req.URL.Path)).ServeHTTP(w, req)
+	})
 
 	ln := newSingleConnListener(conn)
 	srv := &http.Server{
-		Handler:           proxy,
+		Handler:           handler,
 		ReadHeaderTimeout: reverseProxyReadHeaderTimeout,
 		IdleTimeout:       reverseProxyIdleTimeout,
 		ConnState: func(_ net.Conn, state http.ConnState) {
