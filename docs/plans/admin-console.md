@@ -103,10 +103,10 @@ API：
 
 ## 前端设计（`web/`）
 
-- **UI 层用 shadcn-svelte**：Tailwind CSS v4 + bits-ui + lucide-svelte，暗色主题（CSS 变量直接置为暗色值，不提供切换）。组件用 CLI 生成在 `src/lib/components/ui/`（button/card/input/textarea/label/badge/dropdown-menu/separator/table/tabs/alert）。已实现改为浅色主题（`main.ts` 移除 dark 类）。
+- **UI 层用 shadcn-svelte 风格组件**：Tailwind CSS v4 + lucide-svelte，浅色主题（`main.ts` 不挂 dark 类）。组件手维护在 `src/lib/components/ui/`（button/card/input/textarea/label/badge/dropdown-menu/table/alert），原生 Svelte 5 实现，不依赖 bits-ui。不要用 `shadcn-svelte add` 覆盖这些文件（registry 产物会重新引入 bits-ui）。
 - Svelte 5（runes）+ Vite，`bun install` / `bun run build` / `bun run check`（svelte-check）
 - 视图：Login（Card + 密码 → POST /api/session）、Overview（卡片栅格）、Rules（按面包屑 category 上下文切换分类：列表 + 添加 + 删除）、Traffic（Table）
-- **高级菜单面包屑**（参照 cyberguard 的 `AppBreadcrumbHeader`）：品牌 → 当前分区（DropdownMenu 下拉列出全部页面，带图标/描述/当前态）→ 动态上下文段（Rules 的 category 段可下拉切换 block/direct/proxy；Overview 的 version 段、Traffic 的 scope 段为静态段）；右侧收藏星标（localStorage 持久化）+ 页面菜单 + 状态徽章 + 退出。定位/键盘导航/外点关闭由 bits-ui DropdownMenu 承担。
+- **高级菜单面包屑**（参照 cyberguard 的 `AppBreadcrumbHeader`）：品牌 → 当前分区（DropdownMenu 下拉列出全部页面，带图标/描述/当前态）→ 动态上下文段（Rules 的 category 段可下拉切换 block/direct/proxy；Overview 的 version 段、Traffic 的 scope 段为静态段）；右侧收藏星标（localStorage 持久化）+ 页面菜单 + 状态徽章 + 退出。定位/键盘导航/外点关闭由手维护的 DropdownMenu（fixed + 原生焦点/键盘）承担。
 - 有界轮询（3–5s），401 时回登录；loading/error/empty 三态齐全；不引图表库。已实现改为 SSE 实时流（`/api/stream`，会话续期/过期事件），图表用自研 `AreaChart`（`src/lib/components/AreaChart.svelte`）。
 - `traffic.domains` 为空时服务端返回 `[]` 而非 `null`（Go nil slice 会序列化成 null，前端 `null.length` 会抛错）；前端同时做 `?? []` 防御
 - `web/embed.go`：`//go:embed all:dist` 导出 `fs.Sub(FS, "dist")`

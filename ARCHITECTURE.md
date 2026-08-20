@@ -52,7 +52,7 @@ For non-transport fallback traffic, it can route by TLS SNI to per-domain upstre
 
 `web`
 
-- Svelte 5 + Vite (Tailwind v4 + shadcn-svelte) admin console frontend
+- Svelte 5 + Vite (Tailwind v4 + hand-maintained shadcn-svelte-style UI, no bits-ui) admin console frontend
 - Build output `web/dist` is embedded into the binary via `go:embed`
 
 `transport/sower`
