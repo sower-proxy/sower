@@ -1,7 +1,17 @@
 <script lang="ts">
-	import { DropdownMenu as DropdownMenuPrimitive } from "bits-ui";
+	import type { Snippet } from "svelte";
+	import { DropdownMenuState, setDropdownMenu } from "./dropdown-menu-context.svelte.ts";
 
-	let { open = $bindable(false), ...restProps }: DropdownMenuPrimitive.RootProps = $props();
+	let { open = $bindable(false), children }: { open?: boolean; children?: Snippet } = $props();
+
+	const menu = new DropdownMenuState();
+	menu.open = open;
+	setDropdownMenu(menu);
+
+	// Outbound only: internal open drives the bindable. Callers do not pass bind:open.
+	$effect(() => {
+		open = menu.open;
+	});
 </script>
 
-<DropdownMenuPrimitive.Root bind:open {...restProps} />
+{@render children?.()}

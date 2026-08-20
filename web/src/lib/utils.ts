@@ -8,7 +8,7 @@ export function cn(...inputs: ClassValue[]) {
 	return twMerge(clsx(inputs));
 }
 
-// Helper types used by shadcn-svelte component templates (bits-ui agnostic).
+// Helper types used by shadcn-svelte component templates.
 export type WithoutChild<T> = Omit<T, "child">;
 
 export type WithChild<T, U extends unknown[] = []> = T & {

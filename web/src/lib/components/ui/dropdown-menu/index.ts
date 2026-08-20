@@ -1,54 +1,24 @@
-import CheckboxGroup from "./dropdown-menu-checkbox-group.svelte";
-import CheckboxItem from "./dropdown-menu-checkbox-item.svelte";
+import Root from "./dropdown-menu.svelte";
+import Trigger from "./dropdown-menu-trigger.svelte";
 import Content from "./dropdown-menu-content.svelte";
-import GroupHeading from "./dropdown-menu-group-heading.svelte";
-import Group from "./dropdown-menu-group.svelte";
 import Item from "./dropdown-menu-item.svelte";
 import Label from "./dropdown-menu-label.svelte";
-import Portal from "./dropdown-menu-portal.svelte";
-import RadioGroup from "./dropdown-menu-radio-group.svelte";
-import RadioItem from "./dropdown-menu-radio-item.svelte";
 import Separator from "./dropdown-menu-separator.svelte";
 import Shortcut from "./dropdown-menu-shortcut.svelte";
-import SubContent from "./dropdown-menu-sub-content.svelte";
-import SubTrigger from "./dropdown-menu-sub-trigger.svelte";
-import Sub from "./dropdown-menu-sub.svelte";
-import Trigger from "./dropdown-menu-trigger.svelte";
-import Root from "./dropdown-menu.svelte";
 
 export {
-	CheckboxGroup,
-	CheckboxItem,
+	Root,
+	Trigger,
 	Content,
-	Portal,
-	Root as DropdownMenu,
-	CheckboxGroup as DropdownMenuCheckboxGroup,
-	CheckboxItem as DropdownMenuCheckboxItem,
-	Content as DropdownMenuContent,
-	Portal as DropdownMenuPortal,
-	Group as DropdownMenuGroup,
-	Item as DropdownMenuItem,
-	Label as DropdownMenuLabel,
-	RadioGroup as DropdownMenuRadioGroup,
-	RadioItem as DropdownMenuRadioItem,
-	Separator as DropdownMenuSeparator,
-	Shortcut as DropdownMenuShortcut,
-	Sub as DropdownMenuSub,
-	SubContent as DropdownMenuSubContent,
-	SubTrigger as DropdownMenuSubTrigger,
-	Trigger as DropdownMenuTrigger,
-	GroupHeading as DropdownMenuGroupHeading,
-	Group,
-	GroupHeading,
 	Item,
 	Label,
-	RadioGroup,
-	RadioItem,
-	Root,
 	Separator,
 	Shortcut,
-	Sub,
-	SubContent,
-	SubTrigger,
-	Trigger,
+	Root as DropdownMenu,
+	Trigger as DropdownMenuTrigger,
+	Content as DropdownMenuContent,
+	Item as DropdownMenuItem,
+	Label as DropdownMenuLabel,
+	Separator as DropdownMenuSeparator,
+	Shortcut as DropdownMenuShortcut,
 };
