@@ -235,7 +235,7 @@ Sower 节点需要能监听 `53/udp`、`80/tcp`、`443/tcp` 和 `1080/tcp`。如
 
 如果 `sowerd` 作为 systemd 服务运行，且环境里没有 `HOME` 或 `XDG_CACHE_HOME`，证书缓存会退回到 `/var/cache/sower`。
 
-当 `fake_site` 指向本地目录时，`sowerd` 只会通过 `127.0.0.1:80` 的回退流量服务这个目录；公网 HTTP 流量仍会重定向到 HTTPS。
+当 `fake_site` 指向本地目录时，`sowerd` 只会通过 `127.0.0.1:80` 的回退流量服务这个目录；公网 HTTP 流量仍会重定向到 HTTPS。未命中 `site_routes` 的 HTTP/1.x 浏览请求会反代到 `fake_site`（目录模式为 loopback `:80`，或配置的 `host:port`），并覆盖写入 `X-Forwarded-For`、`X-Forwarded-Proto`、`X-Forwarded-Host`、`X-Real-IP`；非 HTTP 流量仍按原字节 TCP relay。
 
 启动方式有两种。
 
@@ -287,7 +287,7 @@ password = "your_admin_password"  # 示例值；留空则启动时自动生成�
 ### Admin 配置项
 
 | 字段 | 默认值 | 说明 |
-|---|---|---|
+| --- | --- | --- |
 | `disable` | `true` | 默认关闭管理台 |
 | `addr` | `127.0.0.1:19090` | 监听地址；设为 `dns.serve:80` 时与 HTTP 代理共享端口 |
 | `password` | 空 | 未配置时启动自动生成一次性随机密码（打印到启动日志）；只用于换取会话 cookie |

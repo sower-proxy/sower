@@ -106,7 +106,7 @@ For non-transport fallback traffic, it can route by TLS SNI to per-domain upstre
 11. If matched, authenticate (the frame checksum covers command, port, and target via HMAC-SHA256; empty or control-character targets are rejected) and relay traffic to the decoded target. The header read is bounded by its own deadline so a connection that sends only the probe byte cannot hold a goroutine and fd forever.
 12. If authentication fails or no transport matches, read the TLS SNI from the terminated TLS connection.
 13. If the SNI exactly matches a configured `site_routes` domain, reverse-proxy the decrypted HTTP/1.1 request to that route's `http://` or `https://` upstream URL.
-14. If the SNI has no route, relay to `fakeSite`.
+14. If the SNI has no route and the decrypted probe is an HTTP/1.x request line, reverse-proxy to `fakeSite` while preserving the original Host and setting edge forwarding headers. Otherwise replay the original bytes to `fakeSite` with a TCP relay, including sower auth failures and other non-HTTP traffic.
 
 ## sowerd Install Flow
 
@@ -141,7 +141,8 @@ For non-transport fallback traffic, it can route by TLS SNI to per-domain upstre
 - `sowerd` prefers the user cache directory for ACME state, but falls back to `/var/cache/sower` so systemd services can start without `HOME`/`XDG_CACHE_HOME` or a config file.
 - `sowerd` fallback site routing is based only on exact TLS SNI matches; wildcard domains are not supported.
 - `sowerd` site routes use HTTP reverse proxying to support full `http://` and `https://` upstream URLs. The reverse proxy rewrites the outbound Host to the upstream host.
-- `sowerd` site routing rejects HTTP upgrade requests instead of hijacking the fallback connection; fallback sites are intended for normal HTTP/1.1 decoy traffic.
+- `sowerd` is the TLS edge for fallback HTTP. Reverse-proxied site routes and HTTP fake-site fallback overwrite `X-Forwarded-For`, `X-Forwarded-Host`, `X-Forwarded-Proto`, and `X-Real-IP` from the immediate client; client-supplied forwarding headers are discarded. `X-Forwarded-Proto` is `https` because this path is the 443 listener after TLS termination. HTTP fake-site fallback preserves the original Host, matching the previous TCP relay.
+- `sowerd` reverse-proxied fallback supports HTTP/1.1 protocol upgrades (including websocket) through the standard library ReverseProxy hijack path.
 - `sowerd` site routing applies bounded client header, upstream dial, TLS handshake, and upstream response-header timeouts.
 - `sowerd` advertises only HTTP/1.1 over TLS because fallback site routing and fake-site serving are HTTP/1.1 paths.
 - In autocert mode, `sowerd` obtains certificates only for configured domains: every `site_routes` domain plus the `cert.domains` whitelist (autocert HostPolicy), so an arbitrary SNI cannot drive ACME issuance and exhaust the account's rate limits. Direct-connection domains (e.g. the sower client's remote addr) must be listed in `cert.domains`. In custom certificate mode, the configured certificate must cover every routed domain through SANs.
