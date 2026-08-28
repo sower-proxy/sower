@@ -1,12 +1,10 @@
 package main
 
 import (
-	"bufio"
 	"crypto/sha1"
 	"crypto/tls"
 	"encoding/base64"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -262,6 +260,125 @@ func TestReverseProxyConnHTTP(t *testing.T) {
 	resp := string(buf[:n])
 	if !strings.Contains(resp, "upstream-response") {
 		t.Fatalf("response does not contain upstream body: %q", resp)
+	}
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("reverseProxyConn error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("reverseProxyConn timed out")
+	}
+}
+
+type connWithRemoteAddr struct {
+	net.Conn
+	addr net.Addr
+}
+
+func (c connWithRemoteAddr) RemoteAddr() net.Addr { return c.addr }
+
+func TestReverseProxyConnForwardingHeaders(t *testing.T) {
+	const clientIP = "203.0.113.10"
+	gotCh := make(chan *http.Request, 1)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotCh <- r.Clone(r.Context())
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	upstreamURL, _ := url.Parse(upstream.URL)
+	rawServer, clientConn := net.Pipe()
+	serverConn := connWithRemoteAddr{
+		Conn: rawServer,
+		addr: &net.TCPAddr{IP: net.ParseIP(clientIP), Port: 54321},
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- reverseProxyConn(serverConn, &siteEntry{upstream: upstreamURL}, &atomic.Bool{})
+	}()
+	go func() {
+		_, _ = clientConn.Write([]byte(
+			"GET /test HTTP/1.1\r\n" +
+				"Host: a.example.com\r\n" +
+				"X-Forwarded-For: 1.2.3.4\r\n" +
+				"X-Forwarded-Proto: http\r\n" +
+				"X-Forwarded-Host: spoofed.example\r\n" +
+				"X-Forwarded-Port: 80\r\n" +
+				"X-Real-IP: 1.2.3.4\r\n\r\n"))
+	}()
+
+	_ = clientConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	buf := make([]byte, 4096)
+	_, _ = clientConn.Read(buf)
+	_ = clientConn.Close()
+
+	select {
+	case got := <-gotCh:
+		if got.Host != upstreamURL.Host {
+			t.Errorf("Host = %q, want upstream %q", got.Host, upstreamURL.Host)
+		}
+		if got.Header.Get("X-Forwarded-For") != clientIP {
+			t.Errorf("X-Forwarded-For = %q, want %q", got.Header.Get("X-Forwarded-For"), clientIP)
+		}
+		if got.Header.Get("X-Real-IP") != clientIP {
+			t.Errorf("X-Real-IP = %q, want %q", got.Header.Get("X-Real-IP"), clientIP)
+		}
+		if got.Header.Get("X-Forwarded-Proto") != "https" {
+			t.Errorf("X-Forwarded-Proto = %q, want https", got.Header.Get("X-Forwarded-Proto"))
+		}
+		if got.Header.Get("X-Forwarded-Host") != "a.example.com" {
+			t.Errorf("X-Forwarded-Host = %q, want a.example.com", got.Header.Get("X-Forwarded-Host"))
+		}
+		if got.Header.Get("X-Forwarded-Port") != "" {
+			t.Errorf("X-Forwarded-Port = %q, want empty", got.Header.Get("X-Forwarded-Port"))
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("upstream did not receive request")
+	}
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("reverseProxyConn error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("reverseProxyConn timed out")
+	}
+}
+
+func TestReverseProxyConnPreserveHost(t *testing.T) {
+	gotCh := make(chan string, 1)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotCh <- r.Host
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	upstreamURL, _ := url.Parse(upstream.URL)
+	serverConn, clientConn := net.Pipe()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- reverseProxyConn(serverConn, &siteEntry{upstream: upstreamURL, preserveHost: true}, &atomic.Bool{})
+	}()
+	go func() {
+		_, _ = clientConn.Write([]byte("GET / HTTP/1.1\r\nHost: miss.example.com\r\n\r\n"))
+	}()
+
+	_ = clientConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	buf := make([]byte, 4096)
+	_, _ = clientConn.Read(buf)
+	_ = clientConn.Close()
+
+	select {
+	case got := <-gotCh:
+		if got != "miss.example.com" {
+			t.Fatalf("Host = %q, want miss.example.com", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("upstream did not receive request")
 	}
 
 	select {
@@ -588,7 +705,13 @@ func websocketAcceptKey(key string) string {
 }
 
 func TestHandleConnFallsBackToFakeSiteWhenSNIMisses(t *testing.T) {
-	fakeSite := startHTTP1TCPServer(t, "fake-site-fallback")
+	gotCh := make(chan *http.Request, 1)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotCh <- r.Clone(r.Context())
+		_, _ = w.Write([]byte("fake-site-fallback"))
+	}))
+	defer upstream.Close()
+	upstreamURL, _ := url.Parse(upstream.URL)
 
 	certServer := httptest.NewTLSServer(http.NotFoundHandler())
 	cert := certServer.TLS.Certificates[0]
@@ -609,14 +732,21 @@ func TestHandleConnFallsBackToFakeSiteWhenSNIMisses(t *testing.T) {
 	router := newSiteRouter([]config.SiteRoute{
 		{Domains: []string{"route.example.com"}, Upstream: "http://127.0.0.1:1"},
 	})
-	go handleConn(serverTLS, fakeSite, router, []proxyProtocolHandler{newSowerProtocolHandler(transportSower.New("secret"))})
+	go handleConn(serverTLS, upstreamURL.Host, router, []proxyProtocolHandler{newSowerProtocolHandler(transportSower.New("secret"))})
 
 	if err := clientTLS.Handshake(); err != nil {
 		t.Fatalf("tls handshake: %v", err)
 	}
 
 	padding := strings.Repeat("x", 512)
-	_, _ = clientTLS.Write([]byte("GET /fallback HTTP/1.1\r\nHost: miss.example.com\r\nX-Pad: " + padding + "\r\n\r\n"))
+	_, _ = clientTLS.Write([]byte(
+		"GET /fallback HTTP/1.1\r\n" +
+			"Host: miss.example.com\r\n" +
+			"X-Forwarded-For: 1.2.3.4\r\n" +
+			"X-Forwarded-Proto: http\r\n" +
+			"X-Forwarded-Host: spoofed.example\r\n" +
+			"X-Real-IP: 1.2.3.4\r\n" +
+			"X-Pad: " + padding + "\r\n\r\n"))
 
 	_ = clientTLS.SetReadDeadline(time.Now().Add(2 * time.Second))
 	buf := make([]byte, 4096)
@@ -627,6 +757,123 @@ func TestHandleConnFallsBackToFakeSiteWhenSNIMisses(t *testing.T) {
 	resp := string(buf[:n])
 	if !strings.Contains(resp, "fake-site-fallback") {
 		t.Fatalf("response does not contain fake site body: %q", resp)
+	}
+
+	select {
+	case got := <-gotCh:
+		if got.Host != "miss.example.com" {
+			t.Errorf("Host = %q, want miss.example.com", got.Host)
+		}
+		if got.Header.Get("X-Forwarded-Proto") != "https" {
+			t.Errorf("X-Forwarded-Proto = %q, want https", got.Header.Get("X-Forwarded-Proto"))
+		}
+		if got.Header.Get("X-Forwarded-Host") != "miss.example.com" {
+			t.Errorf("X-Forwarded-Host = %q, want miss.example.com", got.Header.Get("X-Forwarded-Host"))
+		}
+		if got.Header.Get("X-Forwarded-For") == "1.2.3.4" {
+			t.Errorf("X-Forwarded-For still spoofed: %q", got.Header.Get("X-Forwarded-For"))
+		}
+		if got.Header.Get("X-Real-IP") == "1.2.3.4" {
+			t.Errorf("X-Real-IP still spoofed: %q", got.Header.Get("X-Real-IP"))
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("upstream did not receive request")
+	}
+}
+
+func TestHandleConnFakeSiteHTTPSplitRequestLineSetsProxyHeaders(t *testing.T) {
+	gotCh := make(chan *http.Request, 1)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotCh <- r.Clone(r.Context())
+		_, _ = w.Write([]byte("split-fallback"))
+	}))
+	defer upstream.Close()
+	upstreamURL, _ := url.Parse(upstream.URL)
+
+	certServer := httptest.NewTLSServer(http.NotFoundHandler())
+	cert := certServer.TLS.Certificates[0]
+	certServer.Close()
+
+	serverRaw, clientRaw := net.Pipe()
+	serverTLS := tls.Server(serverRaw, &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		NextProtos:   []string{"http/1.1"},
+	})
+	clientTLS := tls.Client(clientRaw, &tls.Config{
+		InsecureSkipVerify: true,
+		ServerName:         "miss.example.com",
+		NextProtos:         []string{"http/1.1"},
+	})
+	defer clientTLS.Close()
+
+	go handleConn(serverTLS, upstreamURL.Host, siteRouter{}, []proxyProtocolHandler{newSowerProtocolHandler(transportSower.New("secret"))})
+
+	if err := clientTLS.Handshake(); err != nil {
+		t.Fatalf("tls handshake: %v", err)
+	}
+
+	_, _ = clientTLS.Write([]byte("GET /fall"))
+	_, _ = clientTLS.Write([]byte("back HTTP/1.1\r\nHost: miss.example.com\r\n\r\n"))
+
+	_ = clientTLS.SetReadDeadline(time.Now().Add(2 * time.Second))
+	buf := make([]byte, 4096)
+	n, err := clientTLS.Read(buf)
+	if err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+	if !strings.Contains(string(buf[:n]), "split-fallback") {
+		t.Fatalf("response does not contain fake site body: %q", buf[:n])
+	}
+
+	select {
+	case got := <-gotCh:
+		if got.Header.Get("X-Forwarded-Proto") != "https" {
+			t.Errorf("X-Forwarded-Proto = %q, want https", got.Header.Get("X-Forwarded-Proto"))
+		}
+		if got.Host != "miss.example.com" {
+			t.Errorf("Host = %q, want miss.example.com", got.Host)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("upstream did not receive request")
+	}
+}
+
+func TestHandleConnRelaysNonHTTPFakeSiteWhenProbeMisses(t *testing.T) {
+	fakeSite := startRawTCPServer(t, "raw-fallback")
+
+	certServer := httptest.NewTLSServer(http.NotFoundHandler())
+	cert := certServer.TLS.Certificates[0]
+	certServer.Close()
+
+	serverRaw, clientRaw := net.Pipe()
+	serverTLS := tls.Server(serverRaw, &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		NextProtos:   []string{"http/1.1"},
+	})
+	clientTLS := tls.Client(clientRaw, &tls.Config{
+		InsecureSkipVerify: true,
+		ServerName:         "miss.example.com",
+		NextProtos:         []string{"http/1.1"},
+	})
+	defer clientTLS.Close()
+
+	go handleConn(serverTLS, fakeSite, siteRouter{}, []proxyProtocolHandler{newSowerProtocolHandler(transportSower.New("secret"))})
+
+	if err := clientTLS.Handshake(); err != nil {
+		t.Fatalf("tls handshake: %v", err)
+	}
+	_ = clientTLS.SetDeadline(time.Now().Add(2 * time.Second))
+	if _, err := clientTLS.Write([]byte("not-http-payload")); err != nil {
+		t.Fatalf("write non-http payload: %v", err)
+	}
+
+	buf := make([]byte, 4096)
+	n, err := clientTLS.Read(buf)
+	if err != nil {
+		t.Fatalf("read fallback response: %v", err)
+	}
+	if !strings.Contains(string(buf[:n]), "raw-fallback") {
+		t.Fatalf("response does not contain raw fallback body: %q", buf[:n])
 	}
 }
 
@@ -670,33 +917,98 @@ func TestHandleConnFallsBackAfterSowerAuthFailure(t *testing.T) {
 	}
 }
 
-func startHTTP1TCPServer(t *testing.T, body string) string {
-	t.Helper()
-
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen fake site: %v", err)
+func TestHTTPRequestLineProbe(t *testing.T) {
+	tests := []struct {
+		in   string
+		want bool
+	}{
+		{"GET / HTTP/1.1\r\nHost: x\r\n\r\n", true},
+		{"POST /submit HTTP/1.0\r\n\r\n", true},
+		{"CONNECT example.com:443 HTTP/1.1\r\n", true},
+		{"GET / HTTP/1.1\nHost: x\n\n", true},
+		{"GET / HTTP/1.1", true},
+		{"GET / HTTP/1.1\r", true},
+		{"GET / HTTP/1.10\r\n", false},
+		{"GET / HTTP/1.1 extra\r\n", false},
+		{"GET /fall", false},
+		{"hello", false},
+		{"\x80xxxx", false},
+		{"GETX / HTTP/1.1\r\n", false},
 	}
-	t.Cleanup(func() { _ = ln.Close() })
+	for _, tt := range tests {
+		if got := httpRequestLineProbe([]byte(tt.in)); got != tt.want {
+			t.Errorf("httpRequestLineProbe(%q) = %v, want %v", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestCouldBeHTTPRequestLine(t *testing.T) {
+	tests := []struct {
+		in   string
+		want bool
+	}{
+		{"G", true},
+		{"GET", true},
+		{"GET /fall", true},
+		{"GET / HTTP/1.", true},
+		{"GET / HTTP/1.1\r", true},
+		{"GET / HTTP/1.1\r\n", false},
+		{"hello", false},
+		{"\x80", false},
+		{"GET / HTTP/1.10", false},
+	}
+	for _, tt := range tests {
+		if got := couldBeHTTPRequestLine([]byte(tt.in)); got != tt.want {
+			t.Errorf("couldBeHTTPRequestLine(%q) = %v, want %v", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestNewFakeSiteEntry(t *testing.T) {
+	e := newFakeSiteEntry("127.0.0.1:9080")
+	if e.upstream.String() != "http://127.0.0.1:9080" {
+		t.Fatalf("upstream = %q, want http://127.0.0.1:9080", e.upstream.String())
+	}
+	if !e.preserveHost {
+		t.Fatal("preserveHost = false, want true")
+	}
+	v6 := newFakeSiteEntry("[::1]:8080")
+	if v6.upstream.Host != "[::1]:8080" {
+		t.Fatalf("ipv6 host = %q, want [::1]:8080", v6.upstream.Host)
+	}
+}
+
+func TestExtendHTTPRequestProbeReadsSplitRequestLine(t *testing.T) {
+	server, client := net.Pipe()
+	defer server.Close()
+	defer client.Close()
 
 	go func() {
-		conn, err := ln.Accept()
-		if err != nil {
-			return
-		}
-		defer conn.Close()
-
-		r := bufio.NewReader(conn)
-		for {
-			line, err := r.ReadString('\n')
-			if err != nil || line == "\r\n" || line == "\n" {
-				break
-			}
-		}
-		_, _ = conn.Write([]byte("HTTP/1.1 200 OK\r\nContent-Length: " + fmt.Sprint(len(body)) + "\r\n\r\n" + body))
+		_, _ = client.Write([]byte("GET /fall"))
+		_, _ = client.Write([]byte("back HTTP/1.1\r\nHost: x\r\n\r\n"))
 	}()
 
-	return ln.Addr().String()
+	_ = server.SetReadDeadline(time.Now().Add(2 * time.Second))
+	first := make([]byte, protocolProbeMaxBytes)
+	n, err := server.Read(first)
+	if err != nil {
+		t.Fatalf("first read: %v", err)
+	}
+	got := extendHTTPRequestProbe(server, first[:n])
+	if !httpRequestLineProbe(got) {
+		t.Fatalf("extended probe not HTTP request line: %q", got)
+	}
+}
+
+func TestExtendHTTPRequestProbeSkipsNonHTTP(t *testing.T) {
+	server, client := net.Pipe()
+	defer server.Close()
+	defer client.Close()
+
+	got := extendHTTPRequestProbe(server, []byte("not-http"))
+	if string(got) != "not-http" {
+		t.Fatalf("probe = %q, want not-http", got)
+	}
 }
 
 func startRawTCPServer(t *testing.T, body string) string {

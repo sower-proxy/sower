@@ -368,22 +368,33 @@ func handleConn(conn net.Conn, fakeSite string, router siteRouter, handlers []pr
 			slog.Debug("protocol auth or decode failed, fallback", "protocol", handler.Name(), "error", err)
 			_ = rereadConn.SetReadDeadline(time.Time{})
 			rereadConn.Stop().Reread()
-			dur, err = fallbackConn(rereadConn, conn, fakeSite, router, &hijacked)
+			dur, err = fallbackConn(rereadConn, conn, fakeSite, router, &hijacked, probeBuf)
 			return
 		}
 	}
 
+	probeBuf = extendHTTPRequestProbe(rereadConn, probeBuf)
 	rereadConn.Stop().Reread()
 	_ = rereadConn.SetReadDeadline(time.Time{})
-	dur, err = fallbackConn(rereadConn, conn, fakeSite, router, &hijacked)
+	dur, err = fallbackConn(rereadConn, conn, fakeSite, router, &hijacked, probeBuf)
 }
 
-func fallbackConn(conn net.Conn, tlsConn net.Conn, fakeSite string, router siteRouter, hijacked *atomic.Bool) (time.Duration, error) {
+func fallbackConn(conn net.Conn, tlsConn net.Conn, fakeSite string, router siteRouter, hijacked *atomic.Bool, probe []byte) (time.Duration, error) {
 	start := time.Now()
 	if entry := router.lookup(sniFromConn(tlsConn)); entry != nil {
 		return time.Since(start), reverseProxyConn(conn, entry, hijacked)
 	}
+	if httpRequestLineProbe(probe) {
+		return time.Since(start), reverseProxyConn(conn, newFakeSiteEntry(fakeSite), hijacked)
+	}
 	return relay.RelayTo(conn, fakeSite)
+}
+
+func newFakeSiteEntry(fakeSite string) *siteEntry {
+	return &siteEntry{
+		upstream:     &url.URL{Scheme: "http", Host: fakeSite},
+		preserveHost: true,
+	}
 }
 
 func sanitizeConfig(cfg config.SowerdConfig) map[string]any {
@@ -481,8 +492,9 @@ type pathRoute struct {
 // siteEntry is the routing target for one site route: a default upstream plus
 // optional path-prefix overrides.
 type siteEntry struct {
-	upstream *url.URL
-	paths    []pathRoute
+	upstream     *url.URL
+	paths        []pathRoute
+	preserveHost bool // fake-site fallback keeps the original Host header
 }
 
 // resolve returns the upstream URL for the given request path. A configured
@@ -546,6 +558,31 @@ func sniFromConn(conn net.Conn) string {
 	return tlsConn.ConnectionState().ServerName
 }
 
+func stripResidualForwardingHeaders(h http.Header) {
+	h.Del("X-Real-IP")
+	for k := range h {
+		if strings.HasPrefix(k, "X-Forwarded-") {
+			h.Del(k)
+		}
+	}
+}
+
+// setEdgeProxyHeaders overwrites forwarding headers from the TLS-edge peer.
+// ReverseProxy.Rewrite already deleted Forwarded / X-Forwarded-For /
+// X-Forwarded-Host / X-Forwarded-Proto and does not auto-populate them.
+// X-Forwarded-Proto is https because this path is the 443 listener after TLS
+// termination (req.TLS is nil on the decrypted conn).
+func setEdgeProxyHeaders(req *http.Request, forwardedHost, remoteAddr string) {
+	if forwardedHost != "" {
+		req.Header.Set("X-Forwarded-Host", forwardedHost)
+	}
+	req.Header.Set("X-Forwarded-Proto", "https")
+	if clientIP, _, err := net.SplitHostPort(remoteAddr); err == nil {
+		req.Header.Set("X-Forwarded-For", clientIP)
+		req.Header.Set("X-Real-IP", clientIP)
+	}
+}
+
 // reverseProxyConn serves the decrypted HTTP connection through a reverse
 // proxy to the upstream selected per request by the site entry's path routes.
 // Reverse proxies and their transports are created lazily per upstream and
@@ -559,11 +596,17 @@ func reverseProxyConn(conn net.Conn, entry *siteEntry, hijacked *atomic.Bool) er
 		if proxy, ok := proxies[key]; ok {
 			return proxy
 		}
-		proxy := httputil.NewSingleHostReverseProxy(upstream)
-		baseDirector := proxy.Director
-		proxy.Director = func(req *http.Request) {
-			baseDirector(req)
-			req.Host = upstream.Host
+		proxy := &httputil.ReverseProxy{
+			Rewrite: func(pr *httputil.ProxyRequest) {
+				pr.SetURL(upstream)
+				if entry.preserveHost {
+					pr.Out.Host = pr.In.Host
+				} else {
+					pr.Out.Host = upstream.Host
+				}
+				stripResidualForwardingHeaders(pr.Out.Header)
+				setEdgeProxyHeaders(pr.Out, pr.In.Host, pr.In.RemoteAddr)
+			},
 		}
 		transport := &http.Transport{
 			Proxy: http.ProxyFromEnvironment,
