@@ -272,6 +272,81 @@ func TestReverseProxyConnHTTP(t *testing.T) {
 	}
 }
 
+func TestProxyErrorHandler(t *testing.T) {
+	var logged strings.Builder
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logged, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	upstream, _ := url.Parse("http://127.0.0.1:9081")
+	req := httptest.NewRequest(http.MethodGet, "https://gateway.example.com/browser/wss", nil)
+	req.RemoteAddr = "203.0.113.5:54321"
+	rec := httptest.NewRecorder()
+
+	proxyErrorHandler(upstream)(rec, req, errors.New("dial tcp 127.0.0.1:9081: connect: connection refused"))
+
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadGateway)
+	}
+	if !strings.Contains(rec.Body.String(), "bad gateway") {
+		t.Fatalf("body = %q, want a bad gateway marker", rec.Body.String())
+	}
+
+	out := logged.String()
+	for _, want := range []string{
+		"proxy upstream error",
+		"dial tcp 127.0.0.1:9081",
+		"gateway.example.com",
+		"/browser/wss",
+		"203.0.113.5",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("log %q does not contain %q", out, want)
+		}
+	}
+}
+
+func TestReverseProxyConnUpstreamUnreachable(t *testing.T) {
+	// Bind and release a port so the upstream dial is refused.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	upstream, _ := url.Parse("http://" + ln.Addr().String())
+	_ = ln.Close()
+
+	serverConn, clientConn := net.Pipe()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- reverseProxyConn(serverConn, &siteEntry{upstream: upstream}, &atomic.Bool{})
+	}()
+
+	// net.Pipe is synchronous; write and read must run concurrently.
+	go func() {
+		_, _ = clientConn.Write([]byte("GET /test HTTP/1.1\r\nHost: a.example.com\r\n\r\n"))
+	}()
+
+	_ = clientConn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	buf := make([]byte, 4096)
+	n, _ := clientConn.Read(buf)
+	_ = clientConn.Close()
+
+	resp := string(buf[:n])
+	if !strings.Contains(resp, "502 Bad Gateway") || !strings.Contains(resp, "bad gateway") {
+		t.Fatalf("response is not a proxy error: %q", resp)
+	}
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("reverseProxyConn error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("reverseProxyConn timed out")
+	}
+}
+
 type connWithRemoteAddr struct {
 	net.Conn
 	addr net.Addr

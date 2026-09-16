@@ -583,6 +583,25 @@ func setEdgeProxyHeaders(req *http.Request, forwardedHost, remoteAddr string) {
 	}
 }
 
+// proxyErrorHandler replaces the default ReverseProxy error handler, which
+// only logs a bare "http: proxy error: <err>". With site routes and path
+// overrides the routing context is what identifies which upstream failed
+// (the SNI-matched route host, the request path and the upstream URL).
+func proxyErrorHandler(upstream *url.URL) func(http.ResponseWriter, *http.Request, error) {
+	return func(w http.ResponseWriter, req *http.Request, err error) {
+		slog.Warn("proxy upstream error",
+			"error", err,
+			"upstream", upstream.String(),
+			"method", req.Method,
+			"host", req.Host,
+			"path", req.URL.Path,
+			"remote", req.RemoteAddr)
+
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte("bad gateway\n"))
+	}
+}
+
 // reverseProxyConn serves the decrypted HTTP connection through a reverse
 // proxy to the upstream selected per request by the site entry's path routes.
 // Reverse proxies and their transports are created lazily per upstream and
@@ -607,6 +626,7 @@ func reverseProxyConn(conn net.Conn, entry *siteEntry, hijacked *atomic.Bool) er
 				stripResidualForwardingHeaders(pr.Out.Header)
 				setEdgeProxyHeaders(pr.Out, pr.In.Host, pr.In.RemoteAddr)
 			},
+			ErrorHandler: proxyErrorHandler(upstream),
 		}
 		transport := &http.Transport{
 			Proxy: http.ProxyFromEnvironment,
