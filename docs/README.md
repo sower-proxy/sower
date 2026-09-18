@@ -15,6 +15,7 @@ Cross-document references must point to root-level design documents only. Never 
 | Document | Description |
 |----------|-------------|
 | [ARCHITECTURE.md](../ARCHITECTURE.md) | System boundary, layer responsibilities, data flows, design decisions |
+| [security.md](security.md) | sowerd edge threat model, anti-probing layers, unknown-SNI certificate fallback, rejected directions |
 
 ## Plans
 
