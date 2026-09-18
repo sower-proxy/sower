@@ -101,7 +101,9 @@ jobs:
       - name: Prepare packaging files
         run: |
           cp .github/sower.toml .
-          cp .github/${{ matrix.service }} .
+          # matrix.service lists space-separated file names ("sower.service
+          # sowerd.service"); prefix each with .github/ individually.
+          for s in ${{ matrix.service }}; do cp ".github/$s" .; done
 
       - name: Build binaries
         env:
