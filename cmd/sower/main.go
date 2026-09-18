@@ -43,8 +43,11 @@ var (
 )
 
 // defaultMemoryLimitMiB bounds the Go heap unless GOMEMLIMIT or
-// SOWER_MEMORY_LIMIT_MB overrides it; see init for the rationale.
-const defaultMemoryLimitMiB = 128
+// SOWER_MEMORY_LIMIT_MB overrides it. It must stay well above the live rule
+// heap: the full pexcn rule sets keep ~105MB alive, and a limit at that level
+// pins the GC goal to the live heap, so every allocation triggers a full-heap
+// mark (128MiB burned ~39% CPU on an otherwise idle gateway).
+const defaultMemoryLimitMiB = 512
 
 // maxMemoryLimitMiB caps the SOWER_MEMORY_LIMIT_MB override so the MiB
 // shift cannot overflow int64.
@@ -76,6 +79,34 @@ func logConfigLoadError(err error, cfg config.SowerConfig) {
 	slog.Error("load config", "error", err, "remote_addr", cfg.Remote.Addr)
 }
 
+// memoryLimitMiB resolves the soft heap limit for this process.
+//
+//	-1 => the soft limit is explicitly disabled (apply math.MaxInt64)
+//	 0 => leave the limit alone (an explicit GOMEMLIMIT is in charge)
+//	>0 => apply that many MiB
+func memoryLimitMiB(getenv func(string) string) int64 {
+	if getenv("GOMEMLIMIT") != "" {
+		return 0
+	}
+
+	v := getenv("SOWER_MEMORY_LIMIT_MB")
+	if v == "" {
+		return defaultMemoryLimitMiB
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil {
+		return defaultMemoryLimitMiB
+	}
+	switch {
+	case n == 0:
+		return -1
+	case n > 0 && n <= maxMemoryLimitMiB:
+		return n
+	default:
+		return defaultMemoryLimitMiB
+	}
+}
+
 func init() {
 	fi, _ := os.Stdout.Stat()
 	noColor := (fi.Mode() & os.ModeCharDevice) == 0
@@ -97,31 +128,23 @@ func init() {
 		os.Exit(1)
 	}
 
-	// Bound the Go heap with a soft memory limit. The default rule sets
-	// (adlist/chinalist/gfwlist) build ~40MB of suffix trees, and GOGC's
-	// 2x target on top of that pushes resident memory toward 250MB on a
-	// gateway that mostly idles. The soft limit makes GC reclaim eagerly
-	// and return memory to the OS.
+	// Bound the Go heap with a soft memory limit so a mostly idle gateway
+	// returns memory to the OS instead of holding GOGC's 2x headroom.
+	//
+	// The limit must stay well above the live rule heap: the full pexcn rule
+	// sets keep ~105MB alive, and a limit at that level pins the GC goal to
+	// the live heap, so every allocation triggers a full-heap mark. 512MiB
+	// leaves the usual headroom while still capping resident memory.
 	//
 	// Precedence: an explicit standard GOMEMLIMIT wins; otherwise the
-	// default 128MiB applies unless SOWER_MEMORY_LIMIT_MB overrides it
-	// (a positive MiB value, or 0 to disable the soft limit). Malformed or
-	// negative values leave the default in place.
-	if os.Getenv("GOMEMLIMIT") == "" {
-		var limit int64 = defaultMemoryLimitMiB
-		if v := os.Getenv("SOWER_MEMORY_LIMIT_MB"); v != "" {
-			if n, err := strconv.ParseInt(v, 10, 64); err == nil {
-				switch {
-				case n == 0:
-					debug.SetMemoryLimit(math.MaxInt64) // disable
-				case n > 0 && n <= maxMemoryLimitMiB:
-					limit = n
-				}
-			}
-		}
-		if limit > 0 {
-			debug.SetMemoryLimit(limit << 20)
-		}
+	// default applies unless SOWER_MEMORY_LIMIT_MB overrides it (a positive
+	// MiB value, or 0 to disable the soft limit). Malformed or negative
+	// values leave the default in place.
+	switch limit := memoryLimitMiB(os.Getenv); {
+	case limit < 0:
+		debug.SetMemoryLimit(math.MaxInt64) // disable
+	case limit > 0:
+		debug.SetMemoryLimit(limit << 20)
 	}
 
 	logLevel.Set(conf.LogLevel)

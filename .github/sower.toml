@@ -1,3 +1,11 @@
+# Sower client configuration packaged with releases.
+#
+# The binary caps its Go heap with a 512 MiB soft memory limit by default; that
+# limit has to stay well above the ~105MB live rule heap, because a limit at
+# that level pins the GC goal to the live heap and burns CPU on every
+# allocation. Override it with SOWER_MEMORY_LIMIT_MB in the service environment
+# (0 disables the soft limit), not with a TOML field.
+
 # Remote upstream connection.
 [remote]
 type = "sower"

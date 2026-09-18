@@ -263,3 +263,33 @@ func TestLogConfigLoadErrorRedactsRemotePassword(t *testing.T) {
 		t.Fatalf("load-failure log missing error context: %s", out)
 	}
 }
+
+func TestMemoryLimitMiB(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		env  map[string]string
+		want int64
+	}{
+		{name: "default", want: defaultMemoryLimitMiB},
+		{name: "explicit GOMEMLIMIT wins", env: map[string]string{"GOMEMLIMIT": "1GiB"}, want: 0},
+		{name: "override", env: map[string]string{"SOWER_MEMORY_LIMIT_MB": "256"}, want: 256},
+		{name: "zero disables the soft limit", env: map[string]string{"SOWER_MEMORY_LIMIT_MB": "0"}, want: -1},
+		{name: "garbage keeps the default", env: map[string]string{"SOWER_MEMORY_LIMIT_MB": "lots"}, want: defaultMemoryLimitMiB},
+		{name: "negative keeps the default", env: map[string]string{"SOWER_MEMORY_LIMIT_MB": "-5"}, want: defaultMemoryLimitMiB},
+		{name: "above the cap keeps the default", env: map[string]string{"SOWER_MEMORY_LIMIT_MB": strconv.FormatInt(maxMemoryLimitMiB+1, 10)}, want: defaultMemoryLimitMiB},
+		{name: "at the cap", env: map[string]string{"SOWER_MEMORY_LIMIT_MB": strconv.FormatInt(maxMemoryLimitMiB, 10)}, want: maxMemoryLimitMiB},
+		{name: "GOMEMLIMIT beats the override", env: map[string]string{"GOMEMLIMIT": "1GiB", "SOWER_MEMORY_LIMIT_MB": "256"}, want: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := memoryLimitMiB(func(k string) string { return tt.env[k] })
+			if got != tt.want {
+				t.Fatalf("memoryLimitMiB(%v) = %d, want %d", tt.env, got, tt.want)
+			}
+		})
+	}
+}

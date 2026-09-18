@@ -5,6 +5,11 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=/etc/sower
+# Keep the soft heap limit well above the ~105MB live rule heap: a limit at
+# that level pins the GC goal to the live heap and burns CPU on every
+# allocation. Matches the binary default and is declared here so a deployment
+# can tune it without rebuilding (0 disables the soft limit).
+Environment=SOWER_MEMORY_LIMIT_MB=512
 ExecStart=/usr/local/bin/sower -c /etc/sower/sower.toml
 Restart=on-failure
 RestartSec=1min
