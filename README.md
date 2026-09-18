@@ -16,6 +16,51 @@ Sower 是一个跨平台的智能分流代理工具。
 
 如果你已经有机场、VPS、Clash、V2Ray、SSR 或其它 SOCKS5 上游，推荐先把 Sower 当成“内网智能分流节点”使用，不一定要部署 `sowerd`。
 
+## 安装
+
+### 一键安装（Linux / macOS / OpenWrt）
+
+```shell
+curl -fsSL https://raw.githubusercontent.com/sower-proxy/sower/master/install.sh | sudo sh
+```
+
+脚本会识别平台与 init 系统，下载对应版本的 release、安装 `sower` 二进制、生成初始配置并注册系统服务：
+
+| 平台 | 服务方式 | 服务文件 |
+| --- | --- | --- |
+| Linux（systemd） | systemd | `/etc/systemd/system/sower.service` |
+| OpenWrt / iStoreOS | procd | `/etc/init.d/sower` |
+| macOS | launchd | `/Library/LaunchDaemons/sower.plist` |
+
+安装完成后编辑 `/etc/sower/sower.toml`（macOS 是 `/usr/local/etc/sower/sower.toml`），填好 `remote.addr` 与 `remote.password`，再重启服务。重复执行脚本等于原地升级，已有配置不会被覆盖。
+
+常用参数：
+
+```shell
+sudo sh install.sh --version v1.6.0                 # 安装/回退到指定版本
+sudo sh install.sh --mirror https://<你的反代>/     # 给 GitHub 下载地址加前缀
+sudo sh install.sh --dry-run                        # 只打印将要执行的操作
+sudo sh install.sh --service none \
+  --prefix "$HOME/.local/bin" --config-dir "$HOME/.config/sower"   # 只装二进制
+```
+
+远程安装默认会校验 release 里的 `SHA256SUMS`；老版本没有该文件时，需要显式加 `--insecure-skip-verify` 才会继续。`install.sh --help` 可以查看全部参数。
+
+### 手动安装
+
+从 [Releases](https://github.com/sower-proxy/sower/releases) 下载对应平台的 `sower-<平台>.tar.gz`，解压后得到 `sower`、`sowerd`、示例配置和服务文件：
+
+```shell
+tar -xzf sower-linux-amd64.tar.gz
+sudo install -m 0755 sower /usr/local/bin/sower
+sudo install -d -m 0755 /etc/sower
+sudo install -m 0600 sower.toml /etc/sower/sower.toml
+sudo install -m 0644 sower.service /etc/systemd/system/sower.service
+sudo systemctl enable --now sower
+```
+
+Windows 目前没有一键脚本：解压后运行 `sower.exe -c sower.toml`，或参考 `sower_run.vbs` 自行建立开机启动项。
+
 ## 推荐用法一：Tailscale + Sower 节点
 
 对新手来说，最省事的方式是：选一台常开的设备运行 `sower`，让它加入 Tailscale，其它手机、电脑、平板也加入同一个 Tailscale 网络。

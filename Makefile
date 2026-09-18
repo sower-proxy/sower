@@ -3,9 +3,14 @@ GO:=CGO_ENABLED=0 go
 
 default: test build
 
-test: web
+test: web check-scripts
 	${GO} vet ./...
 	${GO} test ./...
+
+.PHONY: check-scripts
+check-scripts:
+	sh -n install.sh
+	sh -n .github/sower.init
 
 build: sower sowerd
 .PHONY: web

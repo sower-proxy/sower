@@ -1,6 +1,8 @@
 [Unit]
 Description=sower client service
-After=network.target
+Documentation=https://github.com/sower-proxy/sower
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
@@ -11,8 +13,10 @@ WorkingDirectory=/etc/sower
 # can tune it without rebuilding (0 disables the soft limit).
 Environment=SOWER_MEMORY_LIMIT_MB=512
 ExecStart=/usr/local/bin/sower -c /etc/sower/sower.toml
-Restart=on-failure
-RestartSec=1min
+# The system resolver may point at this service, so it must come back fast.
+Restart=always
+RestartSec=3
+LimitNOFILE=65535
 
 [Install]
 WantedBy=multi-user.target

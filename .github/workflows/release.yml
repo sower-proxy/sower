@@ -34,37 +34,37 @@ jobs:
           - name: linux-amd64
             goos: linux
             goarch: amd64
-            service: sower.service sowerd.service
+            service: sower.service sowerd.service sower.init
           # Linux: ARM servers (Kunpeng/Graviton), ARM NAS, Raspberry Pi 4/5, routers
           - name: linux-arm64
             goos: linux
             goarch: arm64
-            service: sower.service sowerd.service
+            service: sower.service sowerd.service sower.init
           # Linux: legacy NAS (Synology/QNAP ARM models), Raspberry Pi 2/3
           - name: linux-arm
             goos: linux
             goarch: arm
             goarm: "7"
-            service: sower.service sowerd.service
+            service: sower.service sowerd.service sower.init
           # Linux: emerging RISC-V boards (Orange Pi RV, VisionFive, SG2042)
           - name: linux-riscv64
             goos: linux
             goarch: riscv64
-            service: sower.service sowerd.service
+            service: sower.service sowerd.service sower.init
           # Linux: LoongArch (Loongson) for the local ecosystem
           - name: linux-loong64
             goos: linux
             goarch: loong64
-            service: sower.service sowerd.service
+            service: sower.service sowerd.service sower.init
           # Linux: legacy routers
           - name: linux-mips
             goos: linux
             goarch: mips
-            service: sower.service sowerd.service
+            service: sower.service sowerd.service sower.init
           - name: linux-mipsle
             goos: linux
             goarch: mipsle
-            service: sower.service sowerd.service
+            service: sower.service sowerd.service sower.init
           # macOS: Intel Macs
           - name: darwin-amd64
             goos: darwin
@@ -135,7 +135,11 @@ jobs:
           path: artifacts
           pattern: sower-*.tar.gz
           merge-multiple: true
+      - name: Generate checksums
+        run: |
+          cd artifacts
+          sha256sum sower-*.tar.gz > SHA256SUMS
       - uses: ncipollo/release-action@v1
         with:
-          artifacts: "artifacts/*.tar.gz"
+          artifacts: "artifacts/*.tar.gz,artifacts/SHA256SUMS"
           token: ${{ secrets.GITHUB_TOKEN }}
