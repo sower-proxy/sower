@@ -218,6 +218,7 @@ func buildTLSConfig(cacheDir string, cfg config.SowerdConfig) (*autocert.Manager
 	}
 
 	if cfg.Cert.Cert == "" {
+		tlsConf.GetCertificate = getCertificateWithFallback(certManager, cfg)
 		return certManager, tlsConf, nil
 	}
 
@@ -229,6 +230,34 @@ func buildTLSConfig(cacheDir string, cfg config.SowerdConfig) (*autocert.Manager
 	tlsConf.GetCertificate = nil
 	tlsConf.Certificates = []tls.Certificate{cert}
 	return certManager, tlsConf, nil
+}
+
+// getCertificateWithFallback answers the TLS handshake for names outside the
+// issuance whitelist instead of failing it. Real sites present their default
+// vhost certificate for arbitrary SNI, so a handshake failure on unknown
+// names is itself an active-probing signal. Whitelisted names keep the plain
+// autocert path: their failures (ACME issuance, cache) surface as-is and are
+// never masked by a wrong-name certificate.
+func getCertificateWithFallback(m *autocert.Manager, cfg config.SowerdConfig) func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+	domains := certIssueDomains(cfg)
+	whitelist := make(map[string]struct{}, len(domains))
+	for _, d := range domains {
+		whitelist[strings.ToLower(d)] = struct{}{}
+	}
+	return func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+		if _, ok := whitelist[strings.ToLower(hello.ServerName)]; ok {
+			return m.GetCertificate(hello)
+		}
+		if len(domains) == 0 {
+			return m.GetCertificate(hello)
+		}
+		// Carry the client's capabilities over so autocert derives the same
+		// cache key (ECDSA vs RSA) it would for a direct visit; a bare hello
+		// would count as non-ECDSA and force a needless RSA issuance.
+		fallbackHello := *hello
+		fallbackHello.ServerName = domains[0]
+		return m.GetCertificate(&fallbackHello)
+	}
 }
 
 // certIssueDomains collects the deduplicated domain whitelist for autocert

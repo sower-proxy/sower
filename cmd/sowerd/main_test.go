@@ -1,11 +1,22 @@
 package main
 
 import (
+	"bytes"
+	"context"
+	"crypto"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha1"
 	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/base64"
+	"encoding/pem"
 	"errors"
 	"log/slog"
+	"math/big"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -18,6 +29,8 @@ import (
 
 	"github.com/sower-proxy/sower/config"
 	transportSower "github.com/sower-proxy/sower/transport/sower"
+	"golang.org/x/crypto/acme"
+	"golang.org/x/crypto/acme/autocert"
 )
 
 func TestSanitizeConfig(t *testing.T) {
@@ -1109,4 +1122,186 @@ func startRawTCPServer(t *testing.T, body string) string {
 	}()
 
 	return ln.Addr().String()
+}
+
+// testCertBlob builds an autocert-format cache entry (private key PEM first,
+// certificate PEM second) for a self-signed certificate of the given name.
+// The key type is caller-chosen: autocert keys its cache by client
+// capabilities, so a zero-value ClientHelloInfo (non-ECDSA) resolves to the
+// "domain+rsa" key while an ECDSA-capable hello resolves to the bare domain.
+func testCertBlob(t *testing.T, name string, key crypto.Signer) ([]byte, tls.Certificate) {
+	t.Helper()
+
+	tmpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: name},
+		DNSNames:              []string{name},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment | x509.KeyUsageCertSign,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, key.Public(), key)
+	if err != nil {
+		t.Fatalf("create certificate: %v", err)
+	}
+	leaf, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatalf("parse certificate: %v", err)
+	}
+
+	var keyBlock *pem.Block
+	switch k := key.(type) {
+	case *rsa.PrivateKey:
+		keyBlock = &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(k)}
+	case *ecdsa.PrivateKey:
+		keyDER, err := x509.MarshalECPrivateKey(k)
+		if err != nil {
+			t.Fatalf("marshal ECDSA key: %v", err)
+		}
+		keyBlock = &pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}
+	default:
+		t.Fatalf("unsupported key type %T", key)
+	}
+	blob := append(pem.EncodeToMemory(keyBlock),
+		pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})...)
+	return blob, tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key, Leaf: leaf}
+}
+
+// stubAutocertCache serves ECDSA and RSA certificate blobs under autocert's
+// capability-derived keys and reports a cache miss otherwise, so autocert
+// falls through to issuance.
+type stubAutocertCache struct {
+	ecdsaBlob []byte // bare-domain key
+	rsaBlob   []byte // "domain+rsa" key
+}
+
+func (c stubAutocertCache) Get(_ context.Context, name string) ([]byte, error) {
+	switch name {
+	case "primary.example.com":
+		if c.ecdsaBlob != nil {
+			return c.ecdsaBlob, nil
+		}
+	case "primary.example.com+rsa":
+		if c.rsaBlob != nil {
+			return c.rsaBlob, nil
+		}
+	}
+	return nil, autocert.ErrCacheMiss
+}
+
+func (stubAutocertCache) Put(context.Context, string, []byte) error { return nil }
+
+func (stubAutocertCache) Delete(context.Context, string) error { return nil }
+
+func TestGetCertificateFallbackForUnknownSNI(t *testing.T) {
+	t.Parallel()
+
+	rsaBlob, rsaCert := testCertBlob(t, "primary.example.com", mustRSAKey(t))
+	ecdsaBlob, ecdsaCert := testCertBlob(t, "primary.example.com", mustECDSAKey(t))
+	manager := &autocert.Manager{
+		Prompt:     autocert.AcceptTOS,
+		Cache:      stubAutocertCache{ecdsaBlob: ecdsaBlob, rsaBlob: rsaBlob},
+		HostPolicy: autocert.HostWhitelist("primary.example.com"),
+		// Keep the test hermetic even if the cache lookup misses.
+		Client: &acme.Client{DirectoryURL: "https://127.0.0.1:1/directory"},
+	}
+
+	var cfg config.SowerdConfig
+	cfg.LogLevel = slog.LevelDebug
+	cfg.ServeIP = "0.0.0.0"
+	cfg.Password = "secret"
+	cfg.FakeSite = "127.0.0.1:8080"
+	cfg.Cert.Domains = []string{"primary.example.com"}
+
+	getCert := getCertificateWithFallback(manager, cfg)
+
+	// An ECDSA-capable hello must be answered with the ECDSA certificate: the
+	// fallback carries the client's capabilities over to autocert, and a
+	// regression to a bare ServerName hello would silently serve the RSA one.
+	ecdsaHello := &tls.ClientHelloInfo{
+		ServerName:       "prober.example.org",
+		SignatureSchemes: []tls.SignatureScheme{tls.ECDSAWithP256AndSHA256},
+		SupportedCurves:  []tls.CurveID{tls.CurveP256},
+		CipherSuites:     []uint16{tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256},
+	}
+
+	tests := []struct {
+		name  string
+		hello *tls.ClientHelloInfo
+		want  tls.Certificate
+	}{
+		// Active probers use arbitrary or empty SNI; the handshake must be
+		// answered with the primary domain's certificate, like a real site's
+		// default vhost, instead of failing at the TLS layer. Zero-value
+		// hellos resolve to autocert's "domain+rsa" cache key.
+		{name: "unknown SNI gets fallback cert", hello: &tls.ClientHelloInfo{ServerName: "prober.example.org"}, want: rsaCert},
+		{name: "empty SNI gets fallback cert", hello: &tls.ClientHelloInfo{}, want: rsaCert},
+		{name: "whitelisted SNI gets its cert", hello: &tls.ClientHelloInfo{ServerName: "primary.example.com"}, want: rsaCert},
+		{name: "unknown SNI with ECDSA-capable hello gets ECDSA cert", hello: ecdsaHello, want: ecdsaCert},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := getCert(tt.hello)
+			if err != nil {
+				t.Fatalf("GetCertificate(%q): %v", tt.hello.ServerName, err)
+			}
+			if len(got.Certificate) != 1 || !bytes.Equal(got.Certificate[0], tt.want.Certificate[0]) {
+				t.Fatalf("GetCertificate(%q) returned an unexpected certificate", tt.hello.ServerName)
+			}
+		})
+	}
+}
+
+func mustRSAKey(t *testing.T) *rsa.PrivateKey {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate RSA key: %v", err)
+	}
+	return key
+}
+
+func mustECDSAKey(t *testing.T) *ecdsa.PrivateKey {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate ECDSA key: %v", err)
+	}
+	return key
+}
+
+func TestGetCertificateFallbackNeverMasksIssuanceErrors(t *testing.T) {
+	t.Parallel()
+
+	// Empty cache + a dead ACME directory: any whitelisted name falls through
+	// to issuance and fails. The error must surface as-is, not be masked by a
+	// wrong-name fallback certificate.
+	manager := &autocert.Manager{
+		Prompt:     autocert.AcceptTOS,
+		Cache:      stubAutocertCache{},
+		HostPolicy: autocert.HostWhitelist("primary.example.com"),
+		Client:     &acme.Client{DirectoryURL: "https://127.0.0.1:1/directory"},
+	}
+
+	var cfg config.SowerdConfig
+	cfg.LogLevel = slog.LevelDebug
+	cfg.ServeIP = "0.0.0.0"
+	cfg.Password = "secret"
+	cfg.FakeSite = "127.0.0.1:8080"
+	cfg.Cert.Domains = []string{"primary.example.com"}
+
+	getCert := getCertificateWithFallback(manager, cfg)
+
+	got, err := getCert(&tls.ClientHelloInfo{ServerName: "primary.example.com"})
+	if err == nil {
+		t.Fatal("issuance error was masked by a fallback certificate")
+	}
+	if got != nil {
+		t.Fatalf("expected no certificate on issuance failure, got %v", got)
+	}
 }
