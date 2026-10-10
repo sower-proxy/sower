@@ -335,7 +335,9 @@ write_root_file() {
 install_systemd() {
 	if [ "$DRY_RUN" = "yes" ]; then
 		log "[dry-run] write /etc/systemd/system/sower.service"
-		log "[dry-run] systemctl daemon-reload && systemctl enable --now sower"
+		log "[dry-run] systemctl daemon-reload"
+		log "[dry-run] systemctl enable sower"
+		log "[dry-run] systemctl restart sower"
 		return 0
 	fi
 	tpl="$TMP/extract/sower.service"
@@ -364,6 +366,7 @@ install_procd() {
 install_launchd() {
 	if [ "$DRY_RUN" = "yes" ]; then
 		log "[dry-run] write /Library/LaunchDaemons/sower.plist"
+		log "[dry-run] launchctl unload -w /Library/LaunchDaemons/sower.plist (failure ignored)"
 		log "[dry-run] launchctl load -w /Library/LaunchDaemons/sower.plist"
 		return 0
 	fi
