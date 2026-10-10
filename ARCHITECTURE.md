@@ -154,7 +154,6 @@ For non-transport fallback traffic, it can route by TLS SNI to per-domain upstre
 - `sowerd -i` also requires root because it writes system-level files for self-deployment.
 - ACME mode requires port `80` to be reachable from the public internet.
 - Remote rule download failures stop startup after bounded retries before local listeners are exposed.
-- `sowerd` custom certificate mode must use a certificate whose SANs cover all configured `site_routes` domains.
 - In ACME mode the handshake is answered for arbitrary SNI with the first whitelist domain's certificate (unknown-SNI fallback); keep that entry concrete. See [docs/security.md](docs/security.md).
 
 ## Related Documents
