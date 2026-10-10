@@ -1,7 +1,7 @@
 # Admin 规则持久化与配置页设计
 
 Status: 已实现并部署验证（2026-08-07）；本文为历史计划，非权威来源。权威规则见根目录 `ARCHITECTURE.md`。
-Supersedes: `docs/plans/admin-console.md` 中的 MVP 边界「规则变更仅运行期生效，重启后重置，不改写 TOML、不持久化」
+Supersedes: 早期 admin console MVP 计划的边界「规则变更仅运行期生效，重启后重置，不改写 TOML、不持久化」
 Scope: `cmd/sower` admin 控制台
 
 ## 后续演进（超出本文 v1 范围，已实现）
@@ -174,4 +174,4 @@ PATCH /api/config
 2. 规则持久化接通（RuleManager 适配层 + 启动顺序 + GC）+ 规则页保存状态/Undo/变更汇总；
 3. `slog.LevelVar` 接线 + `router.SetDNS`；
 4. `GET/PATCH /api/config` + 配置页（展示先行，编辑随后）；
-5. 文档：定稿后回写 `docs/plans/admin-console.md` 的范围说明（或沉淀为主设计文档）。
+5. 文档：定稿后把规则与配置规则沉淀到主设计文档（`ARCHITECTURE.md` 设计决策）。

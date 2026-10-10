@@ -103,6 +103,28 @@ Decisions recorded here so they are not re-litigated without new evidence:
   (golang/go#71128). The per-SNI ALPN workaround (h1-only for WS-bearing
   routes) was declined: it makes "new WS routes must opt out of h2" a silent
   failure mode on an anti-censorship edge.
+- **Wildcard `site_routes` domains** (`*.example.com`) — rejected in
+  `config/sowerd.go` (`validateSiteRoutes`) and must stay rejected. SNI
+  dispatch is an exact-match map (`siteRouter.lookup`); a wildcard either
+  collapses every subdomain onto one upstream — losing the per-domain
+  routing it was meant to add — or needs priority/ambiguity rules on the
+  edge's hottest path. `autocert.HostWhitelist` is exact-match too, so
+  wildcard issuance would additionally force a hand-written `HostPolicy`.
+- **Additional listen addresses and configurable 80/443 ports** — one
+  `serve_ip` and hardcoded 80/443 are deliberate: an edge listening on a
+  non-standard port is itself an active-probing signal. Multiple public
+  addresses are served by one instance per address, not by widening this
+  listener. `serve_ip` may be a concrete address to bind a single interface.
+- **Per-site certificate binding** — the edge's certificate set is
+  independent of the `site_routes` table (autocert issues for the union of
+  routed domains plus `cert.domains`; static mode serves one pair for every
+  SNI). Keeping it independent means a prober cannot enumerate configured
+  sites from the certificate. Multi-SAN certificates already cover the
+  legitimate multi-domain case.
+- **Domain routing on plain HTTP (:80)** — the :80 listener only completes
+  ACME challenges and 308-redirects public traffic to HTTPS; the `fake_site`
+  directory is served there on loopback only (`isLocalRemoteAddr`). Routing
+  :80 by domain would hand out a cleartext bypass of the TLS edge.
 
 ## Residual Accepted Signals
 
