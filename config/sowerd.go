@@ -26,10 +26,20 @@ fake_site = "/var/www"            # Fallback fake site directory or address (def
 # When a TLS connection does not match sower transport,
 # the SNI is looked up here. Unmatched connections fall through to fake_site.
 # Custom certificate mode requires the certificate SANs to cover all routed domains.
+# Route domains become public once autocert issues their certificates
+# (Certificate Transparency), so an upstream that cannot authenticate its own
+# visitors needs the optional auth gate below.
 #
 # [[site_routes]]
 # domains = ["a.example.com", "b.example.com"]
 # upstream = "http://127.0.0.1:8080"
+#
+# [site_routes.auth]
+# username = "admin"              # Both fields are required to enable the gate;
+# password = "change_me"          # an empty block leaves the route open.
+# The gate also covers WebSocket upgrades, but browsers cannot set Authorization
+# on a WS handshake and reconnecting clients feed the per-IP lockout: verify
+# before gating one (see docs/security.md).
 #
 # [site_routes.routes]
 # "/ws" = "http://127.0.0.1:8082"
@@ -37,6 +47,9 @@ fake_site = "/var/www"            # Fallback fake site directory or address (def
 # [[site_routes]]
 # domains = ["c.example.com"]
 # upstream = "https://backend.example.com"
+#
+# URL userinfo credentials are sent to the upstream as HTTP Basic auth:
+# upstream = "http://user:pass@127.0.0.1:8080"
 
 # SSL/TLS certificate configuration
 [cert]
@@ -56,6 +69,21 @@ type SiteRoute struct {
 	Domains  []string          `usage:"exact domain names for this route"`
 	Upstream string            `usage:"upstream URL (http:// or https://)"`
 	Routes   map[string]string `usage:"path-prefix to upstream URL overrides (e.g. /ws = http://127.0.0.1:8082)"`
+	// Auth is an optional edge-side gate for visitors of this route. The
+	// route domains are public (Certificate Transparency), so an upstream that
+	// cannot authenticate its own visitors is exposed; the edge is the only
+	// place to insert a gate because sowerd owns 80/443 on the host.
+	Auth SiteRouteAuth `usage:"optional HTTP Basic visitor gate (leave empty to disable)"`
+}
+
+// SiteRouteAuth gates a site route behind HTTP Basic credentials. Both
+// fields must be set to enable the gate; an empty block leaves the route
+// open. The mechanism is deliberately HTTP Basic only: it needs no session
+// state and works for non-browser clients, at the cost of a per-origin
+// browser credential cache and no logout.
+type SiteRouteAuth struct {
+	Username string `usage:"visitor user name for the route's HTTP Basic gate"`
+	Password string `usage:"visitor password for the route's HTTP Basic gate"`
 }
 
 // SowerdConfig represents the configuration for sowerd daemon
@@ -155,6 +183,10 @@ func validateSiteRoutes(routes []SiteRoute) error {
 			return fmt.Errorf("site_routes[%d]: %w", i, err)
 		}
 
+		if err := validateSiteRouteAuth(i, r.Auth); err != nil {
+			return err
+		}
+
 		for path, upstream := range r.Routes {
 			if !strings.HasPrefix(path, "/") {
 				return fmt.Errorf("site_routes[%d].routes: path %q must start with /", i, path)
@@ -200,6 +232,23 @@ func validateUpstreamURL(raw string) error {
 	}
 	if u.Host == "" {
 		return fmt.Errorf("upstream must have a host")
+	}
+	return nil
+}
+
+// validateSiteRouteAuth rejects a half-configured visitor gate: a route
+// whose credentials are only partly set would otherwise run either open or
+// with a credential nobody can present. An empty block means "no gate".
+func validateSiteRouteAuth(i int, auth SiteRouteAuth) error {
+	if auth.Username == "" && auth.Password == "" {
+		return nil
+	}
+	if auth.Username == "" || auth.Password == "" {
+		return fmt.Errorf("site_routes[%d].auth: username and password must be set together", i)
+	}
+	if strings.ContainsRune(auth.Username, ':') {
+		// RFC 7617 splits the decoded credential at the first colon.
+		return fmt.Errorf("site_routes[%d].auth: username must not contain ':'", i)
 	}
 	return nil
 }

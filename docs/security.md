@@ -49,9 +49,72 @@ Dispatch order for non-transport traffic (`cmd/sowerd/main.go:handleConn`):
 2. Otherwise, a valid HTTP/1.1 request line → reverse proxy to `fake_site`.
 3. Otherwise → raw TCP relay to `fake_site`.
 
+A matched route is always fed to the reverse proxy, HTTP request line or not:
+`site_routes` serves HTTP/1.1 only. Non-HTTP traffic on a routed domain fails
+HTTP parsing rather than being relayed, which is also why an HTTP-layer visitor
+gate (below) covers the route's entire surface.
+
 Transport auth failures fall back to the same website paths (never RST, never
 hang), so a prober without the password observes ordinary site behavior on
 every probe.
+
+## Site Route Visitor Gate
+
+`site_routes` upstreams are public: autocert issues certificates for the routed
+domains on demand, and issued certificates are published in Certificate
+Transparency logs. The optional per-route `site_routes.auth` block gates the
+route with HTTP Basic credentials, for upstreams that cannot authenticate their
+own visitors — the edge is the only insertion point, because sowerd owns 80/443
+on the host.
+
+Rules:
+
+- Opt-in and default off. A route without `auth` (or with both fields empty)
+  behaves exactly as before, including passing the client's `Authorization`
+  header through to the upstream.
+- The gate runs in the reverse-proxy handler (`reverseProxyConn`), so it covers
+  the route's whole surface: path-prefix overrides and WebSocket upgrades
+  included. The sower transport path is dispatched before SNI routing and
+  carries its own frame-checksum authentication; it is never gated.
+- Credentials are compared in constant time (`sha256` + `subtle`, so length
+  does not leak).
+- A passing request has its `Authorization` header removed. The edge
+  credential authenticates the visitor to the edge, not to the upstream:
+  forwarding it would copy the edge password into the upstream and its logs,
+  and would collide with an upstream realm that carries the same name.
+- Failures are throttled per direct peer address: `authMaxFails` failed
+  attempts from one source accumulate (there is no decay window; only a request
+  that passes the gate clears the count) and lock that source out for
+  `authLockDuration`. The failure map is bounded (`authMaxEntries`) so
+  source-IP rotation cannot grow it without bound. A lockout only ever affects
+  the IP that caused it; the counter is shared by all gated routes so a visitor
+  cannot get a fresh budget by moving between them.
+- Upstream credentials are a separate mechanism: URL userinfo
+  (`upstream = "http://user:pass@host"`) is sent to the upstream as Basic
+  credentials. `net/http` turns userinfo into that header only in
+  `http.Client`; `httputil.ReverseProxy` round-trips through a `Transport` and
+  drops it, so sowerd sets the header explicitly. Upstream passwords are
+  redacted in error logs (`url.URL.Redacted`).
+- ACME is unaffected: HTTP-01 runs on `:80` and TLS-ALPN-01 completes during
+  the handshake, both before any request reaches the reverse proxy.
+- What it is not: a substitute for the upstream's own authentication, an
+  account system (one credential per route, no session, no logout), or a
+  second factor. A weak password stays weak against a distributed or
+  IPv6-rotating attacker. Cross-origin browser calls that need a CORS
+  preflight also stay broken: a preflight carries no credentials, so the edge
+  rejects it before the cross-origin request is even attempted.
+- Browser WebSocket clients are the open edge case. The gate does run on the
+  `Upgrade` request, but script cannot set `Authorization` on a WebSocket
+  handshake: a browser can only pass it by replaying the origin's cached Basic
+  credential, and whether it does so is browser-specific and unverified here.
+  The gate is per-route, so a `/ws` path cannot be exempted while the rest of
+  the route stays gated. A reconnecting client makes this self-inflicted: every
+  failed handshake feeds the shared per-IP counter, so an auto-reconnecting
+  browser client (socket.io and friends) can lock its own source IP out of the
+  whole route — ordinary page loads included — for `authLockDuration`, and
+  again after each expiry. Verify in the target browser before putting a
+  browser WebSocket route behind the gate, or reach that upstream through the
+  sower transport instead.
 
 ## Unknown-SNI Certificate Fallback
 
@@ -125,6 +188,15 @@ Decisions recorded here so they are not re-litigated without new evidence:
   ACME challenges and 308-redirects public traffic to HTTPS; the `fake_site`
   directory is served there on loopback only (`isLocalRemoteAddr`). Routing
   :80 by domain would hand out a cleartext bypass of the TLS edge.
+- **Session-cookie login for site routes** — declined in favor of HTTP Basic:
+  a login page plus server-side sessions adds edge state and login-page
+  surface, and non-browser clients (curl, media players, mobile apps) speak
+  Basic rather than HTML forms. Basic costs one browser credential prompt per
+  origin and keeps the gate stateless.
+- **Gating the `fake_site` fallback** — the fake site is the decoy that answers
+  unknown SNI (probes and failed transport auth included) and must keep
+  answering like an ordinary public website. An operator's real site that needs
+  a gate belongs in `site_routes`.
 
 ## Residual Accepted Signals
 

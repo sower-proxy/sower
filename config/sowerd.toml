@@ -13,10 +13,20 @@ fake_site = "/var/www"            # Fallback fake site directory or address (def
 # When a TLS connection does not match sower transport,
 # the SNI is looked up here. Unmatched connections fall through to fake_site.
 # Custom certificate mode requires the certificate SANs to cover all routed domains.
+# Route domains become public once autocert issues their certificates
+# (Certificate Transparency), so an upstream that cannot authenticate its own
+# visitors needs the optional auth gate below.
 #
 # [[site_routes]]
 # domains = ["a.example.com", "b.example.com"]
 # upstream = "http://127.0.0.1:8080"
+#
+# [site_routes.auth]
+# username = "admin"              # Both fields are required to enable the gate;
+# password = "change_me"          # an empty block leaves the route open.
+# The gate also covers WebSocket upgrades, but browsers cannot set Authorization
+# on a WS handshake and reconnecting clients feed the per-IP lockout: verify
+# before gating one (see docs/security.md).
 #
 # [site_routes.routes]
 # "/ws" = "http://127.0.0.1:8082"
@@ -24,6 +34,9 @@ fake_site = "/var/www"            # Fallback fake site directory or address (def
 # [[site_routes]]
 # domains = ["c.example.com"]
 # upstream = "https://backend.example.com"
+#
+# URL userinfo credentials are sent to the upstream as HTTP Basic auth:
+# upstream = "http://user:pass@127.0.0.1:8080"
 
 # SSL/TLS certificate configuration
 [cert]

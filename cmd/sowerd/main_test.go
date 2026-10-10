@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto"
@@ -15,6 +16,7 @@ import (
 	"encoding/base64"
 	"encoding/pem"
 	"errors"
+	"io"
 	"log/slog"
 	"math/big"
 	"net"
@@ -792,6 +794,207 @@ func websocketAcceptKey(key string) string {
 	return base64.StdEncoding.EncodeToString(h.Sum(nil))
 }
 
+// proxyRoundTrip drives one HTTP request through reverseProxyConn over an
+// in-memory connection and returns the parsed response. Reverse proxies keep
+// the connection alive, so the response is parsed instead of read as raw
+// bytes: a 401 body may arrive after the headers.
+func proxyRoundTrip(t *testing.T, entry *siteEntry, raw string) *http.Response {
+	t.Helper()
+
+	serverConn, clientConn := net.Pipe()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- reverseProxyConn(serverConn, entry, &atomic.Bool{})
+	}()
+
+	go func() {
+		_, _ = clientConn.Write([]byte(raw))
+	}()
+
+	_ = clientConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	resp, err := http.ReadResponse(bufio.NewReader(clientConn), nil)
+	if err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = resp.Body.Close()
+		_ = clientConn.Close()
+		select {
+		case <-errCh:
+		case <-time.After(2 * time.Second):
+		}
+	})
+	return resp
+}
+
+// startCapturingUpstream starts an HTTP server that records the Authorization
+// header of every request and answers with body. It uses a bare http.Server
+// rather than httptest.NewServer because httptest.Server.Close waits for
+// in-flight handlers: a failed assertion that leaves the capture channel
+// unread would wedge the test instead of failing it.
+func startCapturingUpstream(t *testing.T, body string) (*url.URL, chan string) {
+	t.Helper()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen upstream: %v", err)
+	}
+	authCh := make(chan string, 8)
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authCh <- r.Header.Get("Authorization")
+		_, _ = w.Write([]byte(body))
+	})}
+	go func() { _ = srv.Serve(ln) }()
+	t.Cleanup(func() { _ = srv.Close() })
+
+	return &url.URL{Scheme: "http", Host: ln.Addr().String()}, authCh
+}
+
+func TestReverseProxyConnBasicAuthGate(t *testing.T) {
+	t.Parallel()
+
+	upstream, upstreamAuth := startCapturingUpstream(t, "gated-upstream")
+
+	router := newSiteRouter([]config.SiteRoute{{
+		Domains:  []string{"gated.example.com"},
+		Upstream: upstream.String(),
+		Auth:     config.SiteRouteAuth{Username: "alice", Password: "s3cret"},
+	}})
+	entry := router.lookup("gated.example.com")
+	if entry == nil {
+		t.Fatal("gated route not found")
+	}
+
+	t.Run("missing credentials", func(t *testing.T) {
+		resp := proxyRoundTrip(t, entry, "GET / HTTP/1.1\r\nHost: gated.example.com\r\n\r\n")
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusUnauthorized)
+		}
+		if got := resp.Header.Get("WWW-Authenticate"); !strings.HasPrefix(got, "Basic ") {
+			t.Fatalf("WWW-Authenticate = %q, want a Basic challenge", got)
+		}
+		select {
+		case got := <-upstreamAuth:
+			t.Fatalf("upstream was reached with Authorization %q", got)
+		default:
+		}
+	})
+
+	t.Run("wrong credentials", func(t *testing.T) {
+		resp := proxyRoundTrip(t, entry,
+			"GET / HTTP/1.1\r\nHost: gated.example.com\r\n"+
+				"Authorization: "+basicAuthHeader("alice", "wrong")+"\r\n\r\n")
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusUnauthorized)
+		}
+		select {
+		case got := <-upstreamAuth:
+			t.Fatalf("upstream was reached with Authorization %q", got)
+		default:
+		}
+	})
+
+	t.Run("valid credentials are consumed by the edge", func(t *testing.T) {
+		resp := proxyRoundTrip(t, entry,
+			"GET / HTTP/1.1\r\nHost: gated.example.com\r\n"+
+				"Authorization: "+basicAuthHeader("alice", "s3cret")+"\r\n\r\n")
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		if string(body) != "gated-upstream" {
+			t.Fatalf("body = %q, want gated-upstream", body)
+		}
+		select {
+		case got := <-upstreamAuth:
+			if got != "" {
+				t.Fatalf("upstream saw Authorization %q, want the edge credential stripped", got)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("upstream did not receive the gated request")
+		}
+	})
+}
+
+func TestReverseProxyConnUngatedRouteKeepsAuthorization(t *testing.T) {
+	t.Parallel()
+
+	upstream, upstreamAuth := startCapturingUpstream(t, "open-upstream")
+
+	router := newSiteRouter([]config.SiteRoute{{
+		Domains:  []string{"open.example.com"},
+		Upstream: upstream.String(),
+	}})
+	entry := router.lookup("open.example.com")
+	if entry == nil {
+		t.Fatal("ungated route not found")
+	}
+
+	resp := proxyRoundTrip(t, entry,
+		"GET / HTTP/1.1\r\nHost: open.example.com\r\nAuthorization: Bearer upstream-token\r\n\r\n")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	select {
+	case got := <-upstreamAuth:
+		// A route without a gate must stay byte-compatible with the previous
+		// behavior: the client's own credentials belong to the upstream.
+		if got != "Bearer upstream-token" {
+			t.Fatalf("upstream saw Authorization %q, want the client header untouched", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("upstream did not receive the request")
+	}
+}
+
+func TestReverseProxyConnUpstreamUserinfoSendsBasicAuth(t *testing.T) {
+	t.Parallel()
+
+	upstream, upstreamAuth := startCapturingUpstream(t, "upstream-authed")
+	upstream.User = url.UserPassword("upuser", "uppass")
+
+	resp := proxyRoundTrip(t, &siteEntry{upstream: upstream},
+		"GET / HTTP/1.1\r\nHost: a.example.com\r\n\r\n")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	// httputil.ReverseProxy sends the request through a Transport, which drops
+	// URL userinfo: net/http only turns it into Basic credentials in
+	// http.Client. The proxy must set the header itself.
+	want := "Basic " + base64.StdEncoding.EncodeToString([]byte("upuser:uppass"))
+	select {
+	case got := <-upstreamAuth:
+		if got != want {
+			t.Fatalf("upstream saw Authorization %q, want %q", got, want)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("upstream did not receive the request")
+	}
+}
+
+func TestProxyErrorHandlerRedactsUpstreamCredentials(t *testing.T) {
+	var logged strings.Builder
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logged, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	upstream, _ := url.Parse("http://alice:s3cret@127.0.0.1:9081")
+	req := httptest.NewRequest(http.MethodGet, "https://gateway.example.com/", nil)
+	rec := httptest.NewRecorder()
+
+	proxyErrorHandler(upstream)(rec, req, errors.New("dial tcp 127.0.0.1:9081: connect: connection refused"))
+
+	out := logged.String()
+	if strings.Contains(out, "s3cret") {
+		t.Fatalf("log leaks the upstream password: %q", out)
+	}
+	if !strings.Contains(out, "alice:xxxxx@127.0.0.1:9081") {
+		t.Fatalf("log does not identify the upstream: %q", out)
+	}
+}
+
 func TestHandleConnFallsBackToFakeSiteWhenSNIMisses(t *testing.T) {
 	gotCh := make(chan *http.Request, 1)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1049,6 +1252,17 @@ func TestCouldBeHTTPRequestLine(t *testing.T) {
 		if got := couldBeHTTPRequestLine([]byte(tt.in)); got != tt.want {
 			t.Errorf("couldBeHTTPRequestLine(%q) = %v, want %v", tt.in, got, tt.want)
 		}
+	}
+}
+
+// The fake-site decoy answers unknown SNI and must stay open: it is what a
+// prober sees, and a gate there would protect the wrong thing. A real site
+// that needs a visitor gate belongs in site_routes.
+func TestFakeSiteEntryIsNeverGated(t *testing.T) {
+	t.Parallel()
+
+	if entry := newFakeSiteEntry("127.0.0.1:80"); entry.basicAuth != nil {
+		t.Fatal("fake-site fallback must not be gated")
 	}
 }
 

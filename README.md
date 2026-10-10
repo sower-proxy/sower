@@ -282,6 +282,26 @@ Sower 节点需要能监听 `53/udp`、`80/tcp`、`443/tcp` 和 `1080/tcp`。如
 
 当 `fake_site` 指向本地目录时，`sowerd` 只会通过 `127.0.0.1:80` 的回退流量服务这个目录；公网 HTTP 流量仍会重定向到 HTTPS。未命中 `site_routes` 的 HTTP/1.x 浏览请求会反代到 `fake_site`（目录模式为 loopback `:80`，或配置的 `host:port`），并覆盖写入 `X-Forwarded-For`、`X-Forwarded-Proto`、`X-Forwarded-Host`、`X-Real-IP`；非 HTTP 流量仍按原字节 TCP relay。
 
+### 站点路由的访问认证
+
+`site_routes` 的域名会随 Let's Encrypt 证书进入 Certificate Transparency 日志，任何人都能查到，因此上游站点如果自身没有登录功能，就等于公开。可以给单条路由加一个边缘认证门（HTTP Basic）：
+
+```toml
+[[site_routes]]
+domains = ["nas.example.com"]
+upstream = "http://127.0.0.1:5000"
+
+[site_routes.auth]                # 两个字段都填才生效，留空即不启用
+username = "admin"
+password = "your_long_random_password"
+```
+
+- 只作用于这条路由的反代流量（路径分流和 WebSocket 升级都包含在内）。`sower` 客户端的传输流量在 SNI 路由之前就已分流，只用传输密码认证，不受影响。
+- 浏览器 WebSocket 是已知的边界情况：门禁会拦到 `Upgrade` 请求，但脚本无法给 WebSocket 握手设置 `Authorization`，浏览器只能靠复用该 origin 已缓存的 Basic 凭证，能否复用因浏览器而异（未验证）；门禁按路由生效，无法只放行 `/ws`。每次失败握手还会计入按来源 IP 的锁定计数，所以会自动重连的客户端（socket.io 之类）可能把自己这个 IP 锁在整条路由之外（连普通页面也一起锁）15 分钟。把浏览器的 WS 路由放在门禁后面之前请先自测，或让该客户端走 `sower` 传输。
+- 认证通过后客户端的 `Authorization` 头会被丢弃，不会转发给上游，也不会写进上游日志。
+- 同一来源 IP 累计 5 次失败（中间没有成功请求）会被拒绝 15 分钟（返回 429），所以弱口令不会被直接暴力枚举。但它是边缘门禁，不是上游自身认证的替代品，也不是账号系统（一条路由一组账号，没有会话和登出）。
+- 上游需要认证时把凭证写在 upstream 的 userinfo 里（`upstream = "http://user:pass@127.0.0.1:5000"`），`sowerd` 会把它作为 Basic 凭证发给上游；错误日志中该密码会被脱敏。
+
 启动方式有两种。
 
 直接运行：

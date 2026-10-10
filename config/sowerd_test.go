@@ -45,6 +45,57 @@ fake_site = "127.0.0.1:18080"
 	}
 }
 
+func TestSowerdConfigSiteRouteBasicAuthFromTOML(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "sowerd.toml")
+	if err := os.WriteFile(path, []byte(`
+password = "secret"
+fake_site = "127.0.0.1:18080"
+
+[[site_routes]]
+domains = ["nas.example.com"]
+upstream = "http://127.0.0.1:9000"
+
+[site_routes.auth]
+username = "alice"
+password = "s3cret"
+
+[site_routes.routes]
+"/ws" = "http://127.0.0.1:9002"
+
+[[site_routes]]
+domains = ["open.example.com"]
+upstream = "http://127.0.0.1:9001"
+`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	var cfg SowerdConfig
+	if err := loadConfigFileForTest(path, &cfg); err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+
+	// The gate lives in a nested table of an array-of-tables element; a
+	// decoder that silently drops it would leave the route open, so the
+	// parsed values (not just the load result) are the assertion.
+	if len(cfg.SiteRoutes) != 2 {
+		t.Fatalf("site routes = %d, want 2", len(cfg.SiteRoutes))
+	}
+	if got := cfg.SiteRoutes[0].Auth; got.Username != "alice" || got.Password != "s3cret" {
+		t.Fatalf("basic auth = %#v, want alice/s3cret", got)
+	}
+	if cfg.SiteRoutes[0].Routes["/ws"] != "http://127.0.0.1:9002" {
+		t.Fatalf("path routes = %#v, want the /ws override alongside auth", cfg.SiteRoutes[0].Routes)
+	}
+	if got := cfg.SiteRoutes[1].Auth; got.Username != "" || got.Password != "" {
+		t.Fatalf("ungated route basic auth = %#v, want empty", got)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("validate config: %v", err)
+	}
+}
+
 func TestSowerdConfigValidate(t *testing.T) {
 	t.Parallel()
 
@@ -139,6 +190,65 @@ func TestSowerdConfigValidate(t *testing.T) {
 						Domains:  []string{"a.example.com"},
 						Upstream: "http://127.0.0.1:9000",
 						Routes:   map[string]string{"ws": "http://127.0.0.1:9002"},
+					},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "basic auth visitor gate",
+			cfg: SowerdConfig{
+				Password: "secret",
+				FakeSite: "127.0.0.1:8080",
+				SiteRoutes: []SiteRoute{
+					{
+						Domains:  []string{"nas.example.com"},
+						Upstream: "http://127.0.0.1:9000",
+						Auth:     SiteRouteAuth{Username: "alice", Password: "s3cret"},
+					},
+				},
+			},
+		},
+		{
+			name: "basic auth username without password",
+			cfg: SowerdConfig{
+				Password: "secret",
+				FakeSite: "127.0.0.1:8080",
+				SiteRoutes: []SiteRoute{
+					{
+						Domains:  []string{"nas.example.com"},
+						Upstream: "http://127.0.0.1:9000",
+						Auth:     SiteRouteAuth{Username: "alice"},
+					},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "basic auth password without username",
+			cfg: SowerdConfig{
+				Password: "secret",
+				FakeSite: "127.0.0.1:8080",
+				SiteRoutes: []SiteRoute{
+					{
+						Domains:  []string{"nas.example.com"},
+						Upstream: "http://127.0.0.1:9000",
+						Auth:     SiteRouteAuth{Password: "s3cret"},
+					},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "basic auth username with colon",
+			cfg: SowerdConfig{
+				Password: "secret",
+				FakeSite: "127.0.0.1:8080",
+				SiteRoutes: []SiteRoute{
+					{
+						Domains:  []string{"nas.example.com"},
+						Upstream: "http://127.0.0.1:9000",
+						Auth:     SiteRouteAuth{Username: "ali:ce", Password: "s3cret"},
 					},
 				},
 			},

@@ -519,11 +519,12 @@ type pathRoute struct {
 }
 
 // siteEntry is the routing target for one site route: a default upstream plus
-// optional path-prefix overrides.
+// optional path-prefix overrides and an optional visitor gate.
 type siteEntry struct {
 	upstream     *url.URL
 	paths        []pathRoute
-	preserveHost bool // fake-site fallback keeps the original Host header
+	basicAuth    *siteBasicAuth // nil when the route is not gated
+	preserveHost bool           // fake-site fallback keeps the original Host header
 }
 
 // resolve returns the upstream URL for the given request path. A configured
@@ -544,9 +545,12 @@ type siteRouter struct {
 
 func newSiteRouter(routes []config.SiteRoute) siteRouter {
 	m := make(map[string]*siteEntry)
+	// One throttle for every gated route: a visitor guessing at one route must
+	// not get a fresh budget by moving to another.
+	throttle := newAuthThrottle()
 	for _, r := range routes {
 		u, _ := url.Parse(r.Upstream) // validated in config.Validate
-		entry := &siteEntry{upstream: u}
+		entry := &siteEntry{upstream: u, basicAuth: newSiteBasicAuth(r.Auth, throttle)}
 		for path, upstream := range r.Routes {
 			pu, _ := url.Parse(upstream) // validated in config.Validate
 			entry.paths = append(entry.paths, pathRoute{
@@ -620,7 +624,9 @@ func proxyErrorHandler(upstream *url.URL) func(http.ResponseWriter, *http.Reques
 	return func(w http.ResponseWriter, req *http.Request, err error) {
 		slog.Warn("proxy upstream error",
 			"error", err,
-			"upstream", upstream.String(),
+			// Redacted: the upstream URL can carry Basic credentials in its
+			// userinfo, which must not reach the log.
+			"upstream", upstream.Redacted(),
 			"method", req.Method,
 			"host", req.Host,
 			"path", req.URL.Path,
@@ -654,6 +660,14 @@ func reverseProxyConn(conn net.Conn, entry *siteEntry, hijacked *atomic.Bool) er
 				}
 				stripResidualForwardingHeaders(pr.Out.Header)
 				setEdgeProxyHeaders(pr.Out, pr.In.Host, pr.In.RemoteAddr)
+				if upstream.User != nil {
+					// net/http applies URL userinfo as Basic credentials only in
+					// http.Client; ReverseProxy round-trips the request through a
+					// Transport, which drops them. Configured upstream credentials
+					// are explicit, so they override any inbound Authorization.
+					password, _ := upstream.User.Password()
+					pr.Out.Header.Set("Authorization", basicAuthHeader(upstream.User.Username(), password))
+				}
 			},
 			ErrorHandler: proxyErrorHandler(upstream),
 		}
@@ -682,6 +696,11 @@ func reverseProxyConn(conn net.Conn, entry *siteEntry, hijacked *atomic.Bool) er
 	}()
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		// The gate covers the whole route, including its path overrides and
+		// WebSocket upgrades: it runs before request dispatch to any upstream.
+		if entry.basicAuth != nil && !entry.basicAuth.guard(w, req) {
+			return
+		}
 		proxyFor(entry.resolve(req.URL.Path)).ServeHTTP(w, req)
 	})
 
