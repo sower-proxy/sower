@@ -21,7 +21,7 @@
 - **用 reverse proxy 而非裸 TCP relay**：只有交给 `http.Server` 解析 HTTP 才能拿到路径做前缀分流，并统一重写 outbound `Host` 与转发头。代价是每条连接多一层 HTTP 解析。
 - **单连接 listener 模式**：把 `rereadConn` 包装成只 `Accept` 一次的 `net.Listener` 交给 `http.Server.Serve`，让标准库处理请求生命周期，而不是自写 HTTP 解析循环。
 - **HTTP/1.1-only 是有意决策**：`NextProtos` 只留 `http/1.1`；advertise h2 后 WebSocket 需要 RFC 8441 extended CONNECT，stdlib 不支持。详细证据与 per-SNI ALPN 替代方案被拒的理由见 `docs/security.md` 的 "Rejected Directions"。
-- **未配置 `site_routes` 时行为与改造前完全一致**：`fake_site` 字段保留，语义不变（本地目录或 `host:port`）。
+- **未配置 `site_routes` 时 `fake_site` 仍是唯一兜底目标**：字段语义不变（已存在目录或 `host:port`），SNI 分流表为空即永不命中。但兜底机制本身已随这轮改造变化，不再是原先的裸 TCP relay：探测到 HTTP/1.x 请求行时走反向代理（保留原始 `Host`、设置 edge 转发头），其余流量才裸 relay，且 `NextProtos` 只剩 `http/1.1`（见 `ARCHITECTURE.md` 的 sowerd Data Flow 第 13–14 步）。
 
 ## 已推翻的实现决策
 
