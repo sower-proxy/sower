@@ -9,14 +9,17 @@ serve_ip = "0.0.0.0"              # IP address to listen on for ports 80 and 443
 password = "change_me"            # Password for client authentication
 fake_site = "/var/www"            # Fallback fake site directory or address (default: /var/www)
 
-# Site routing configuration
-# When a TLS connection does not match sower transport, sowerd uses
-# the TLS SNI to select an upstream URL. Unmatched names fall back to fake_site.
+# Site routing: map domains to upstream URLs for fallback traffic.
+# When a TLS connection does not match sower transport,
+# the SNI is looked up here. Unmatched connections fall through to fake_site.
 # Custom certificate mode requires the certificate SANs to cover all routed domains.
 #
 # [[site_routes]]
 # domains = ["a.example.com", "b.example.com"]
 # upstream = "http://127.0.0.1:8080"
+#
+# [site_routes.routes]
+# "/ws" = "http://127.0.0.1:8082"
 #
 # [[site_routes]]
 # domains = ["c.example.com"]
@@ -25,6 +28,8 @@ fake_site = "/var/www"            # Fallback fake site directory or address (def
 # SSL/TLS certificate configuration
 [cert]
 email = "your-email@example.com" # Email for Let's Encrypt certificate
-domains = ["proxy.example.com"] # Issuance whitelist beyond site_routes. The FIRST entry answers TLS handshakes for unknown/empty SNI (keep it a concrete domain, not a wildcard); see docs/security.md
+# domains = ["proxy.example.com"] # Issuance whitelist beyond site_routes (autocert mode).
+# The FIRST entry answers TLS handshakes for unknown/empty SNI: keep it a concrete
+# domain, not a wildcard. See docs/security.md.
 cert = ""                        # Path to custom certificate file (optional)
 key = ""                         # Path to custom private key file (optional)

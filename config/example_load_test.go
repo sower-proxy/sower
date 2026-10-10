@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -126,6 +127,42 @@ upstream = "https://backend.example.com"
 			}
 		})
 	}
+}
+
+// TestExampleSowerdConfigTOMLMatchesFile pins the embedded example to the
+// checked-in file byte for byte. They are the same artifact in two places:
+// the constant is what the installer writes to /etc/sower/sowerd.toml, and
+// the file is what `-c config/sowerd.toml` loads during development. Let
+// them drift and operators get guidance that contradicts shipped behavior.
+func TestExampleSowerdConfigTOMLMatchesFile(t *testing.T) {
+	t.Parallel()
+
+	file := mustReadFileForTest(t, "sowerd.toml")
+	if ExampleSowerdConfigTOML != file {
+		t.Fatalf("ExampleSowerdConfigTOML and config/sowerd.toml have drifted:\n%s",
+			exampleConfigDiff(ExampleSowerdConfigTOML, file))
+	}
+}
+
+func exampleConfigDiff(embedded, file string) string {
+	embeddedLines := strings.Split(strings.TrimRight(embedded, "\n"), "\n")
+	fileLines := strings.Split(strings.TrimRight(file, "\n"), "\n")
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "  const has %d lines, file has %d lines\n", len(embeddedLines), len(fileLines))
+	for i := 0; i < len(embeddedLines) || i < len(fileLines); i++ {
+		var e, f string
+		if i < len(embeddedLines) {
+			e = embeddedLines[i]
+		}
+		if i < len(fileLines) {
+			f = fileLines[i]
+		}
+		if e != f {
+			fmt.Fprintf(&b, "  line %d\n    const: %q\n    file:  %q\n", i+1, e, f)
+		}
+	}
+	return b.String()
 }
 
 func loadConfigFileForTest(path string, dst any) error {

@@ -41,7 +41,9 @@ fake_site = "/var/www"            # Fallback fake site directory or address (def
 # SSL/TLS certificate configuration
 [cert]
 email = "your-email@example.com" # Email for Let's Encrypt certificate
-# domains = ["proxy.example.com"] # Domains autocert may issue for, in addition to site_routes domains (required for direct connections like the sower client remote addr)
+# domains = ["proxy.example.com"] # Issuance whitelist beyond site_routes (autocert mode).
+# The FIRST entry answers TLS handshakes for unknown/empty SNI: keep it a concrete
+# domain, not a wildcard. See docs/security.md.
 cert = ""                        # Path to custom certificate file (optional)
 key = ""                         # Path to custom private key file (optional)
 `
