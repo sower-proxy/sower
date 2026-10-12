@@ -59,7 +59,8 @@ finding `f-4d7d5bd2-cee`）：
   上游解析到远端（正常被代理域名必须放行）、未服务端口零解析、未指定地址绑定（`0.0.0.0:443`
   匹配任意本地地址）、解析失败/空答案放行、决策缓存；`cmd/sower` 侧钉住 `selfProxyAddrs`
   的集合，以及“拒绝回 403 而不是静默关闭”。
-- 现场（r6c，v1.7.6，sha256 `faf4bf20…`）：自指 `curl -x http://100.64.1.1:80 http://sower.wweir.fun/`
+- 现场（r6c，v1.7.7 release 资产 `sower-linux-arm64.tar.gz`，sha256 `8cf0a869…`、
+  `vcs.modified=false`）：自指 `curl -x http://100.64.1.1:80 http://sower.wweir.fun/`
   → `403 Forbidden`；`--socks5-hostname` 自指 → SOCKS5 码 `2`；正常路径 `--socks5-hostname`
   到 google `204`、`-x http://100.64.1.1:80` 到 baidu `200`、`/api/config` `401`；kr 上 sowerd
   到 `100.64.1.1` 的连接数为 `0`（修复前峰值 601）。
