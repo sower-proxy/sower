@@ -23,15 +23,19 @@ finding `f-4d7d5bd2-cee`）：
 **代理拨号不得回到本机正在转发代理流量的监听器。** 只要目标（解析后）落在这组地址上，
 转发它必然再次进入同一个代理，于是链自持。
 
-实现（单一收口点，`router.DialProxyOnly`，显式代理与自动路由两条路径都经过它）：
+实现（两个拨号出口都守，因为 `handleHTTPConn` 走 `DialSmart` 而 `handleHTTPSConn` 走
+`DialProxyOnly`）：
 
 - `Router.SetSelfProxyAddrs(addrs...)` 记录本进程转发代理流量的监听地址：每个 DNS 监听
   地址上的 `:80`、`:443`，加上 SOCKS5 地址（`cmd/sower/selfProxyAddrs`）。admin-only 与
   DNS 监听器不参与：它们不转发，拨过去不可能成链。
-- `DialProxyOnly` 在拨号前调用 `selfTarget(domain, port)`：只有目标端口命中本机转发端口
-  时才解析（否则直接跳过，零开销）；目标是 IP 字面量时直接比较；否则本地解析（远端解析在
-  relay 侧发生，所以这里只需要知道"那个地址是不是我"），结果按 `selfProxyLookupTTL`
-  （1 分钟）缓存，避免每条被代理连接都付一次 DNS 往返。
+- `DialSmart` 入口与 `DialProxyOnly` 入口各检查一次 `selfTarget(domain, port)`：只有目标
+  端口命中本机转发端口时才解析（否则直接跳过，零开销）；目标是 IP 字面量时直接比较；否则
+  本地解析（远端解析在 relay 侧发生，所以这里只需要知道"那个地址是不是我"），结果按
+  `selfProxyLookupTTL`（1 分钟）缓存，避免每条被代理连接都付一次 DNS 往返。
+- 两个出口都必须守：`DialSmart` 的 direct 分支（DirectRule 命中，或 `isAccess` 探测把该名字
+  判为可达）会直接 `directDial` 回到本机监听器，那时递归完全不出主机 —— 同样是自持的，只是
+  不经过隧道。
 - 解析失败不视为自指证据：返回"无地址"，拨号照常进行，由 relay 报自己的解析失败。
 - 拒绝错误是 `router.ErrSelfProxyTarget`：HTTP 返回 `403`，SOCKS5 回 `0x02`
   （connection not allowed by ruleset），HTTPS/SNI 路径关连接（该路径本来没有可写的响应）。

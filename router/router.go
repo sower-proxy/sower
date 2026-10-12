@@ -223,6 +223,14 @@ func (r *Router) DialSmart(network, domain string, port uint16) (net.Conn, error
 	ctx := context.Background()
 	addr := net.JoinHostPort(domain, strconv.FormatUint(uint64(port), 10))
 
+	// Guarded here as well as in DialProxyOnly: this path reaches directDial
+	// without passing it (rule-based and probe-based direct decisions), and
+	// dialing a listener this client itself forwards on re-enters the proxy
+	// either way — locally, in that case, since no tunnel is involved.
+	if ip, self := r.selfTarget(domain, port); self {
+		return nil, selfProxyError(domain, port, ip)
+	}
+
 	// 1. rule_based( block > direct > proxy )
 	// 2. detect_based( CN IP || access site )
 	// 3. fallback( proxy )

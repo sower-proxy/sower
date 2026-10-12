@@ -108,3 +108,29 @@ func TestDialProxyOnlyAllowsTargetThatFailsToResolve(t *testing.T) {
 		t.Fatalf("dial after a resolution failure: %v", err)
 	}
 }
+
+// DialSmart reaches directDial without passing DialProxyOnly, so the guard has
+// to sit on that path too: a name a direct rule matches, or one the access
+// probe marks reachable, would otherwise dial this client's own listener in a
+// loop that never leaves the host.
+func TestDialSmartRefusesDirectSelfTarget(t *testing.T) {
+	t.Parallel()
+
+	r := newSelfTargetRouter(t, []string{"100.64.1.1:80"}, func(context.Context, string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("100.64.1.1")}, nil
+	})
+	r.DirectRule.Add("self.example.com")
+
+	if _, err := r.DialSmart("tcp", "self.example.com", 80); !errors.Is(err, ErrSelfProxyTarget) {
+		t.Fatalf("direct-routed self target err = %v, want ErrSelfProxyTarget", err)
+	}
+}
+
+func TestDialSmartRefusesSelfTargetLiteral(t *testing.T) {
+	t.Parallel()
+
+	r := newSelfTargetRouter(t, []string{"100.64.1.1:443"}, nil)
+	if _, err := r.DialSmart("tcp", "100.64.1.1", 443); !errors.Is(err, ErrSelfProxyTarget) {
+		t.Fatalf("literal self target on the smart path err = %v, want ErrSelfProxyTarget", err)
+	}
+}
