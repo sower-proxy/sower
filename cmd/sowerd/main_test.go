@@ -23,9 +23,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -1641,5 +1643,154 @@ func TestGetCertificateFallbackNeverMasksIssuanceErrors(t *testing.T) {
 	}
 	if got != nil {
 		t.Fatalf("expected no certificate on issuance failure, got %v", got)
+	}
+}
+
+// The plain-HTTP listener serves the whole internet. Every timeout must stay
+// set: without them one connection that never finishes a request pins a
+// goroutine, a socket and its buffers for as long as the peer keeps the
+// connection open, which is the unbounded hold the 2026-10-12 OOM investigation
+// pointed at.
+func TestRedirectServerBoundsEveryConnection(t *testing.T) {
+	t.Parallel()
+
+	srv := newRedirectServer("127.0.0.1:0", http.NotFoundHandler())
+	if srv.ReadHeaderTimeout <= 0 {
+		t.Error("ReadHeaderTimeout is unset: a peer can hold a connection by sending a partial request head")
+	}
+	if srv.ReadTimeout <= 0 {
+		t.Error("ReadTimeout is unset: a peer can hold a connection by trickling a body")
+	}
+	if srv.WriteTimeout <= 0 {
+		t.Error("WriteTimeout is unset: a peer that stops reading keeps the connection and its buffers")
+	}
+	if srv.IdleTimeout <= 0 {
+		t.Error("IdleTimeout is unset: a keep-alive connection is never reclaimed")
+	}
+}
+
+func TestConnLimiter(t *testing.T) {
+	t.Parallel()
+
+	limiter := newConnLimiter(2)
+	if !limiter.acquire() || !limiter.acquire() {
+		t.Fatal("acquire within the cap failed")
+	}
+	if limiter.acquire() {
+		t.Fatal("acquire beyond the cap succeeded")
+	}
+
+	limiter.release()
+	if !limiter.acquire() {
+		t.Fatal("acquire after release failed")
+	}
+
+	limiter.release()
+	limiter.release()
+}
+
+// scriptedListener hands out canned connections in order, standing in for the
+// TLS listener so the accept path can be driven without a handshake.
+type scriptedListener struct {
+	conns chan net.Conn
+	done  chan struct{}
+	once  sync.Once
+}
+
+func newScriptedListener(conns ...net.Conn) *scriptedListener {
+	queued := make(chan net.Conn, len(conns))
+	for _, conn := range conns {
+		queued <- conn
+	}
+	return &scriptedListener{conns: queued, done: make(chan struct{})}
+}
+
+func (l *scriptedListener) Accept() (net.Conn, error) {
+	select {
+	case conn := <-l.conns:
+		return conn, nil
+	case <-l.done:
+		return nil, net.ErrClosed
+	}
+}
+
+func (l *scriptedListener) Close() error {
+	l.once.Do(func() { close(l.done) })
+	return nil
+}
+
+func (l *scriptedListener) Addr() net.Addr {
+	return &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)}
+}
+
+func TestServe443DropsConnectionsBeyondLimit(t *testing.T) {
+	t.Parallel()
+
+	// The first connection occupies the only slot until its probe deadline
+	// expires, so the second must be refused instead of queued.
+	heldServer, heldClient := net.Pipe()
+	t.Cleanup(func() { _ = heldClient.Close() })
+	refusedServer, refusedClient := net.Pipe()
+	t.Cleanup(func() { _ = refusedClient.Close() })
+
+	ln := newScriptedListener(heldServer, refusedServer)
+	t.Cleanup(func() { _ = ln.Close() })
+
+	go func() {
+		// Port 1 refuses immediately, so the held connection is released
+		// without waiting for a real upstream.
+		_ = serve443(context.Background(), ln, "127.0.0.1:1", siteRouter{routes: map[string]*siteEntry{}}, nil, newConnLimiter(1))
+	}()
+
+	_ = refusedClient.SetReadDeadline(time.Now().Add(3 * time.Second))
+	if _, err := refusedClient.Read(make([]byte, 1)); err == nil {
+		t.Fatal("connection beyond the cap was served, want it closed on accept")
+	} else if errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Fatal("connection beyond the cap stayed open until the client gave up")
+	}
+}
+
+func TestDumpHeapProfileWritesReadableProfile(t *testing.T) {
+	t.Parallel()
+
+	path, err := dumpHeapProfile(t.TempDir())
+	if err != nil {
+		t.Fatalf("dump heap profile: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read heap profile: %v", err)
+	}
+	if len(data) < 2 || data[0] != 0x1f || data[1] != 0x8b {
+		t.Fatalf("heap profile %s is not a gzip-compressed pprof profile (%d bytes)", path, len(data))
+	}
+}
+
+// relay.Relay only arms read deadlines, so a peer that stops reading used to
+// block its writer forever and leak the connection pair. The stall wrapper is
+// what makes that write fail instead.
+func TestWriteStallConnFailsAStalledWrite(t *testing.T) {
+	t.Parallel()
+
+	peer, stalled := net.Pipe()
+	t.Cleanup(func() { _ = peer.Close() })
+	t.Cleanup(func() { _ = stalled.Close() })
+
+	conn := &writeStallConn{Conn: stalled, stall: 50 * time.Millisecond}
+	done := make(chan error, 1)
+	go func() {
+		// The peer never reads, so this write can only end on the deadline.
+		_, err := conn.Write(make([]byte, 1<<16))
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("write to a peer that never reads succeeded, want a deadline error")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("write to a peer that never reads blocked past the stall deadline")
 	}
 }

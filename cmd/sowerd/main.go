@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime/pprof"
 	"sort"
 	"strings"
 	"sync"
@@ -40,6 +41,34 @@ const (
 	upstreamDialTimeout           = 10 * time.Second
 	upstreamResponseTimeout       = 30 * time.Second
 	systemCacheDir                = "/var/cache/sower"
+
+	// Timeouts for the plain-HTTP listener, which only redirects to HTTPS and
+	// answers ACME HTTP-01 challenges. Without them a peer that opens a
+	// connection and never finishes a request keeps a goroutine, its socket
+	// and its buffers for as long as it stays connected, which is an unbounded
+	// hold on an internet-facing port.
+	plainHTTPReadHeaderTimeout = 10 * time.Second
+	plainHTTPReadTimeout       = 10 * time.Second
+	plainHTTPWriteTimeout      = 10 * time.Second
+	plainHTTPIdleTimeout       = 30 * time.Second
+
+	// maxInboundConns caps how many connections sowerd serves at once. Each
+	// one costs a goroutine stack, TLS record buffers and, while it is
+	// relayed, up to 64 KiB of copy buffers, so an uncapped accept loop turns
+	// a burst of connections (a scan wave, a reconnect storm, peers that
+	// stopped reading) into resident memory proportional to the arrival rate.
+	// At the measured per-connection cost this cap bounds that memory to a few
+	// hundred MiB, and refusing a connection is cheaper than answering one.
+	maxInboundConns = 2048
+
+	// writeStallTimeout bounds a single write that makes no progress. The
+	// relay library only arms read deadlines, so a peer that stops reading
+	// blocks its write forever: both copy directions then wait on each other,
+	// wg.Wait never returns and the connection pair, its goroutines and its
+	// file descriptors leak for the process's lifetime. A stalled relayed
+	// chunk is at most the copy buffer (64 KiB), so five minutes is far beyond
+	// any live link while still reclaiming a dead one.
+	writeStallTimeout = 5 * time.Minute
 )
 
 var (
@@ -114,6 +143,8 @@ func run(ctx context.Context, conf config.SowerdConfig) error {
 		return err
 	}
 
+	go dumpHeapOnSignal(ctx, cacheDir)
+
 	fakeSite, dirServer, err := prepareFakeSite(conf.FakeSite, conf.ServeIP)
 	if err != nil {
 		return err
@@ -122,10 +153,7 @@ func run(ctx context.Context, conf config.SowerdConfig) error {
 	siteRouter := newSiteRouter(conf.SiteRoutes)
 
 	httpAddr := net.JoinHostPort(conf.ServeIP, "80")
-	httpServer := &http.Server{
-		Addr:    httpAddr,
-		Handler: certManager.HTTPHandler(fakeSiteHandler(dirServer)),
-	}
+	httpServer := newRedirectServer(httpAddr, certManager.HTTPHandler(fakeSiteHandler(dirServer)))
 
 	httpErrCh := make(chan error, 1)
 	go func() {
@@ -137,11 +165,15 @@ func run(ctx context.Context, conf config.SowerdConfig) error {
 	}()
 
 	httpsAddr := net.JoinHostPort(conf.ServeIP, "443")
-	ln, err := tls.Listen("tcp", httpsAddr, tlsConf)
+	rawLn, err := net.Listen("tcp", httpsAddr)
 	if err != nil {
 		_ = shutdownHTTP(context.Background(), httpServer)
 		return fmt.Errorf("listen https %s: %w", httpsAddr, err)
 	}
+	// The stall wrapper sits below the TLS listener so that every write on the
+	// connection is bounded: handshake, proxied response, relayed or hijacked
+	// tunnel. Idle tunnels issue no writes and stay untouched.
+	ln := tls.NewListener(newWriteStallListener(rawLn, writeStallTimeout), tlsConf)
 	defer ln.Close()
 
 	protocolHandlers := []proxyProtocolHandler{
@@ -150,7 +182,7 @@ func run(ctx context.Context, conf config.SowerdConfig) error {
 
 	httpsErrCh := make(chan error, 1)
 	go func() {
-		httpsErrCh <- serve443(ctx, ln, fakeSite, siteRouter, protocolHandlers)
+		httpsErrCh <- serve443(ctx, ln, fakeSite, siteRouter, protocolHandlers, newConnLimiter(maxInboundConns))
 		close(httpsErrCh)
 	}()
 
@@ -315,7 +347,116 @@ func fakeSiteHandler(dirServer http.Handler) http.Handler {
 	})
 }
 
-func serve443(ctx context.Context, ln net.Listener, fakeSite string, router siteRouter, handlers []proxyProtocolHandler) error {
+// newRedirectServer builds the plain-HTTP listener. Every timeout is set:
+// this listener answers the whole internet and only ever serves a redirect or
+// an ACME challenge, so a connection that is slow, idle or half-sent has
+// nothing to wait for and must not be able to pin its goroutine and socket.
+func newRedirectServer(addr string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: plainHTTPReadHeaderTimeout,
+		ReadTimeout:       plainHTTPReadTimeout,
+		WriteTimeout:      plainHTTPWriteTimeout,
+		IdleTimeout:       plainHTTPIdleTimeout,
+	}
+}
+
+// connLimiter is a counting semaphore over served connections. A connection
+// that finds no slot is closed instead of queued: queueing would keep the
+// memory the cap exists to bound.
+type connLimiter struct {
+	slots chan struct{}
+}
+
+func newConnLimiter(n int) *connLimiter {
+	return &connLimiter{slots: make(chan struct{}, n)}
+}
+
+func (l *connLimiter) acquire() bool {
+	select {
+	case l.slots <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+func (l *connLimiter) release() { <-l.slots }
+
+// writeStallListener arms a write deadline on every accepted connection, so a
+// write that a peer never accepts fails instead of blocking the writer
+// forever. It wraps the raw listener so the TLS layer - and therefore every
+// path above it - is covered.
+type writeStallListener struct {
+	net.Listener
+	stall time.Duration
+}
+
+func newWriteStallListener(ln net.Listener, stall time.Duration) *writeStallListener {
+	return &writeStallListener{Listener: ln, stall: stall}
+}
+
+func (l *writeStallListener) Accept() (net.Conn, error) {
+	conn, err := l.Listener.Accept()
+	if err != nil {
+		return nil, err
+	}
+	return &writeStallConn{Conn: conn, stall: l.stall}, nil
+}
+
+type writeStallConn struct {
+	net.Conn
+	stall time.Duration
+}
+
+func (c *writeStallConn) Write(b []byte) (int, error) {
+	if err := c.Conn.SetWriteDeadline(time.Now().Add(c.stall)); err != nil {
+		return 0, err
+	}
+	return c.Conn.Write(b)
+}
+
+// dumpHeapOnSignal writes a heap profile per SIGUSR1 into the cache dir, so a
+// heap that has grown can be attributed to an allocation site without adding
+// a network endpoint ('systemctl kill -s USR1 sowerd'; read it with
+// 'go tool pprof -http :0 <file>'). Sending the signal needs root or the
+// service's own uid, so the trigger stays local.
+func dumpHeapOnSignal(ctx context.Context, dir string) {
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, syscall.SIGUSR1)
+	defer signal.Stop(signals)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-signals:
+			path, err := dumpHeapProfile(dir)
+			if err != nil {
+				slog.Warn("write heap profile", "error", err)
+				continue
+			}
+			slog.Info("heap profile written", "path", path)
+		}
+	}
+}
+
+func dumpHeapProfile(dir string) (string, error) {
+	path := filepath.Join(dir, fmt.Sprintf("sowerd-heap-%d.pprof", time.Now().Unix()))
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		return "", fmt.Errorf("create heap profile %s: %w", path, err)
+	}
+	defer f.Close()
+
+	if err := pprof.WriteHeapProfile(f); err != nil {
+		return "", fmt.Errorf("write heap profile %s: %w", path, err)
+	}
+	return path, nil
+}
+
+func serve443(ctx context.Context, ln net.Listener, fakeSite string, router siteRouter, handlers []proxyProtocolHandler, limiter *connLimiter) error {
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
@@ -332,7 +473,15 @@ func serve443(ctx context.Context, ln net.Listener, fakeSite string, router site
 			return fmt.Errorf("accept tls connection: %w", err)
 		}
 
-		go handleConn(conn, fakeSite, router, handlers)
+		if !limiter.acquire() {
+			slog.Debug("connection limit reached, dropping", "remote", conn.RemoteAddr(), "limit", maxInboundConns)
+			_ = conn.Close()
+			continue
+		}
+		go func() {
+			defer limiter.release()
+			handleConn(conn, fakeSite, router, handlers)
+		}()
 	}
 }
 
