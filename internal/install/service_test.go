@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/sower-proxy/sower/config"
 )
 
 func TestInstallServiceRequiresRoot(t *testing.T) {
@@ -215,6 +217,27 @@ func TestRenderDefaultConfigWithoutPasswordLine(t *testing.T) {
 
 	if _, err := renderDefaultConfig("fake_site = \"/var/www\"\n", "abc123"); err == nil {
 		t.Fatal("a template without a top-level password line must be an error")
+	}
+}
+
+// The installer renders this exact template (installService), so the embedded
+// example and renderDefaultConfig form a contract: reformat the password line
+// (indent it, drop the space) and renderDefaultConfig errors, which would fail
+// every fresh `sowerd -i` at runtime. This is the test that fails instead.
+func TestRenderDefaultConfigWithEmbeddedTemplate(t *testing.T) {
+	t.Parallel()
+
+	got, err := renderDefaultConfig(config.ExampleSowerdConfigTOML, "abc123")
+	if err != nil {
+		t.Fatalf("renderDefaultConfig(embedded example) error = %v", err)
+	}
+	if !strings.Contains(got, `password = "abc123"`) {
+		t.Fatalf("rendered example does not carry the generated password:\n%s", got)
+	}
+	// The example's site_routes.auth sample carries a commented placeholder;
+	// it must survive untouched, and the real credential must not be it.
+	if strings.Count(got, "change_me") != 1 || !strings.Contains(got, `# password = "change_me"`) {
+		t.Fatalf("placeholder must survive only in the commented sample:\n%s", got)
 	}
 }
 
