@@ -26,4 +26,4 @@
 ## 已推翻的实现决策
 
 - ~~reverse proxy 会拒绝 HTTP upgrade 请求~~ — **已推翻**：现行实现不做任何拒绝，`httputil.ReverseProxy` 在 101 时经 hijack 直通，`TestReverseProxyConnWebSocket` 与 `TestReverseProxyConnPathRoutedWebSocket` 均通过，见 `ARCHITECTURE.md`。
-- reverse proxy 会把 outbound `Host` 显式改写为 upstream Host，路径和查询参数保留；并设置客户端 header、upstream dial、TLS handshake、upstream response header 超时。
+- reverse proxy 会把 outbound `Host` 显式改写为 upstream Host，路径和查询参数保留；并设置客户端 header、upstream dial、TLS handshake、upstream response header 超时。（更新 v1.7.1：route 可设 `authority = "client"` 保留客户端 authority，见 [docs/security.md](../security.md)；本条描述默认行为。）

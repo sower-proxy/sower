@@ -35,10 +35,8 @@ fake_site = "/var/www"            # Fallback fake site directory or address (def
 # upstream = "http://127.0.0.1:8080"
 #
 # authority selects the Host header sent upstream: "upstream" (the default)
-# sends the route's upstream host, "client" forwards the authority the client
-# asked for. Use "client" only for an upstream that validates the authority
-# itself (an exact host allowlist, or Origin against Host), because the
-# forwarded name is client-controlled.
+# sends the route's upstream host, "client" forwards the client's authority,
+# for an upstream that validates that authority itself (see docs/security.md).
 # authority = "client"
 #
 # [site_routes.auth]
@@ -77,12 +75,9 @@ type SiteRoute struct {
 	Upstream string   `usage:"upstream URL (http:// or https://)"`
 	// Authority selects the Host header presented to the upstream: the empty
 	// value and AuthorityUpstream send the upstream host, AuthorityClient
-	// forwards the authority the client asked for. An upstream that validates
-	// the visited authority itself (an exact host allowlist, or an
-	// Origin-versus-Host comparison) needs the client's name and rejects the
-	// rewritten one, so the choice is explicit and per route. Either way the
-	// forwarded name is client-controlled: only opt in for an upstream that
-	// checks it itself.
+	// forwards the authority the client asked for. Only an upstream that
+	// validates that authority itself wants the client's name; the reasoning is
+	// in docs/security.md.
 	Authority string            `usage:"authority presented to the upstream: upstream (default) or client"`
 	Routes    map[string]string `usage:"path-prefix to upstream URL overrides (e.g. /ws = http://127.0.0.1:8082)"`
 	// Auth is an optional edge-side gate for visitors of this route. The
@@ -187,12 +182,10 @@ func (c *SowerdConfig) Validate() error {
 
 // Authority values accepted by SiteRoute.Authority.
 const (
-	// AuthorityUpstream sends the route's upstream host as the Host header. It
-	// is the default, and the behavior of every route that leaves the field
-	// unset.
+	// AuthorityUpstream sends the route's upstream host as the Host header; it
+	// is the default.
 	AuthorityUpstream = "upstream"
-	// AuthorityClient forwards the authority the client asked for, for an
-	// upstream that validates that authority itself.
+	// AuthorityClient forwards the authority the client asked for.
 	AuthorityClient = "client"
 )
 
@@ -201,14 +194,13 @@ const (
 func (r SiteRoute) PreserveHost() bool { return r.Authority == AuthorityClient }
 
 // validateSiteRouteAuthority rejects a typo'd authority instead of silently
-// falling back to the default: the two values differ in whether the upstream
-// sees a client-controlled name.
+// falling back to the default, which is the value that hides the client's name.
 func validateSiteRouteAuthority(i int, authority string) error {
 	switch authority {
 	case "", AuthorityUpstream, AuthorityClient:
 		return nil
 	}
-	return fmt.Errorf("site_routes[%d].authority: %q is not %q, %q, or empty", i, authority, AuthorityUpstream, AuthorityClient)
+	return fmt.Errorf("site_routes[%d].authority: unknown value %q (want %q or %q)", i, authority, AuthorityUpstream, AuthorityClient)
 }
 
 func validateSiteRoutes(routes []SiteRoute) error {

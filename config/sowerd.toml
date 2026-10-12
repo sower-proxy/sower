@@ -22,10 +22,8 @@ fake_site = "/var/www"            # Fallback fake site directory or address (def
 # upstream = "http://127.0.0.1:8080"
 #
 # authority selects the Host header sent upstream: "upstream" (the default)
-# sends the route's upstream host, "client" forwards the authority the client
-# asked for. Use "client" only for an upstream that validates the authority
-# itself (an exact host allowlist, or Origin against Host), because the
-# forwarded name is client-controlled.
+# sends the route's upstream host, "client" forwards the client's authority,
+# for an upstream that validates that authority itself (see docs/security.md).
 # authority = "client"
 #
 # [site_routes.auth]
