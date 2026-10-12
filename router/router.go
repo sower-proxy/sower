@@ -37,7 +37,7 @@ type (
 		// instead of re-entering this proxy (see selfproxy.go).
 		selfProxy       atomic.Pointer[selfProxyGuard]
 		selfProxyCache  *otter.Cache[string, []net.IP]
-		selfProxyLookup func(ctx context.Context, domain string) ([]net.IP, error)
+		selfProxyLookup func(domain string) ([]net.IP, error)
 
 		dns struct {
 			upstreamDNS  string
@@ -142,9 +142,10 @@ func NewRouter(serveIPs []string, upstreamDNS, fallbackDNS, mmdbFile string, pro
 			ExpiryCalculator: otter.ExpiryWriting[string, []net.IP](selfProxyLookupTTL),
 		}),
 	}
-	r.selfProxyLookup = func(ctx context.Context, domain string) ([]net.IP, error) {
-		return net.DefaultResolver.LookupIP(ctx, "ip", domain)
-	}
+	// The guard resolves through the configured upstream resolvers, not the
+	// system resolver: a deployed client answers its own DNS for every proxied
+	// domain by design, so a system-resolver answer says nothing (selfproxy.go).
+	r.selfProxyLookup = r.lookupUpstreamIPs
 
 	r.dns.upstreamDNS = upstreamDNS
 	r.dns.fallbackDNS = fallbackDNS

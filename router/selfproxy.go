@@ -1,13 +1,14 @@
 package router
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"net"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/miekg/dns"
 )
 
 const (
@@ -108,12 +109,13 @@ func (r *Router) selfTarget(domain string, port uint16) (net.IP, bool) {
 	return nil, false
 }
 
-// selfProxyIPs resolves domain for the self-target check. The relay resolves
-// the target remotely, so this resolution exists only to answer "is that
-// address mine?"; its answer is cached, so only a name that is new within
-// selfProxyLookupTTL costs a lookup. A resolution failure is not evidence of
-// self-targeting: it returns no addresses and the dial proceeds, leaving the
-// relay to report its own resolution failure.
+// selfProxyIPs resolves domain the way the relay will see it: through the
+// configured upstream resolvers, never through the system resolver. A deployed
+// client answers its own DNS for every domain it proxies — that is how its
+// clients are steered into it — so a system-resolver answer is no evidence of
+// self-targeting, while the upstream answer is what the relay acts on. Only a
+// name whose own record points at this client (e.g. one published for its
+// serve address) resolves to a listener here.
 func (r *Router) selfProxyIPs(domain string) []net.IP {
 	if ip := net.ParseIP(strings.Trim(domain, "[]")); ip != nil {
 		return []net.IP{ip}
@@ -122,15 +124,48 @@ func (r *Router) selfProxyIPs(domain string) []net.IP {
 		return ips
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), selfProxyLookupTimeout)
-	defer cancel()
-
-	ips, err := r.selfProxyLookup(ctx, domain)
-	if err != nil || len(ips) == 0 {
-		return nil
+	// A resolution failure is not evidence of self-targeting: it yields no
+	// addresses and the dial proceeds, leaving the relay to report its own
+	// failure. The empty answer is cached too, so a failing lookup is not paid
+	// once per connection.
+	ips, err := r.selfProxyLookup(domain)
+	if err != nil {
+		ips = nil
 	}
 	r.selfProxyCache.Set(domain, ips)
 	return ips
+}
+
+// lookupUpstreamIPs asks the configured upstream resolvers for domain's
+// addresses. The upstream list already excludes this client's own serve
+// addresses (see buildUpstreamAddrs), so this cannot be answered by this
+// client's own intercepting DNS.
+func (r *Router) lookupUpstreamIPs(domain string) ([]net.IP, error) {
+	var (
+		ips     []net.IP
+		lastErr error
+	)
+	for _, qtype := range []uint16{dns.TypeA, dns.TypeAAAA} {
+		req := new(dns.Msg)
+		req.SetQuestion(dns.Fqdn(domain), qtype)
+		resp, err := r.Exchange(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		for _, answer := range resp.Answer {
+			switch rr := answer.(type) {
+			case *dns.A:
+				ips = append(ips, rr.A)
+			case *dns.AAAA:
+				ips = append(ips, rr.AAAA)
+			}
+		}
+	}
+	if len(ips) == 0 && lastErr != nil {
+		return nil, lastErr
+	}
+	return ips, nil
 }
 
 // selfProxyError renders a refused proxy dial.

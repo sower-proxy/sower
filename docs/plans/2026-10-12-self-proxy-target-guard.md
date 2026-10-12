@@ -31,8 +31,11 @@ finding `f-4d7d5bd2-cee`）：
   DNS 监听器不参与：它们不转发，拨过去不可能成链。
 - `DialSmart` 入口与 `DialProxyOnly` 入口各检查一次 `selfTarget(domain, port)`：只有目标
   端口命中本机转发端口时才解析（否则直接跳过，零开销）；目标是 IP 字面量时直接比较；否则
-  本地解析（远端解析在 relay 侧发生，所以这里只需要知道"那个地址是不是我"），结果按
-  `selfProxyLookupTTL`（1 分钟）缓存，避免每条被代理连接都付一次 DNS 往返。
+  **向配置的上游解析器求证**（`lookupUpstreamIPs`）——绝不能用系统解析器：部署形态的客户端
+  对本机 DNS 被配置成对每一个“要代理的域名”都回答自己的 serve IP（这正是把客户机引到它那里
+  的机制），所以系统解析器的答案对所有被代理域名都是“指向我”，无法区分回环与正常流量；而
+  上游的答案正是 relay 会据以拨号的答案。结果按 `selfProxyLookupTTL`（1 分钟）缓存（含“无
+  答案”的负缓存，避免解析失败的名字每条连接都重付一次超时）。
 - 两个出口都必须守：`DialSmart` 的 direct 分支（DirectRule 命中，或 `isAccess` 探测把该名字
   判为可达）会直接 `directDial` 回到本机监听器，那时递归完全不出主机 —— 同样是自持的，只是
   不经过隧道。
@@ -58,6 +61,27 @@ finding `f-4d7d5bd2-cee`）：
 - 现场：r6c 升级后，从 tailnet 发 `curl -x http://100.64.1.1:80 http://sower.wweir.fun/`
   应得 403、`--socks5-hostname` 应被规则拒绝，且两侧连接数不增长；正常代理（google 204、
   baidu 200）与 admin 控制台不受影响。
+
+## 现场验证与一次回归（v1.7.4 → v1.7.5）
+
+首版守卫（`v1.7.4`，commit `2de08e6`）用系统解析器做自指判定，部署到 r6c 后现场验证立刻
+暴露反例：
+
+- `curl --socks5-hostname 100.64.1.1:1080 https://www.google.com/generate_204` 返回
+  SOCKS5 码 `2`（not allowed）而不是 204；r6c 的 `logread` 给出根因——
+  `target is this client's own listener: sower.wweir.fun:80 resolves to 100.64.1.1:80`。
+- 同时 `nslookup www.google.com 127.0.0.1` 在 r6c 上返回 `100.64.1.1`：本机 DNS 对被代理
+  域名回答的就是自己的 serve IP。于是“解析结果是我的地址”对**所有正常被代理域名**都成立，
+  守卫把整条正常代理路径拒了。这是判定依据错误，不是实现细节错误。
+
+处理：立即把 r6c 回滚到上一个可用二进制（`/usr/sbin/sower.bak-20261012195538`，sha256
+`76459b95…`，procd 重启后 pid 变化确认），随后改成向上游解析器求证（`v1.7.5`）并重新部署。
+
+部署坑（已记入 deploy skill）：跨机传二进制用 `cat > /tmp/sower.new` 得到的是 `0644`，
+`cp -a` 会原样保留该权限，procd 因为不可执行而根本起不来（`/usr/sbin/sower: Permission
+Denied`），表现为服务静默 down、LAN DNS 连锁失效。替换后必须 `chmod 755` 并用
+`sha256sum` + `pidof` 验证；同时 r6c 的 SSH 在 sower down 时可能连 `home` 跳板的域名解析
+都失败，此时改用 IP（`wweir@192.168.1.2` → `root@192.168.1.1`）。
 
 ## 未决（不在本次范围）
 
