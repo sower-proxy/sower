@@ -114,7 +114,7 @@ For non-transport fallback traffic, it can route by TLS SNI to per-domain upstre
 2. Require root privileges because the installer writes to `/usr/local/bin`, `/etc/systemd/system`, and `/etc/sower`.
 3. Optionally copy or update the current binary to `/usr/local/bin/sowerd`.
 4. Write `/etc/systemd/system/sowerd.service` with `ExecStart=/usr/local/bin/sowerd -c /etc/sower/sowerd.toml`.
-5. Ensure `/etc/sower/sowerd.toml` exists and bootstrap `/var/www` for directory-backed fake site mode.
+5. Ensure `/etc/sower/sowerd.toml` exists — a fresh one is written with a generated random client password, printed once — and bootstrap `/var/www` for directory-backed fake site mode. An existing config is never rewritten.
 6. Reload systemd and optionally enable/start or restart the service.
 
 ## Design Decisions

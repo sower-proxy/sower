@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -84,8 +85,16 @@ func TestInstallServiceFreshInstall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read config file: %v", err)
 	}
-	if string(configContent) == "" {
+	configText := string(configContent)
+	if configText == "" {
 		t.Fatal("config file is empty")
+	}
+	// A fresh install must not ship the template's publicly known placeholder.
+	if strings.Contains(configText, "change_me") {
+		t.Fatalf("fresh config still carries the placeholder password:\n%s", configText)
+	}
+	if !regexp.MustCompile(`(?m)^password = "[0-9a-f]{32}"`).MatchString(configText) {
+		t.Fatalf("fresh config does not carry a generated 32-hex password:\n%s", configText)
 	}
 
 	if info, err := os.Stat(fakeSiteDir); err != nil || !info.IsDir() {
@@ -173,5 +182,57 @@ func TestInstallServiceUpdateWithoutRestart(t *testing.T) {
 	wantSystemctlCalls := []string{"daemon-reload"}
 	if !reflect.DeepEqual(systemctlCalls, wantSystemctlCalls) {
 		t.Fatalf("systemctl calls = %#v, want %#v", systemctlCalls, wantSystemctlCalls)
+	}
+}
+
+func TestRenderDefaultConfigReplacesOnlyTheTopLevelPassword(t *testing.T) {
+	t.Parallel()
+
+	// The example template also carries a commented password line inside the
+	// site_routes.auth sample: replacing that one instead would leave the real
+	// credential as the placeholder while looking correct.
+	template := `password = "change_me"            # Client auth password (required; replace the placeholder)
+fake_site = "/var/www"
+
+# [site_routes.auth]
+# password = "change_me"          # an empty block leaves the route open.
+`
+
+	got, err := renderDefaultConfig(template, "abc123")
+	if err != nil {
+		t.Fatalf("renderDefaultConfig() error = %v", err)
+	}
+	if !strings.Contains(got, `password = "abc123"`) {
+		t.Fatalf("rendered config does not carry the generated password:\n%s", got)
+	}
+	if strings.Count(got, "change_me") != 1 || !strings.Contains(got, `# password = "change_me"`) {
+		t.Fatalf("rendered config must keep the placeholder only in the commented sample:\n%s", got)
+	}
+}
+
+func TestRenderDefaultConfigWithoutPasswordLine(t *testing.T) {
+	t.Parallel()
+
+	if _, err := renderDefaultConfig("fake_site = \"/var/www\"\n", "abc123"); err == nil {
+		t.Fatal("a template without a top-level password line must be an error")
+	}
+}
+
+func TestGeneratePassword(t *testing.T) {
+	t.Parallel()
+
+	first, err := generatePassword()
+	if err != nil {
+		t.Fatalf("generatePassword() error = %v", err)
+	}
+	if !regexp.MustCompile(`^[0-9a-f]{32}$`).MatchString(first) {
+		t.Fatalf("password = %q, want 32 hex characters", first)
+	}
+	second, err := generatePassword()
+	if err != nil {
+		t.Fatalf("generatePassword() error = %v", err)
+	}
+	if first == second {
+		t.Fatal("generatePassword() returned the same value twice")
 	}
 }

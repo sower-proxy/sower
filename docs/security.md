@@ -61,9 +61,13 @@ authorization:
   else rate-limits the transport path: a weak password is guessable online at
   roughly one TLS handshake per attempt. Only the `site_routes` visitor gate is
   throttled.
-- **Password handling is the operator's.** Validation rejects only an empty
-  password (`SowerdConfig.Validate`), and the HMAC key is the raw password with
-  no KDF (see Residual Accepted Signals).
+- **A fresh install generates its own password.** `sowerd -i` writes a random
+  128-bit client password into a new `/etc/sower/sowerd.toml` and prints it once
+  (`internal/install`), instead of shipping the template's placeholder. The
+  example template keeps `change_me` for manual/development configs, and
+  validation rejects only an empty password (`SowerdConfig.Validate`), so a
+  hand-written config is the operator's responsibility. The HMAC key is the raw
+  password with no KDF (see Residual Accepted Signals).
 
 Use it as a transport, not as a boundary: keep the exposed service's own
 authentication, keep the password long and unique to this deployment, and keep
@@ -225,6 +229,14 @@ Decisions recorded here so they are not re-litigated without new evidence:
   unknown SNI (probes and failed transport auth included) and must keep
   answering like an ordinary public website. An operator's real site that needs
   a gate belongs in `site_routes`.
+- **Rejecting known-weak passwords in `SowerdConfig.Validate`** — declined: a
+  blocklist of placeholder strings is not a strength policy (it catches
+  `change_me` and nothing else), and it would stop existing deployments from
+  starting on upgrade. The fixable half of that risk is handled where the
+  config is created — the installer now generates a random password instead of
+  writing the template's placeholder — and the remaining operator duty (replace
+  the placeholder in a hand-written config) is stated under "What the Transport
+  Password Gates".
 
 ## Residual Accepted Signals
 
@@ -235,7 +247,3 @@ Decisions recorded here so they are not re-litigated without new evidence:
   is deferred.
 - The `Head` HMAC key is the raw password without a KDF: only relevant to an
   observer who can already capture a `Head`, which requires defeating TLS.
-- The shipped default config carries `password = "change_me"` (the installer
-  writes `config.ExampleSowerdConfigTOML`) and validation rejects only an empty
-  password: a deployment that never replaced the placeholder runs with a
-  publicly known credential.

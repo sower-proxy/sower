@@ -316,7 +316,7 @@ sudo sowerd -password XXX -fake_site 127.0.0.1:8080
 sudo sowerd -i
 ```
 
-安装器可以复制当前二进制到 `/usr/local/bin/sowerd`，写入 `/etc/systemd/system/sowerd.service`，在缺少配置时创建 `/etc/sower/sowerd.toml`，并按提示决定是否立即启动服务。
+安装器可以复制当前二进制到 `/usr/local/bin/sowerd`，写入 `/etc/systemd/system/sowerd.service`，在缺少配置时创建 `/etc/sower/sowerd.toml`，并按提示决定是否立即启动服务。新建配置会写入一个随机生成的客户端口令并在安装过程中打印一次（不会沿用模板里的 `change_me` 占位值）；已有配置不会被覆盖，需要自己把 `password` 改成强随机值——它是传输路径上唯一的凭据。
 
 ## 管理控制台（Admin）
 
