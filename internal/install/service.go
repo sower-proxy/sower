@@ -191,6 +191,9 @@ Wants=network-online.target
 [Service]
 Type=simple
 ExecStart="%s" -c "%s"
+# Soft heap ceiling: a runaway heap degrades this service instead of
+# OOM-killing the host (see docs/security.md, Connection Resource Bounds).
+Environment=GOMEMLIMIT=512MiB
 Restart=always
 RestartSec=5s
 

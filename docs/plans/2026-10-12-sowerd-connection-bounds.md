@@ -1,6 +1,20 @@
 # Plan: sowerd 连接资源上界（2026-10-12 OOM 复盘）
 
-状态：实施中（2026-10-12）。本文为非权威记录；定稿后的长期规则回写 [security.md](../security.md)。
+状态：已定稿并回写（2026-10-12）。本文为非权威历史记录，权威规则见 [security.md](../security.md) 的
+"Connection Resource Bounds"。
+
+实施结果摘要：
+
+- 落地 commit `28c4f9e`：`newRedirectServer` 补齐 :80 的四个超时；`serve443` 加
+  `maxInboundConns = 2048` 并发上界；`writeStallListener`/`writeStallConn` 位于 TLS
+  之下，为每次写入武装 `writeStallTimeout`；`dumpHeapOnSignal` 在 SIGUSR1 时写 heap profile。
+- kr 已部署 `v1.7.1-4-g28c4f9e`（sha256 `9ec44038190b...`，备份
+  `/usr/local/bin/sowerd.bak-20261012175623`），并以 drop-in
+  `/etc/systemd/system/sowerd.service.d/10-memory.conf` 设 `GOMEMLIMIT=512MiB`。
+- 验证：`:80` 仍 308 跳转；`:443` 回退反代 200；SIGUSR1 产出
+  `/var/cache/sower/sowerd-heap-*.pprof`；用 `transport/sower` 从本机经 kr 中继
+  `www.baidu.com:80` 得到 HTTP/1.0 200（证明新增的写超时不误伤中继）；r6c 客户端
+  socks5 到 google 仍 204，其日志自 17:31 起无握手失败。
 
 ## 事件
 

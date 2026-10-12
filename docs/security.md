@@ -207,6 +207,36 @@ sower clients should set `[remote.tls] client_hello = "chrome"` (uTLS) in
 deployment configs. This is a client configuration knob, not a protocol
 property, and has no server-side effect.
 
+## Connection Resource Bounds
+
+Both listeners are internet-facing, so an inbound connection must have a
+bounded cost and a bounded lifetime. These bounds are normative:
+
+- The plain-HTTP listener (`:80`) sets `ReadHeaderTimeout`, `ReadTimeout`,
+  `WriteTimeout` and `IdleTimeout`. It only ever serves a redirect or an ACME
+  challenge, so a connection that is slow, idle or half-sent has nothing to
+  wait for; without the timeouts a peer can pin a goroutine, a socket and its
+  buffers indefinitely, and nothing about it is logged.
+- The TLS listener (`:443`) serves at most `maxInboundConns` connections at
+  once; a connection that finds no slot is closed on accept instead of queued.
+  Per-connection state (TLS record buffers, relay copy buffers, goroutine
+  stacks) is what turns an arrival-rate burst into resident memory.
+- Every write on a `:443` connection carries a deadline (`writeStallTimeout`,
+  armed below the TLS listener, so handshake, reverse-proxied response and
+  hijacked tunnel are all covered). The relay library only arms read
+  deadlines, so a peer that stops reading would otherwise block its writer
+  forever, leaking the connection pair, its goroutines and its descriptors.
+  Idle tunnels issue no writes and are not affected.
+- A heap profile is written per `SIGUSR1` (`systemctl kill -s USR1 sowerd`,
+  read with `go tool pprof`). It is the only way to attribute a grown heap to
+  an allocation site, and unlike an HTTP endpoint it adds no network surface.
+
+The service unit also carries a soft heap ceiling (`GOMEMLIMIT`), so an
+unbounded heap degrades this service instead of OOM-killing the host: the
+2026-10-12 OOM on `kr` (970 MiB anon-rss on a 1.6 GiB host) killed the machine,
+not the service. Historical analysis and the still-unproven trigger live in `docs/plans/`
+(2026-10-12, sowerd connection bounds; non-authoritative).
+
 ## Rejected Directions
 
 Decisions recorded here so they are not re-litigated without new evidence:

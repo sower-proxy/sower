@@ -7,6 +7,9 @@ Type=simple
 ExecStart=/usr/local/bin/sowerd
 Environment="FAKE_SITE=127.0.0.1:8080"
 Environment="PASSWORD=I_am_Passw0rd"
+# Soft heap ceiling: a runaway heap degrades the service instead of
+# OOM-killing the host (docs/security.md, Connection Resource Bounds).
+Environment="GOMEMLIMIT=512MiB"
 Restart=on-failure
 RestartSec=1min
 
