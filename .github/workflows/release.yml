@@ -98,13 +98,6 @@ jobs:
           name: web-dist
           path: web/dist
 
-      - name: Prepare packaging files
-        run: |
-          cp .github/sower.toml .
-          # matrix.service lists space-separated file names ("sower.service
-          # sowerd.service"); prefix each with .github/ individually.
-          for s in ${{ matrix.service }}; do cp ".github/$s" .; done
-
       - name: Build binaries
         env:
           GOOS: ${{ matrix.goos }}
@@ -115,6 +108,17 @@ jobs:
           ldflags="-X main.version=$(git describe --tags --always) -X main.date=$(date +%Y-%m-%d)"
           go build -ldflags "$ldflags" -o sower${{ matrix.ext }} ./cmd/sower
           go build -ldflags "$ldflags" -o sowerd${{ matrix.ext }} ./cmd/sowerd
+
+      # The packaging files are copied in only after the build: they land in the
+      # repository root, and the toolchain stamps the worktree state into each
+      # binary, so copying them first published every artifact as a build no
+      # commit can be held to (`vcs.modified=true`, module version `+dirty`).
+      - name: Package
+        run: |
+          cp .github/sower.toml .
+          # matrix.service lists space-separated file names ("sower.service
+          # sowerd.service"); prefix each with .github/ individually.
+          for s in ${{ matrix.service }}; do cp ".github/$s" .; done
           tar czf sower-${{ matrix.name }}.tar.gz \
             sower${{ matrix.ext }} sowerd${{ matrix.ext }} sower.toml \
             ${{ matrix.service }}
