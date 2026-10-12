@@ -9,6 +9,7 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -147,12 +148,18 @@ upstream = "http://127.0.0.1:9001"
 func TestSowerdConfigSiteRouteAuthorityRejectsUnknownValue(t *testing.T) {
 	t.Parallel()
 
-	cfg := SowerdConfig{Password: "secret"}
+	// FakeSite is set so Validate reaches the route check: an earlier field
+	// failing first would make this test green without exercising the authority.
+	cfg := SowerdConfig{Password: "secret", FakeSite: "127.0.0.1:18080"}
 	cfg.SiteRoutes = []SiteRoute{
 		{Domains: []string{"a.example.com"}, Upstream: "http://127.0.0.1:9000", Authority: "keep"},
 	}
-	if err := cfg.Validate(); err == nil {
+	err := cfg.Validate()
+	if err == nil {
 		t.Fatal("Validate accepted an unknown authority, want an error")
+	}
+	if !strings.Contains(err.Error(), "authority") {
+		t.Fatalf("Validate error = %v, want it to name the authority field", err)
 	}
 }
 
