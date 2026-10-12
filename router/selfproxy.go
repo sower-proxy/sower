@@ -16,9 +16,7 @@ const (
 	// self-target check. A proxied dial must not pay a DNS round trip per
 	// connection, and a name that points at this client keeps pointing at it
 	// for far longer than this window.
-	selfProxyLookupTTL = time.Minute
-	// selfProxyLookupTimeout matches localSite's resolution budget.
-	selfProxyLookupTimeout = 2 * time.Second
+	selfProxyLookupTTL     = time.Minute
 	selfProxyCacheMaxNames = 1024
 )
 

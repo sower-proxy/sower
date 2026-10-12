@@ -100,27 +100,21 @@ func TestDialProxyOnlyRefusesUnspecifiedBind(t *testing.T) {
 	}
 }
 
-// A resolution failure says nothing about self-targeting: the dial proceeds so
-// the relay reports its own resolution result.
-func TestDialProxyOnlyAllowsTargetThatFailsToResolve(t *testing.T) {
+// Neither a resolution failure nor an empty answer is evidence of
+// self-targeting: the dial proceeds so the relay reports its own result, and
+// the empty decision is cached so a failing lookup is not paid per connection.
+func TestDialProxyOnlyAllowsTargetWithoutAnAnswer(t *testing.T) {
 	t.Parallel()
 
-	r := newSelfTargetRouter(t, []string{"100.64.1.1:80"}, func(string) ([]net.IP, error) {
-		return nil, errors.New("no such host")
-	})
-	if _, err := r.DialProxyOnly("tcp", "missing.example.com", 80); err != nil {
-		t.Fatalf("dial after a resolution failure: %v", err)
+	resolvers := map[string]func(string) ([]net.IP, error){
+		"resolution failure": func(string) ([]net.IP, error) { return nil, errors.New("no such host") },
+		"empty answer":       func(string) ([]net.IP, error) { return nil, nil },
 	}
-}
-
-func TestDialProxyOnlyAllowsTargetWithNoAnswer(t *testing.T) {
-	t.Parallel()
-
-	r := newSelfTargetRouter(t, []string{"100.64.1.1:80"}, func(string) ([]net.IP, error) {
-		return nil, nil
-	})
-	if _, err := r.DialProxyOnly("tcp", "nodata.example.com", 80); err != nil {
-		t.Fatalf("dial after an empty answer: %v", err)
+	for name, resolve := range resolvers {
+		r := newSelfTargetRouter(t, []string{"100.64.1.1:80"}, resolve)
+		if _, err := r.DialProxyOnly("tcp", "missing.example.com", 80); err != nil {
+			t.Errorf("%s: dial = %v, want it to proceed", name, err)
+		}
 	}
 }
 

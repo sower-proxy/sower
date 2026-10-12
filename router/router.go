@@ -222,15 +222,6 @@ func (r *Router) Dial(network, domain string, port uint16) (net.Conn, error) {
 
 func (r *Router) DialSmart(network, domain string, port uint16) (net.Conn, error) {
 	ctx := context.Background()
-	addr := net.JoinHostPort(domain, strconv.FormatUint(uint64(port), 10))
-
-	// Guarded here as well as in DialProxyOnly: this path reaches directDial
-	// without passing it (rule-based and probe-based direct decisions), and
-	// dialing a listener this client itself forwards on re-enters the proxy
-	// either way — locally, in that case, since no tunnel is involved.
-	if ip, self := r.selfTarget(domain, port); self {
-		return nil, selfProxyError(domain, port, ip)
-	}
 
 	// 1. rule_based( block > direct > proxy )
 	// 2. detect_based( CN IP || access site )
@@ -243,14 +234,14 @@ func (r *Router) DialSmart(network, domain string, port uint16) (net.Conn, error
 	case r.DirectRule.Match(domain):
 		r.observe(RouteDirect, domain)
 		r.observeRuleHit(RouteDirect, domain)
-		return r.directDial(ctx, network, addr)
+		return r.directDial(ctx, network, domain, port)
 	case r.ProxyRule.Match(domain):
 		r.observeRuleHit(RouteProxy, domain)
 		return r.DialProxyOnly(network, domain, port)
 	case r.localSite(ctx, domain), r.isAccess(domain, port):
 		r.observe(RouteDirect, domain)
 		r.observeRuleMiss(domain)
-		return r.directDial(ctx, network, addr)
+		return r.directDial(ctx, network, domain, port)
 	default:
 		r.observeRuleMiss(domain)
 		return r.DialProxyOnly(network, domain, port)
@@ -261,9 +252,8 @@ func (r *Router) DialProxyOnly(network, domain string, port uint16) (net.Conn, e
 	if r.ProxyDial == nil {
 		return nil, fmt.Errorf("proxy dialer unavailable")
 	}
-	// Guards every path that reaches the tunnel, explicit proxy requests and
-	// auto-routed traffic alike: a target that resolves to a listener this
-	// client forwards on would be forwarded again, forever.
+	// A target that resolves to a listener this client forwards on would be
+	// forwarded again, forever: the tunnel is one of the two dial exits.
 	if ip, self := r.selfTarget(domain, port); self {
 		return nil, selfProxyError(domain, port, ip)
 	}
@@ -276,7 +266,16 @@ func (r *Router) DialProxyOnly(network, domain string, port uint16) (net.Conn, e
 	return rc, nil
 }
 
-func (r *Router) directDial(ctx context.Context, network, addr string) (net.Conn, error) {
+// directDial is the other way into this client's own listeners: a rule or an
+// access probe can classify a name that points at one of them as direct, and
+// that connection re-enters the proxy just the same — locally, since no tunnel
+// is involved. Both dial exits are therefore guarded, not just the tunnel.
+func (r *Router) directDial(ctx context.Context, network, domain string, port uint16) (net.Conn, error) {
+	if ip, self := r.selfTarget(domain, port); self {
+		return nil, selfProxyError(domain, port, ip)
+	}
+
+	addr := net.JoinHostPort(domain, strconv.FormatUint(uint64(port), 10))
 	start := time.Now()
 	dialer := net.Dialer{Timeout: 5 * time.Second}
 	conn, err := dialer.DialContext(ctx, network, addr)
