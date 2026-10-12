@@ -96,6 +96,66 @@ upstream = "http://127.0.0.1:9001"
 	}
 }
 
+func TestSowerdConfigSiteRouteAuthorityFromTOML(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "sowerd.toml")
+	if err := os.WriteFile(path, []byte(`
+password = "secret"
+fake_site = "127.0.0.1:18080"
+
+[[site_routes]]
+domains = ["web.example.com"]
+upstream = "http://192.0.2.10:30141"
+authority = "client"
+
+[[site_routes]]
+domains = ["plain.example.com"]
+upstream = "http://127.0.0.1:9001"
+`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	var cfg SowerdConfig
+	if err := loadConfigFileForTest(path, &cfg); err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+
+	if len(cfg.SiteRoutes) != 2 {
+		t.Fatalf("site routes = %d, want 2", len(cfg.SiteRoutes))
+	}
+	// An upstream that validates the visited authority itself only works when the
+	// client's name survives the proxy, so the value must round-trip from TOML and
+	// must stay off when the route does not ask for it.
+	if got := cfg.SiteRoutes[0].Authority; got != AuthorityClient {
+		t.Errorf("authority = %q, want %q", got, AuthorityClient)
+	}
+	if !cfg.SiteRoutes[0].PreserveHost() {
+		t.Error("PreserveHost() = false for an authority = client route")
+	}
+	if cfg.SiteRoutes[1].Authority != "" {
+		t.Errorf("authority = %q, want the empty default", cfg.SiteRoutes[1].Authority)
+	}
+	if cfg.SiteRoutes[1].PreserveHost() {
+		t.Error("PreserveHost() = true for a route that did not ask for it")
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("validate config: %v", err)
+	}
+}
+
+func TestSowerdConfigSiteRouteAuthorityRejectsUnknownValue(t *testing.T) {
+	t.Parallel()
+
+	cfg := SowerdConfig{Password: "secret"}
+	cfg.SiteRoutes = []SiteRoute{
+		{Domains: []string{"a.example.com"}, Upstream: "http://127.0.0.1:9000", Authority: "keep"},
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate accepted an unknown authority, want an error")
+	}
+}
+
 func TestSowerdConfigValidate(t *testing.T) {
 	t.Parallel()
 

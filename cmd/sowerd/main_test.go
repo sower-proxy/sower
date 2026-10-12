@@ -539,6 +539,79 @@ func TestHandleConnRoutesFallbackBySNI(t *testing.T) {
 	}
 }
 
+// TestHandleConnPreservesHostForOptedInRoute pins the config-to-wire chain: a
+// route that asked for preserve_host reaches its upstream with the client's
+// authority. An upstream that compares Origin against the Host header rejects
+// the rewritten host, and that failure only shows up at request time.
+func TestHandleConnPreservesHostForOptedInRoute(t *testing.T) {
+	const authority = "keep.example.com"
+	gotCh := make(chan string, 1)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotCh <- r.Host
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	router := newSiteRouter([]config.SiteRoute{
+		{Domains: []string{authority}, Upstream: upstream.URL, Authority: config.AuthorityClient},
+	})
+
+	certServer := httptest.NewTLSServer(http.NotFoundHandler())
+	cert := certServer.TLS.Certificates[0]
+	certServer.Close()
+
+	serverRaw, clientRaw := net.Pipe()
+	serverTLS := tls.Server(serverRaw, &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		NextProtos:   []string{"http/1.1"},
+	})
+	clientTLS := tls.Client(clientRaw, &tls.Config{
+		InsecureSkipVerify: true,
+		ServerName:         authority,
+		NextProtos:         []string{"http/1.1"},
+	})
+	defer clientTLS.Close()
+
+	go handleConn(serverTLS, "127.0.0.1:1", router, []proxyProtocolHandler{newSowerProtocolHandler(transportSower.New("secret"))})
+
+	if err := clientTLS.Handshake(); err != nil {
+		t.Fatalf("tls handshake: %v", err)
+	}
+	_, _ = clientTLS.Write([]byte("GET / HTTP/1.1\r\nHost: " + authority + "\r\n\r\n"))
+
+	select {
+	case got := <-gotCh:
+		if got != authority {
+			t.Fatalf("upstream Host = %q, want %q", got, authority)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("upstream did not receive request")
+	}
+}
+
+func TestSiteRouterPreserveHost(t *testing.T) {
+	router := newSiteRouter([]config.SiteRoute{
+		{Domains: []string{"keep.example.com"}, Upstream: "http://127.0.0.1:9000", Authority: config.AuthorityClient},
+		{Domains: []string{"rewrite.example.com"}, Upstream: "http://127.0.0.1:9001"},
+	})
+
+	keep := router.lookup("keep.example.com")
+	if keep == nil {
+		t.Fatal("lookup returned nil for the preserve_host route")
+	}
+	if !keep.preserveHost {
+		t.Error("preserve_host route entry does not preserve the Host header")
+	}
+
+	rewrite := router.lookup("rewrite.example.com")
+	if rewrite == nil {
+		t.Fatal("lookup returned nil for the default route")
+	}
+	if rewrite.preserveHost {
+		t.Error("default route entry preserves the Host header, want the upstream host")
+	}
+}
+
 func TestSiteRouterResolvePathRoutes(t *testing.T) {
 	router := newSiteRouter([]config.SiteRoute{
 		{

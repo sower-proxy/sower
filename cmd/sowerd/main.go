@@ -524,7 +524,7 @@ type siteEntry struct {
 	upstream     *url.URL
 	paths        []pathRoute
 	basicAuth    *siteBasicAuth // nil when the route is not gated
-	preserveHost bool           // fake-site fallback keeps the original Host header
+	preserveHost bool           // forward the client's Host: site routes opt in, fake-site fallback always does
 }
 
 // resolve returns the upstream URL for the given request path. A configured
@@ -550,7 +550,7 @@ func newSiteRouter(routes []config.SiteRoute) siteRouter {
 	throttle := newAuthThrottle()
 	for _, r := range routes {
 		u, _ := url.Parse(r.Upstream) // validated in config.Validate
-		entry := &siteEntry{upstream: u, basicAuth: newSiteBasicAuth(r.Auth, throttle)}
+		entry := &siteEntry{upstream: u, basicAuth: newSiteBasicAuth(r.Auth, throttle), preserveHost: r.PreserveHost()}
 		for path, upstream := range r.Routes {
 			pu, _ := url.Parse(upstream) // validated in config.Validate
 			entry.paths = append(entry.paths, pathRoute{

@@ -148,6 +148,36 @@ Rules:
   browser WebSocket route behind the gate, or reach that upstream through the
   sower transport instead.
 
+## Site Route Upstream Authority
+
+**Rule: a site route states explicitly whether its upstream sees the client's
+authority or the upstream's own host.**
+
+- By default the reverse proxy rewrites the outbound `Host` to the route's
+  upstream host and reports the client's authority in `X-Forwarded-Host`.
+  An upstream that virtual-hosts on its own address keeps working, and a
+  misconfigured route cannot make an upstream believe it serves a name it
+  does not own.
+- `authority = "client"` forwards the client's `Host` verbatim instead. This
+  is what an upstream that validates the visited authority itself needs — an
+  exact host allowlist, or an `Origin` versus `Host` comparison — because it
+  rejects the rewritten host: pi-web answers `403` to every browser-originated
+  `/api` request, so the page loads and its WebSocket never connects.
+- The forwarded authority is client-controlled, so preserving it does not make
+  the upstream safe by itself: the upstream must still validate the name, and
+  its allowlist has to include the public domain (pi-web's
+  `PI_WEB_ALLOWED_HOSTS`). The route's visitor gate still runs, and inbound
+  `X-Forwarded-*` headers from the client are still discarded, so one request
+  cannot tell the upstream two different stories.
+- Keep it per route. An upstream that does not check the authority accepts any
+  name, and `authority = "client"` would then let a prober choose what that
+  upstream records in its logs, emits in redirects, and sets as a cookie
+  domain.
+- Rejected alternative: teaching the upstream to trust `X-Forwarded-Host`.
+  Those headers are client-forgeable wherever sowerd is not the immediate
+  proxy, so the adaptation belongs to the edge, which already owns the
+  connection and strips what the client supplied.
+
 ## Unknown-SNI Certificate Fallback
 
 **Rule: the TLS handshake must complete for arbitrary SNI.** A handshake

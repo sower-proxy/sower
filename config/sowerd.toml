@@ -21,6 +21,13 @@ fake_site = "/var/www"            # Fallback fake site directory or address (def
 # domains = ["a.example.com", "b.example.com"]
 # upstream = "http://127.0.0.1:8080"
 #
+# authority selects the Host header sent upstream: "upstream" (the default)
+# sends the route's upstream host, "client" forwards the authority the client
+# asked for. Use "client" only for an upstream that validates the authority
+# itself (an exact host allowlist, or Origin against Host), because the
+# forwarded name is client-controlled.
+# authority = "client"
+#
 # [site_routes.auth]
 # username = "admin"              # Both fields are required to enable the gate;
 # password = "change_me"          # an empty block leaves the route open.
