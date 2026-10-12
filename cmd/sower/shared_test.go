@@ -230,45 +230,40 @@ func TestServeSharedHTTPRoutesAdminAndProxy(t *testing.T) {
 	}
 	loginResp.Body.Close()
 
-	// proxy: origin-form with another Host -> connection closed (blocked)
-	conn0, err := net.Dial("tcp", ln.Addr().String())
-	if err != nil {
-		t.Fatalf("dial: %v", err)
-	}
-	defer conn0.Close()
-	_ = conn0.SetDeadline(time.Now().Add(3 * time.Second))
-	if _, err := io.WriteString(conn0, "GET / HTTP/1.1\r\nHost: example.com\r\n\r\n"); err != nil {
-		t.Fatalf("write origin form: %v", err)
-	}
-	if _, err := conn0.Read(make([]byte, 1)); err == nil {
-		t.Fatal("expected proxy path to close the connection")
-	}
+	// proxy: origin-form with another Host -> the proxy path refuses it (the
+	// router blocks example.com), and the admin console does not answer it.
+	assertProxyRefusal(t, ln.Addr().String(), "GET / HTTP/1.1\r\nHost: example.com\r\n\r\n")
 
-	// proxy: CONNECT -> connection closed
-	conn, err := net.Dial("tcp", ln.Addr().String())
+	// proxy: CONNECT -> proxy refusal
+	assertProxyRefusal(t, ln.Addr().String(), "CONNECT example.com:443 HTTP/1.1\r\nHost: example.com:443\r\n\r\n")
+
+	// proxy: absolute-form -> proxy refusal
+	assertProxyRefusal(t, ln.Addr().String(), "GET http://example.com/ HTTP/1.1\r\nHost: example.com\r\n\r\n")
+}
+
+// assertProxyRefusal drives one proxy-form request through the shared listener
+// and requires the proxy path to answer it: the router blocks example.com, so
+// the client sees a 403 instead of the admin console's response, and a refusal
+// is a status rather than a silent close so a client can tell policy from a
+// broken proxy.
+func assertProxyRefusal(t *testing.T, addr, request string) {
+	t.Helper()
+
+	conn, err := net.Dial("tcp", addr)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
 	defer conn.Close()
 	_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
-	if _, err := io.WriteString(conn, "CONNECT example.com:443 HTTP/1.1\r\nHost: example.com:443\r\n\r\n"); err != nil {
-		t.Fatalf("write connect: %v", err)
-	}
-	if _, err := conn.Read(make([]byte, 1)); err == nil {
-		t.Fatal("expected proxy path to close the connection")
+	if _, err := io.WriteString(conn, request); err != nil {
+		t.Fatalf("write request: %v", err)
 	}
 
-	// proxy: absolute-form -> connection closed
-	conn2, err := net.Dial("tcp", ln.Addr().String())
+	response, err := io.ReadAll(conn)
 	if err != nil {
-		t.Fatalf("dial: %v", err)
+		t.Fatalf("read proxy refusal: %v", err)
 	}
-	defer conn2.Close()
-	_ = conn2.SetDeadline(time.Now().Add(3 * time.Second))
-	if _, err := io.WriteString(conn2, "GET http://example.com/ HTTP/1.1\r\nHost: example.com\r\n\r\n"); err != nil {
-		t.Fatalf("write absolute: %v", err)
-	}
-	if _, err := conn2.Read(make([]byte, 1)); err == nil {
-		t.Fatal("expected proxy path to close the connection")
+	if !strings.HasPrefix(string(response), "HTTP/1.1 403 Forbidden") {
+		t.Fatalf("proxy refusal = %q, want a 403 status", response)
 	}
 }

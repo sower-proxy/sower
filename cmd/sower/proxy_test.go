@@ -499,3 +499,45 @@ func TestHandleHTTPConnConnectTunnelsToTargetPort(t *testing.T) {
 	_ = upstreamServer.Close()
 	waitForHandler(t, &wg)
 }
+
+// A refused proxy request must be answered rather than silently closed: only a
+// status tells the client that the refusal is policy (this proxy's own
+// listener, or a blocked target) and not a broken proxy.
+func TestHandleHTTPConnAnswersRefusedSelfTarget(t *testing.T) {
+	t.Parallel()
+
+	downstreamServer, downstreamClient := net.Pipe()
+	defer downstreamClient.Close()
+	t.Cleanup(func() { _ = downstreamServer.Close() })
+
+	r, err := router.NewRouter(nil, "", "", "", func(_, _ string, _ uint16) (net.Conn, error) {
+		t.Error("proxy dial reached for a self target")
+		return nil, nil
+	})
+	if err != nil {
+		t.Fatalf("new router: %v", err)
+	}
+	t.Cleanup(func() { _ = r.Close() })
+	r.SetSelfProxyAddrs("100.64.1.1:80")
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		handleHTTPConn(downstreamServer, r, newTestStats(t))
+	}()
+
+	if _, err := downstreamClient.Write([]byte("GET / HTTP/1.1\r\nHost: 100.64.1.1\r\n\r\n")); err != nil {
+		t.Fatalf("write downstream request: %v", err)
+	}
+	_ = downstreamClient.SetReadDeadline(time.Now().Add(2 * time.Second))
+	response, err := io.ReadAll(downstreamClient)
+	if err != nil {
+		t.Fatalf("read refusal response: %v", err)
+	}
+	if !strings.HasPrefix(string(response), "HTTP/1.1 403 Forbidden") {
+		t.Fatalf("refusal response = %q, want a 403 status", response)
+	}
+
+	waitForHandler(t, &wg)
+}

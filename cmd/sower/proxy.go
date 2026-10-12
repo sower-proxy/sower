@@ -217,7 +217,13 @@ func handleHTTPConn(conn net.Conn, r *router.Router, stats *admin.Stats) {
 	rc, err := r.DialProxyOnly("tcp", host, port)
 	if err != nil {
 		slog.Error("dial proxy", "error", err, "host", req.Host, "req", req.URL)
-		stats.RecordProxyError("dial", fmt.Sprintf("%s: %v", hostOnly(req.Host), err))
+		if !stderrors.Is(err, router.ErrBlocked) {
+			stats.RecordProxyError("dial", fmt.Sprintf("%s: %v", hostOnly(req.Host), err))
+		}
+		// Answer the refusal: a client that only sees the connection close cannot
+		// tell a policy refusal (blocked target, this proxy's own listener) from
+		// a broken proxy.
+		writeHTTPProxyError(rereadConn.Stop(), err)
 		return
 	}
 	defer rc.Close()
