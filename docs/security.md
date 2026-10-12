@@ -41,6 +41,34 @@ recorded below.
   (e.g. uTLS Chrome fingerprint); the post-handshake sniff routes it to the
   transport path regardless of the negotiated protocol.
 
+## What the Transport Password Gates
+
+The frame checksum is the only access control on the transport path. Its
+consequences are deliberate, and must not be mistaken for per-service
+authorization:
+
+- **One shared secret, no identity.** Every client presents the same password;
+  there is no per-client identity, no per-target authorization, and no
+  revocation short of rotating the password for everyone (`transport/sower`'s
+  `Sower` holds only the password).
+- **A passing frame reaches any target the host can dial.** `Sower.Unwrap`
+  rejects only empty hosts and control characters — there is no allowlist. A
+  leaked password therefore exposes the host's whole network position, not just
+  the service the operator meant to share, including cloud metadata endpoints
+  and same-VPC peers.
+- **No attempt throttling.** A wrong checksum falls back to the website path
+  (`cmd/sowerd/main.go:handleConn`) without counting the failure, and nothing
+  else rate-limits the transport path: a weak password is guessable online at
+  roughly one TLS handshake per attempt. Only the `site_routes` visitor gate is
+  throttled.
+- **Password handling is the operator's.** Validation rejects only an empty
+  password (`SowerdConfig.Validate`), and the HMAC key is the raw password with
+  no KDF (see Residual Accepted Signals).
+
+Use it as a transport, not as a boundary: keep the exposed service's own
+authentication, keep the password long and unique to this deployment, and keep
+what sowerd can dial as small as the deployment allows.
+
 ## Layer 3 — Everything Else Is a Website
 
 Dispatch order for non-transport traffic (`cmd/sowerd/main.go:handleConn`):
@@ -207,3 +235,7 @@ Decisions recorded here so they are not re-litigated without new evidence:
   is deferred.
 - The `Head` HMAC key is the raw password without a KDF: only relevant to an
   observer who can already capture a `Head`, which requires defeating TLS.
+- The shipped default config carries `password = "change_me"` (the installer
+  writes `config.ExampleSowerdConfigTOML`) and validation rejects only an empty
+  password: a deployment that never replaced the placeholder runs with a
+  publicly known credential.
