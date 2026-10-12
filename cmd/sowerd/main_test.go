@@ -24,6 +24,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -1205,6 +1206,67 @@ func TestHandleConnFallsBackAfterSowerAuthFailure(t *testing.T) {
 	resp := string(buf[:n])
 	if !strings.Contains(resp, "auth-fallback") {
 		t.Fatalf("response does not contain fallback body: %q", resp)
+	}
+}
+
+// Positive control for transport dispatch: a frame authenticated with the
+// configured password must be relayed to the target named inside the frame.
+// TestHandleConnFallsBackAfterSowerAuthFailure is the negative arm (wrong
+// password falls back to the website path), and the two fallback/target bodies
+// differ so neither arm can pass as the other.
+func TestHandleConnRelaysAfterSowerAuth(t *testing.T) {
+	target := startRawTCPServer(t, "relay-target")
+	fallback := startRawTCPServer(t, "wrong-path")
+
+	host, portStr, err := net.SplitHostPort(target)
+	if err != nil {
+		t.Fatalf("split target addr: %v", err)
+	}
+	port, err := strconv.ParseUint(portStr, 10, 16)
+	if err != nil {
+		t.Fatalf("parse target port: %v", err)
+	}
+
+	certServer := httptest.NewTLSServer(http.NotFoundHandler())
+	cert := certServer.TLS.Certificates[0]
+	certServer.Close()
+
+	serverRaw, clientRaw := net.Pipe()
+	serverTLS := tls.Server(serverRaw, &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		NextProtos:   []string{"http/1.1"},
+	})
+	clientTLS := tls.Client(clientRaw, &tls.Config{
+		InsecureSkipVerify: true,
+		ServerName:         "relay.example.com",
+		NextProtos:         []string{"http/1.1"},
+	})
+	defer clientTLS.Close()
+
+	go handleConn(serverTLS, fallback, siteRouter{}, []proxyProtocolHandler{newSowerProtocolHandler(transportSower.New("secret"))})
+
+	if err := clientTLS.Handshake(); err != nil {
+		t.Fatalf("tls handshake: %v", err)
+	}
+	_ = clientTLS.SetDeadline(time.Now().Add(2 * time.Second))
+	if err := transportSower.New("secret").Wrap(clientTLS, host, uint16(port)); err != nil {
+		t.Fatalf("write sower request: %v", err)
+	}
+	if _, err := clientTLS.Write([]byte("ping")); err != nil {
+		t.Fatalf("write payload: %v", err)
+	}
+
+	buf := make([]byte, 4096)
+	n, err := clientTLS.Read(buf)
+	if err != nil {
+		t.Fatalf("read relayed response: %v", err)
+	}
+	resp := string(buf[:n])
+	if strings.Contains(resp, "wrong-path") {
+		t.Fatalf("authenticated frame fell back to the website path: %q", resp)
+	}
+	if !strings.Contains(resp, "relay-target") {
+		t.Fatalf("response is not from the framed target: %q", resp)
 	}
 }
 
