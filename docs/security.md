@@ -231,11 +231,10 @@ bounded cost and a bounded lifetime. These bounds are normative:
   read with `go tool pprof`). It is the only way to attribute a grown heap to
   an allocation site, and unlike an HTTP endpoint it adds no network surface.
 
-The service unit also carries a soft heap ceiling (`GOMEMLIMIT`), so an
-unbounded heap degrades this service instead of OOM-killing the host: the
-2026-10-12 OOM on `kr` (970 MiB anon-rss on a 1.6 GiB host) killed the machine,
-not the service. Historical analysis and the still-unproven trigger live in `docs/plans/`
-(2026-10-12, sowerd connection bounds; non-authoritative).
+The service unit also carries a soft heap ceiling (`GOMEMLIMIT`): a heap that
+grows without bound must degrade this service, not take the host down with it
+(the 2026-10-12 OOM on `kr` reached 970 MiB anon-rss on a 1.6 GiB host).
+Motivation and the historical analysis live in `docs/plans/` (non-authoritative).
 
 ## Rejected Directions
 

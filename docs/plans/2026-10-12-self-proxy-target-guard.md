@@ -1,6 +1,6 @@
 # Plan: 拒绝自指代理目标（2026-10-12 r6c↔kr 递归）
 
-状态：实施中（2026-10-12）。本文为非权威记录；长期规则回写 [ARCHITECTURE.md](../../ARCHITECTURE.md) 的 Design Decisions。
+状态：已定稿并回写（2026-10-12，v1.7.6）。本文为非权威历史记录；权威规则见 [ARCHITECTURE.md](../../ARCHITECTURE.md) 的 Design Decisions。
 
 ## 问题
 
@@ -55,33 +55,23 @@ finding `f-4d7d5bd2-cee`）：
 
 ## 验证
 
-- `go vet ./...`、`go test ./...` 全绿；新增用例覆盖：IP 字面量自指、名字解析到自指、
-  非自指（含未服务端口不解析）、未指定地址绑定（`0.0.0.0:443` 匹配任意本地地址）、
-  解析失败放行、决策缓存（同名只解析一次）；`cmd/sower` 侧钉住 `selfProxyAddrs` 的集合。
-- 现场：r6c 升级后，从 tailnet 发 `curl -x http://100.64.1.1:80 http://sower.wweir.fun/`
-  应得 403、`--socks5-hostname` 应被规则拒绝，且两侧连接数不增长；正常代理（google 204、
-  baidu 200）与 admin 控制台不受影响。
+- 单元测试：`go vet ./...`、`go test ./...` 全绿。守卫用例覆盖 IP 字面量自指、上游解析到自指、
+  上游解析到远端（正常被代理域名必须放行）、未服务端口零解析、未指定地址绑定（`0.0.0.0:443`
+  匹配任意本地地址）、解析失败/空答案放行、决策缓存；`cmd/sower` 侧钉住 `selfProxyAddrs`
+  的集合，以及“拒绝回 403 而不是静默关闭”。
+- 现场（r6c，v1.7.6，sha256 `faf4bf20…`）：自指 `curl -x http://100.64.1.1:80 http://sower.wweir.fun/`
+  → `403 Forbidden`；`--socks5-hostname` 自指 → SOCKS5 码 `2`；正常路径 `--socks5-hostname`
+  到 google `204`、`-x http://100.64.1.1:80` 到 baidu `200`、`/api/config` `401`；kr 上 sowerd
+  到 `100.64.1.1` 的连接数为 `0`（修复前峰值 601）。
 
-## 现场验证与一次回归（v1.7.4 → v1.7.5）
+### 一次必须记住的回归（v1.7.4 → v1.7.5）
 
-首版守卫（`v1.7.4`，commit `2de08e6`）用系统解析器做自指判定，部署到 r6c 后现场验证立刻
-暴露反例：
-
-- `curl --socks5-hostname 100.64.1.1:1080 https://www.google.com/generate_204` 返回
-  SOCKS5 码 `2`（not allowed）而不是 204；r6c 的 `logread` 给出根因——
-  `target is this client's own listener: sower.wweir.fun:80 resolves to 100.64.1.1:80`。
-- 同时 `nslookup www.google.com 127.0.0.1` 在 r6c 上返回 `100.64.1.1`：本机 DNS 对被代理
-  域名回答的就是自己的 serve IP。于是“解析结果是我的地址”对**所有正常被代理域名**都成立，
-  守卫把整条正常代理路径拒了。这是判定依据错误，不是实现细节错误。
-
-处理：立即把 r6c 回滚到上一个可用二进制（`/usr/sbin/sower.bak-20261012195538`，sha256
-`76459b95…`，procd 重启后 pid 变化确认），随后改成向上游解析器求证（`v1.7.5`）并重新部署。
-
-部署坑（已记入 deploy skill）：跨机传二进制用 `cat > /tmp/sower.new` 得到的是 `0644`，
-`cp -a` 会原样保留该权限，procd 因为不可执行而根本起不来（`/usr/sbin/sower: Permission
-Denied`），表现为服务静默 down、LAN DNS 连锁失效。替换后必须 `chmod 755` 并用
-`sha256sum` + `pidof` 验证；同时 r6c 的 SSH 在 sower down 时可能连 `home` 跳板的域名解析
-都失败，此时改用 IP（`wweir@192.168.1.2` → `root@192.168.1.1`）。
+首版守卫（`v1.7.4`，commit `2de08e6`）用系统解析器判定，现场立刻被推翻：`--socks5-hostname`
+到 google 返回 SOCKS5 码 `2`，而 `nslookup www.google.com 127.0.0.1` 在 r6c 上返回
+`100.64.1.1` —— 本机 DNS 按设计对每个被代理域名都回答自己的 serve IP。于是“解析结果是我的
+地址”对**所有正常被代理域名**都成立，守卫把整条正常代理路径拒了：**这是判定依据错，不是
+实现细节错**。处理是把 r6c 回滚到上一版可用二进制，改成向上游解析器求证后以 `v1.7.5` 重发
+（部署期间的权限位与 LAN DNS 连锁坑见 skill `sower-deploy` 的 Pitfalls）。
 
 ## 未决（不在本次范围）
 

@@ -10,18 +10,13 @@
   TLS 之下，为每次写入武装 `writeStallTimeout`；`dumpHeapOnSignal`（`heapdump_unix.go`，
   其他平台 no-op）在 SIGUSR1 时写 heap profile；`GOMEMLIMIT=512MiB` 进入安装器 unit、
   打包 unit 与 kr drop-in。
-- 发布：`v1.7.2` 的 Release run 在 windows-amd64/arm64 上失败（`syscall.SIGUSR1` 在
-  Windows 未定义），Attach release assets 被跳过、没有发布任何资产；`06c357c` 把信号
-  处理挪到 `//go:build unix` 文件后以 `v1.7.3` 重新发布（12 个平台构建 + Attach assets 全绿）。
-- kr 运行的是 **v1.7.3 release 资产**：tarball `sower-linux-amd64.tar.gz` 经
-  `SHA256SUMS` 校验，`sowerd` sha256 `74b34fd9119d45d0d8de2013656a292ed2ffa08ec7e6a2dff6cac9262fd6d428`，
-  `go version -m` 显示 `mod v1.7.3`、`vcs.revision=06c357c`、`vcs.modified=false`；
-  备份 `/usr/local/bin/sowerd.bak-20261012191818`（上一版为本地构建 v1.7.1-4-g28c4f9e，
-  备份 `sowerd.bak-20261012175623`）。
-- 验证：`:80` 仍 308 跳转；`:443` 回退反代 200；SIGUSR1 产出
-  `/var/cache/sower/sowerd-heap-*.pprof`；用 `transport/sower` 从本机经 kr 中继
-  `www.baidu.com:80` 得到 HTTP/1.0 200（证明新增的写超时不误伤中继）；r6c 客户端
-  socks5 到 google 仍 204，其日志自 17:31 起无握手失败；`GOMEMLIMIT=512MiB` 在进程中可见。
+- 已发布 `v1.7.3`（`v1.7.2` 因 Windows 上 `syscall.SIGUSR1` 未定义而未发布）；kr 运行的是
+  该 release 资产的 `sowerd`。
+- OOM 的**驱动**随后被定位为自指代理递归并在客户端修复（`v1.7.5`/`v1.7.6`，见
+  [2026-10-12-self-proxy-target-guard.md](2026-10-12-self-proxy-target-guard.md)）；本文件的
+  连接上界是下限保护，不是根因修复。
+- 验证：`:80` 308 跳转；`:443` 回退反代 200；SIGUSR1 产出 heap profile；`transport/sower`
+  经 kr 中继 `www.baidu.com:80` 得到 HTTP/1.0 200（新增写超时不误伤中继）。
 
 ## 事件
 
@@ -78,23 +73,18 @@ kr 的 zram swap 因 `vm.swappiness=0` 从未被使用。
    （`systemctl kill -s USR1 sowerd`，`go tool pprof -http :0 <file>`），不新增网络面。
 4. 部署侧：sowerd 单元加 `Environment=GOMEMLIMIT=512MiB`，让失控堆退化服务而不是
    杀死宿主机。
-5. 发布工具链：v1.7.1 是唯一用 go1.26.8 构建的制品（现场其余二进制为
-   go1.27.1/1.27.2），而 go1.26 的 Green Tea GC 有公开的内存回归报告
-   （golang/go#77567、#77361）。CI 的 `go-version: ^1.26` 收敛到 `^1.27`。
+5. 发布工具链：CI 的 `go-version: ^1.26` 收敛到 `^1.27`，与本地/现场构建一致。当时曾怀疑
+   go1.26.8 的 GC 回归（golang/go#77567、#77361）是原因，后证明是自指递归；保留这个改动只是
+   让制品构建环境不再漂移。
 
 ## 未决
 
-- **驱动已由另一会话定位（2026-10-12 18:44–18:50，board 消息 `m-77507977-64f`）**：任何
-  指名 `sower.wweir.fun` 的代理请求会形成自持链——该名字的公网 A 记录指向 r6c 的
-  tailscale 地址 `100.64.1.1`（r6c 上 sower 监听 80/443/53/1080），`cmd/sower` 无条件下
-  发给 kr，kr 解析同名后回dial 进 r6c:80，再转发，逐跳生成下一跳。实测 r6c 上
-  `100.64.1.1:80` 连接数 155→254→305→495→601（对端全是 kr），且触发它的 curl 退出后
-  仍在增长；kr 上 sowerd 同期 311 个 dial、649 个 fd。这与本次 OOM 的窗口、双向近似
-  对称流量、静默增长、以及“sowerd 一死链就断”全部吻合；18:50 重启 r6c 的 sower 后两侧
-  都回到 0 连接。sowerd 侧的 cap 与写超时只把它**限住**（链在 2048 处停止增长、内存有界），
-  真正的修法是客户端拒绝把请求 dial 回自己的监听地址（另一会话已开高优先级 finding）。
-  触发链是否就是 17:30 那次膨胀的唯一成因仍无直接证据（当时进程已死、无 pprof、sar 缺样），
-  因此上界与 SIGUSR1 dump 的价值是把下一次复现变成可定位事件，而不是宣称已修复根因。
+- **驱动已定位并修复（见姊妹文件）**：任何指名 `sower.wweir.fun`（公网 A 记录 = r6c 的
+  tailscale 地址 `100.64.1.1`）的代理请求会形成自持链：实测 r6c 上 `100.64.1.1:80` 连接数
+  155→601、kr 上 sowerd 311 个 dial / 649 个 fd，且触发请求退出后仍增长；客户端守卫已在
+  `v1.7.5`/`v1.7.6` 拒绝这类自指拨号。本文件的连接上界因此是下限保护（链在 2048 处停止
+  增长、内存有界）；该链是否就是 17:30 那次膨胀的唯一成因仍无直接证据（进程已死、无 pprof、
+  sar 缺样），SIGUSR1 dump 的价值是把下一次复现变成可定位事件。
 - `relay.Relay` 的写超时缺陷属于 `sower-proxy/conns` 仓库，应在那里修（finding
   `f-1ae16668-b92`）。sowerd 侧只做上界，不给隧道加全局空闲超时，避免误杀合法但长时间
   空闲的隧道。
