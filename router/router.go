@@ -8,8 +8,10 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/maypok86/otter/v2"
 	geoip2 "github.com/oschwald/geoip2-golang"
 	"github.com/sower-proxy/conns/relay"
 	"github.com/sower-proxy/deferlog/v2"
@@ -29,6 +31,13 @@ type (
 		ruleHitObserver  RuleHitObserver
 		ruleMissObserver RuleMissObserver
 		accessCache      *accessProbeCache
+
+		// selfProxy holds the listener addresses this client forwards proxy
+		// traffic on: a proxy dial that resolves to one of them is refused
+		// instead of re-entering this proxy (see selfproxy.go).
+		selfProxy       atomic.Pointer[selfProxyGuard]
+		selfProxyCache  *otter.Cache[string, []net.IP]
+		selfProxyLookup func(ctx context.Context, domain string) ([]net.IP, error)
 
 		dns struct {
 			upstreamDNS  string
@@ -128,6 +137,13 @@ func NewRouter(serveIPs []string, upstreamDNS, fallbackDNS, mmdbFile string, pro
 		ProxyRule:   NewRuleSet(),
 		ProxyDial:   proxyDial,
 		accessCache: newAccessCache(accessCacheTTL, httpPing),
+		selfProxyCache: otter.Must(&otter.Options[string, []net.IP]{
+			MaximumSize:      selfProxyCacheMaxNames,
+			ExpiryCalculator: otter.ExpiryWriting[string, []net.IP](selfProxyLookupTTL),
+		}),
+	}
+	r.selfProxyLookup = func(ctx context.Context, domain string) ([]net.IP, error) {
+		return net.DefaultResolver.LookupIP(ctx, "ip", domain)
 	}
 
 	r.dns.upstreamDNS = upstreamDNS
@@ -235,6 +251,12 @@ func (r *Router) DialSmart(network, domain string, port uint16) (net.Conn, error
 func (r *Router) DialProxyOnly(network, domain string, port uint16) (net.Conn, error) {
 	if r.ProxyDial == nil {
 		return nil, fmt.Errorf("proxy dialer unavailable")
+	}
+	// Guards every path that reaches the tunnel, explicit proxy requests and
+	// auto-routed traffic alike: a target that resolves to a listener this
+	// client forwards on would be forwarded again, forever.
+	if ip, self := r.selfTarget(domain, port); self {
+		return nil, selfProxyError(domain, port, ip)
 	}
 	r.observe(RouteProxy, domain)
 	start := time.Now()

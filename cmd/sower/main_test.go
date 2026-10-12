@@ -293,3 +293,41 @@ func TestMemoryLimitMiB(t *testing.T) {
 		})
 	}
 }
+
+// The self-target guard is only as good as the listener set it is given: it
+// must name every address this process forwards proxy traffic on, and only
+// those (a proxied dial to one of them re-enters the proxy).
+func TestSelfProxyAddrsCoversEveryForwardingListener(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.SowerConfig{}
+	cfg.DNS.Serve = "100.64.1.1"
+	cfg.DNS.Serve6 = "fd7a::1"
+	cfg.Socks5.Addr = "100.64.1.1:1080"
+	cfg.Admin.Addr = "100.64.1.1:18080"
+
+	got := selfProxyAddrs(cfg)
+	want := []string{
+		"100.64.1.1:80", "100.64.1.1:443",
+		"[fd7a::1]:80", "[fd7a::1]:443",
+		"100.64.1.1:1080",
+	}
+	slices.Sort(got)
+	slices.Sort(want)
+	if !slices.Equal(got, want) {
+		t.Fatalf("selfProxyAddrs = %v, want %v", got, want)
+	}
+
+	// A standalone admin listener answers admin traffic instead of forwarding,
+	// so it can never close a proxy chain; disabling SOCKS5 drops its address.
+	cfg.Socks5.Disable = true
+	if got := selfProxyAddrs(cfg); slices.Contains(got, cfg.Admin.Addr) {
+		t.Fatalf("admin-only listener listed as a proxy listener: %v", got)
+	}
+
+	// With DNS disabled no HTTP/HTTPS proxy listener is started at all.
+	cfg.DNS.Disable = true
+	if got := selfProxyAddrs(cfg); len(got) != 0 {
+		t.Fatalf("selfProxyAddrs = %v, want none while the proxy listeners are disabled", got)
+	}
+}

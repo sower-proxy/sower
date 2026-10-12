@@ -435,6 +435,7 @@ func newRouter(cfg config.SowerConfig, proxyDial router.ProxyDialFn) (*router.Ro
 	r.BlockRule.Add(cfg.Router.Block.Rules...)
 	r.DirectRule.Add(cfg.Router.Direct.Rules...)
 	r.ProxyRule.Add(cfg.Router.Proxy.Rules...)
+	r.SetSelfProxyAddrs(selfProxyAddrs(cfg)...)
 	if err := r.AddCountryCIDRs(cfg.Router.Country.Rules...); err != nil {
 		_ = r.Close()
 		return nil, err
@@ -496,6 +497,27 @@ func dnsListenIPs(cfg config.SowerConfig) []string {
 		ips = append(ips, cfg.DNS.Serve6)
 	}
 	return ips
+}
+
+// selfProxyAddrs lists the TCP addresses this process serves proxy traffic on:
+// the HTTP and HTTPS proxy listeners on every DNS listen address, plus SOCKS5.
+// A proxy dial that resolves to one of them can only re-enter this proxy and be
+// forwarded again (router.ErrSelfProxyTarget). Admin-only and DNS listeners are
+// deliberately excluded: they do not forward, so dialing them cannot build a
+// chain.
+func selfProxyAddrs(cfg config.SowerConfig) []string {
+	if cfg.DNS.Disable {
+		return nil
+	}
+	ips := dnsListenIPs(cfg)
+	addrs := make([]string, 0, len(ips)*2+1)
+	for _, ip := range ips {
+		addrs = append(addrs, net.JoinHostPort(ip, "80"), net.JoinHostPort(ip, "443"))
+	}
+	if !cfg.Socks5.Disable && strings.TrimSpace(cfg.Socks5.Addr) != "" {
+		addrs = append(addrs, cfg.Socks5.Addr)
+	}
+	return addrs
 }
 
 func startHTTPListener(ctx context.Context, wg *sync.WaitGroup, ip string, r *router.Router, stats *admin.Stats, errCh chan<- error) error {

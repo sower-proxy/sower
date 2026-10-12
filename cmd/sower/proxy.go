@@ -460,7 +460,10 @@ func wrapAcceptErr(ctx context.Context, protocol string, err error) error {
 
 func writeHTTPProxyError(conn net.Conn, err error) {
 	status := "502 Bad Gateway"
-	if stderrors.Is(err, router.ErrBlocked) {
+	switch {
+	case stderrors.Is(err, router.ErrBlocked), stderrors.Is(err, router.ErrSelfProxyTarget):
+		// A refused request: blocked by a rule, or aimed at a name this proxy
+		// itself serves, which cannot be forwarded without re-entering it.
 		status = "403 Forbidden"
 	}
 	if _, writeErr := conn.Write([]byte("HTTP/1.1 " + status + "\r\n\r\n")); writeErr != nil {
@@ -469,7 +472,7 @@ func writeHTTPProxyError(conn net.Conn, err error) {
 }
 
 func routeSocks5ReplyCode(err error) byte {
-	if stderrors.Is(err, router.ErrBlocked) {
+	if stderrors.Is(err, router.ErrBlocked) || stderrors.Is(err, router.ErrSelfProxyTarget) {
 		return socks5.RepConnectionNotAllowed
 	}
 	return socks5.RepGeneralFailure
