@@ -348,6 +348,15 @@ func (s *Stats) recentErrorEvents() []ErrorEvent {
 	return out
 }
 
+// RecordSelfRefusal counts one proxy dial refused because its target resolves
+// into this client's own listener. The refusal is a policy answer, so it stays
+// out of the error counters and the event ring that drive the console alert;
+// the dedicated metric exists so a client that points at the proxy through the
+// proxy remains observable. protocol is http, https, or socks5.
+func (s *Stats) RecordSelfRefusal(protocol string) {
+	s.metrics.RecordSelfRefusal(protocol)
+}
+
 // RecordProxyError counts one proxy-side failure of the given kind (dial,
 // dns, or accept) and appends it to the console event ring. Policy refusals
 // must not call this: a blocked target, or one that resolves into this

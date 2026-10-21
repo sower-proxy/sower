@@ -20,6 +20,8 @@ func TestExporterServesInstruments(t *testing.T) {
 	m.ConnOpened("http")
 	m.ConnClosed("http")
 	m.RecordRoute("proxy")
+	m.RecordProxyError("dial")
+	m.RecordSelfRefusal("socks5")
 	m.RecordConnDuration(3 * time.Millisecond)
 
 	rec := httptest.NewRecorder()
@@ -35,6 +37,8 @@ func TestExporterServesInstruments(t *testing.T) {
 		`sower_connections_total{protocol="http"} 1`,
 		`sower_connections_active{protocol="http"} 0`,
 		`sower_rule_hits_total{route="proxy"} 1`,
+		`sower_proxy_errors_total{kind="dial"} 1`,
+		`sower_proxy_self_refusals_total{protocol="socks5"} 1`,
 		"sower_uptime_seconds ",
 		"sower_process_goroutines ",
 	} {

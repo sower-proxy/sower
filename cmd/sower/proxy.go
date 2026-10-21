@@ -142,6 +142,29 @@ func isPolicyRefusal(err error) bool {
 	return stderrors.Is(err, router.ErrBlocked) || stderrors.Is(err, router.ErrSelfProxyTarget)
 }
 
+// logDialError logs a failed proxy dial at the level it deserves: a policy
+// refusal is the proxy's intended answer (the client gets 403/0x02), so it is
+// debug-level diagnostics rather than an error; a real dial failure stays an
+// error so an outage is still visible.
+func logDialError(protocol, host string, err error, attrs ...any) {
+	args := append([]any{"protocol", protocol, "error", err, "host", host}, attrs...)
+	if isPolicyRefusal(err) {
+		slog.Debug("dial refused", args...)
+		return
+	}
+	slog.Error("dial proxy", args...)
+}
+
+// recordSelfRefusal keeps a refused self-target observable without turning it
+// into a service failure: the refusal stays out of the error counters and the
+// console alert, and only this dedicated metric counts it. A blocked target is
+// already visible through the rule-hit metric, so it is not counted here.
+func recordSelfRefusal(stats *admin.Stats, protocol string, err error) {
+	if stderrors.Is(err, router.ErrSelfProxyTarget) {
+		stats.RecordSelfRefusal(protocol)
+	}
+}
+
 func upstreamDialAddr(addr, defaultPort string) (string, error) {
 	if host, port, err := net.SplitHostPort(addr); err == nil {
 		if host == "" || port == "" {
@@ -211,7 +234,9 @@ func handleHTTPConn(conn net.Conn, r *router.Router, stats *admin.Stats) {
 	br := bufio.NewReader(rereadConn)
 	req, err := http.ReadRequest(br)
 	if err != nil {
-		slog.Error("read http request", "error", err)
+		// Malformed or aborted requests are client noise, not service
+		// failures; error level here would drown real outages.
+		slog.Debug("read http request", "error", err)
 		return
 	}
 	_ = rereadConn.SetDeadline(time.Time{})
@@ -225,7 +250,9 @@ func handleHTTPConn(conn net.Conn, r *router.Router, stats *admin.Stats) {
 	host, port := splitHostPort(req.Host, defPort)
 	rc, err := r.DialProxyOnly("tcp", host, port)
 	if err != nil {
-		slog.Error("dial proxy", "error", err, "host", req.Host, "req", req.URL)
+		// The path, not the URL: a query string can carry credentials.
+		logDialError("http", req.Host, err, "path", req.URL.Path)
+		recordSelfRefusal(stats, "http", err)
 		if !isPolicyRefusal(err) {
 			stats.RecordProxyError("dial", fmt.Sprintf("%s: %v", hostOnly(req.Host), err))
 		}
@@ -285,7 +312,8 @@ func handleHTTPSConn(conn net.Conn, r *router.Router, stats *admin.Stats) {
 	stats.BindConn(conn, domain)
 	rc, err := r.DialProxyOnly("tcp", domain, 443)
 	if err != nil {
-		slog.Error("dial proxy", "error", err, "host", domain)
+		logDialError("https", domain, err)
+		recordSelfRefusal(stats, "https", err)
 		if !isPolicyRefusal(err) {
 			stats.RecordProxyError("dial", fmt.Sprintf("%s: %v", domain, err))
 		}
@@ -364,7 +392,7 @@ func handleSocks5Conn(conn net.Conn, r *router.Router, stats *admin.Stats) {
 
 	byte1 := make([]byte, 1)
 	if n, err := rereadConn.Read(byte1); err != nil || n != 1 {
-		slog.Error("read first byte", "error", err)
+		slog.Debug("read first byte", "error", err)
 		return
 	}
 	rereadConn.Reread()
@@ -374,7 +402,9 @@ func handleSocks5Conn(conn net.Conn, r *router.Router, stats *admin.Stats) {
 		server := socks5.New()
 		addr, err := server.ReadRequest(rereadConn)
 		if err != nil {
-			slog.Error("read socks5 request", "error", err)
+			// Probes and clients that hang up mid-handshake are routine on a
+			// listener that is reachable from the LAN and the tailnet.
+			slog.Debug("read socks5 request", "error", err)
 			return
 		}
 		// The handshake is complete: clear the deadline before dialing and
@@ -386,6 +416,8 @@ func handleSocks5Conn(conn net.Conn, r *router.Router, stats *admin.Stats) {
 		stats.BindConn(conn, host)
 		rc, err := r.DialSmart("tcp", host, port)
 		if err != nil {
+			logDialError("socks5", host, err, "port", port)
+			recordSelfRefusal(stats, "socks5", err)
 			if !isPolicyRefusal(err) {
 				stats.RecordProxyError("dial", fmt.Sprintf("%s: %v", host, err))
 			}
@@ -407,7 +439,7 @@ func handleSocks5Conn(conn net.Conn, r *router.Router, stats *admin.Stats) {
 	br := bufio.NewReader(rereadConn)
 	req, err := http.ReadRequest(br)
 	if err != nil {
-		slog.Error("read http request", "error", err)
+		slog.Debug("read http request", "error", err)
 		return
 	}
 	// Handshake complete; clear the deadline before dialing.
@@ -422,6 +454,8 @@ func handleSocks5Conn(conn net.Conn, r *router.Router, stats *admin.Stats) {
 	stats.BindConn(conn, host)
 	rc, err := r.DialSmart("tcp", host, port)
 	if err != nil {
+		logDialError("socks5", host, err, "port", port)
+		recordSelfRefusal(stats, "socks5", err)
 		if !isPolicyRefusal(err) {
 			stats.RecordProxyError("dial", fmt.Sprintf("%s: %v", host, err))
 		}

@@ -84,7 +84,7 @@
       <CircleAlert class="size-4" />
       <Alert.AlertDescription>
         <p>
-          服务异常 {formatCount(errorTotal)} 次
+          自启动以来服务异常 {formatCount(errorTotal)} 次
           <span class="tabular-nums">
             （上游连接 {formatCount(traffic.errors.dial)} · DNS
             {formatCount(traffic.errors.dns)} · 接收 {formatCount(traffic.errors.accept)}）

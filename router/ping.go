@@ -70,7 +70,10 @@ func httpPing(key string) (bool, error) {
 
 	resp, err := pingClient.Head(scheme + "://" + host)
 	if err != nil {
-		slog.Warn("failed to ping", "error", err, "scheme", scheme, "host", host)
+		// A failed probe is the expected answer for a domain that is only
+		// reachable through the tunnel: the miss routes it to the proxy, so it
+		// is routing diagnostics rather than a warning.
+		slog.Debug("failed to ping", "error", err, "scheme", scheme, "host", host)
 		return false, nil
 	}
 	_ = resp.Body.Close()

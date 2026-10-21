@@ -33,7 +33,11 @@ type Metrics struct {
 	activeConns metric.Int64UpDownCounter
 	ruleHits    metric.Int64Counter // attr: route=block|direct|proxy
 	proxyErrors metric.Int64Counter // attr: kind=dial|dns|accept
-	connDur     metric.Int64Histogram
+	// selfRefusals counts proxy dials refused because the target resolves into
+	// this client's own listener: a policy answer, not a service failure, kept
+	// out of proxyErrors but still observable. attr: protocol=http|https|socks5
+	selfRefusals metric.Int64Counter
+	connDur      metric.Int64Histogram
 
 	start time.Time
 }
@@ -71,6 +75,8 @@ func New() (*Metrics, error) {
 		metric.WithDescription("Connection routing decisions by rule category"))
 	m.proxyErrors = mustCounter(m.meter, "sower.proxy_errors",
 		metric.WithDescription("Proxy-side failures by kind"))
+	m.selfRefusals = mustCounter(m.meter, "sower.proxy_self_refusals",
+		metric.WithDescription("Proxy dials refused because the target resolves into this client's own listener"))
 	m.connDur = mustHistogram(m.meter, "sower.connection_duration",
 		metric.WithDescription("Proxy connection lifetime"),
 		metric.WithUnit("ms"))
@@ -147,6 +153,16 @@ func (m *Metrics) RecordConnDuration(d time.Duration) {
 func (m *Metrics) RecordProxyError(kind string) {
 	m.proxyErrors.Add(context.Background(), 1,
 		metric.WithAttributes(attribute.String("kind", kind)))
+}
+
+// RecordSelfRefusal counts one proxy dial refused because its target resolves
+// into this client's own listener: forwarding it would re-enter this proxy. A
+// refusal is a policy answer, so it is counted here rather than in
+// RecordProxyError, which drives the console's service alert. protocol is the
+// listener that received the request: http, https, or socks5.
+func (m *Metrics) RecordSelfRefusal(protocol string) {
+	m.selfRefusals.Add(context.Background(), 1,
+		metric.WithAttributes(attribute.String("protocol", protocol)))
 }
 
 // ServeHTTP serves the Prometheus exposition format.

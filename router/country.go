@@ -21,7 +21,10 @@ func (r *Router) localSite(ctx context.Context, domain string) bool {
 
 	ips, err := net.DefaultResolver.LookupIP(resolveCtx, "ip", domain)
 	if err != nil || len(ips) == 0 {
-		slog.Warn("resolve domain", "error", err, "domain", domain, "ips", len(ips))
+		// Names the system resolver cannot answer are routine for the domains a
+		// client proxies by design; the miss falls through to the proxy route,
+		// so this is diagnostics rather than a warning.
+		slog.Debug("resolve domain", "error", err, "domain", domain, "ips", len(ips))
 		return false
 	}
 

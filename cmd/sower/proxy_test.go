@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -104,7 +105,8 @@ func TestHandleSocks5ConnReturnsSocks5FailureForBlockedRequest(t *testing.T) {
 	defer client.Close()
 
 	r := newTestRouter()
-	go handleSocks5Conn(server, r, newTestStats(t))
+	stats := newTestStats(t)
+	go handleSocks5Conn(server, r, stats)
 
 	client.SetDeadline(time.Now().Add(2 * time.Second))
 	if _, err := client.Write([]byte{0x05, 0x01, 0x00}); err != nil {
@@ -132,6 +134,15 @@ func TestHandleSocks5ConnReturnsSocks5FailureForBlockedRequest(t *testing.T) {
 	}
 	if reply[1] != 0x02 {
 		t.Fatalf("expected connection-not-allowed reply, got %d", reply[1])
+	}
+
+	// A blocked target is a policy refusal like a self target: neither feeds
+	// the service alert, and only the self target has a refusal metric.
+	assertNoProxyServiceErrors(t, stats)
+	rec := httptest.NewRecorder()
+	stats.Metrics().ServeHTTP(rec, httptest.NewRequest("GET", "/metrics", nil))
+	if strings.Contains(rec.Body.String(), "sower_proxy_self_refusals_total") {
+		t.Fatalf("blocked target counted as a self-target refusal:\n%s", rec.Body.String())
 	}
 }
 
@@ -544,6 +555,7 @@ func TestHandleHTTPConnAnswersRefusedSelfTarget(t *testing.T) {
 
 	waitForHandler(t, &wg)
 	assertNoProxyServiceErrors(t, stats)
+	assertSelfRefusalCounted(t, stats, "http")
 }
 
 // A self-target refusal is a policy answer, so the SOCKS5 listener must reply
@@ -584,6 +596,7 @@ func TestHandleSocks5ConnSelfTargetRefusalIsNotAServiceError(t *testing.T) {
 	}
 
 	assertNoProxyServiceErrors(t, stats)
+	assertSelfRefusalCounted(t, stats, "socks5")
 }
 
 // The SOCKS5 listener also accepts HTTP proxy requests (non-0x05 first byte);
@@ -612,6 +625,50 @@ func TestHandleSocks5ConnHTTPSelfTargetRefusalIsNotAServiceError(t *testing.T) {
 	}
 
 	assertNoProxyServiceErrors(t, stats)
+	assertSelfRefusalCounted(t, stats, "socks5")
+}
+
+// A self-target refusal on the HTTPS/SNI path must not count as a service
+// failure either. The router's guard is covered in the router package; here a
+// stubbed dialer returns the same sentinel to pin the handler's classification.
+func TestHandleHTTPSConnDoesNotCountSelfTargetRefusal(t *testing.T) {
+	t.Parallel()
+
+	server, client := net.Pipe()
+	defer client.Close()
+
+	dialed := make(chan struct{}, 1)
+	r := &router.Router{
+		BlockRule:  router.NewRuleSet(),
+		DirectRule: router.NewRuleSet(),
+		ProxyRule:  router.NewRuleSet(),
+		ProxyDial: func(_, _ string, _ uint16) (net.Conn, error) {
+			dialed <- struct{}{}
+			return nil, fmt.Errorf("proxy dial 100.64.1.1:443: %w", router.ErrSelfProxyTarget)
+		},
+	}
+	stats := newTestStats(t)
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		handleHTTPSConn(server, r, stats)
+	}()
+
+	hello := generateTLSClientHelloRecord(t, "example.com")
+	if _, err := client.Write(hello); err != nil {
+		t.Fatalf("write client hello: %v", err)
+	}
+	select {
+	case <-dialed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("proxy dial was not reached")
+	}
+
+	waitForHandler(t, &wg)
+	assertNoProxyServiceErrors(t, stats)
+	assertSelfRefusalCounted(t, stats, "https")
 }
 
 // The suppression must not swallow real dial failures: they still feed the
@@ -690,5 +747,22 @@ func assertNoProxyServiceErrors(t *testing.T, stats *admin.Stats) {
 	}
 	if len(snap.Events) != 0 {
 		t.Fatalf("policy refusal entered the error ring: %+v", snap.Events)
+	}
+}
+
+// assertSelfRefusalCounted checks that a refusal stays observable through the
+// dedicated metric instead of the alert counters.
+func assertSelfRefusalCounted(t *testing.T, stats *admin.Stats, protocol string) {
+	t.Helper()
+
+	rec := httptest.NewRecorder()
+	stats.Metrics().ServeHTTP(rec, httptest.NewRequest("GET", "/metrics", nil))
+	body := rec.Body.String()
+	want := fmt.Sprintf(`sower_proxy_self_refusals_total{protocol=%q} 1`, protocol)
+	if !strings.Contains(body, want) {
+		t.Fatalf("expected %q in the metrics export, got:\n%s", want, body)
+	}
+	if strings.Contains(body, "sower_proxy_errors_total") {
+		t.Fatalf("refusal was also counted as a proxy error:\n%s", body)
 	}
 }
