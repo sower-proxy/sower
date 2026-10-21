@@ -29,10 +29,11 @@
   const history = $derived(live.history)
 
   // Proxy-side failures (upstream dial, DNS, accept) surface as a service
-  // alert; blocked connections are routing decisions and never counted. The
-  // alert reflects the current state: it only shows while a failure happened
-  // within alertWindowMs, so a past outage does not keep a red banner up
-  // forever. The cumulative counts are shown as context inside it.
+  // alert; blocked connections and refused self-target dials are routing
+  // decisions and never counted. The alert reflects the current state: it only
+  // shows while a failure happened within alertWindowMs, so a past outage does
+  // not keep a red banner up forever. The cumulative counts are shown as
+  // context inside it.
   const alertWindowMs = 10 * 60 * 1000
   const errorTotal = $derived(
     traffic ? traffic.errors.dial + traffic.errors.dns + traffic.errors.accept : 0,

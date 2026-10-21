@@ -2,6 +2,8 @@ package main
 
 import (
 	"crypto/tls"
+	"errors"
+	"fmt"
 	"io"
 	"net"
 	"strings"
@@ -520,11 +522,12 @@ func TestHandleHTTPConnAnswersRefusedSelfTarget(t *testing.T) {
 	t.Cleanup(func() { _ = r.Close() })
 	r.SetSelfProxyAddrs("100.64.1.1:80")
 
+	stats := newTestStats(t)
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		handleHTTPConn(downstreamServer, r, newTestStats(t))
+		handleHTTPConn(downstreamServer, r, stats)
 	}()
 
 	if _, err := downstreamClient.Write([]byte("GET / HTTP/1.1\r\nHost: 100.64.1.1\r\n\r\n")); err != nil {
@@ -540,4 +543,152 @@ func TestHandleHTTPConnAnswersRefusedSelfTarget(t *testing.T) {
 	}
 
 	waitForHandler(t, &wg)
+	assertNoProxyServiceErrors(t, stats)
+}
+
+// A self-target refusal is a policy answer, so the SOCKS5 listener must reply
+// with connection-not-allowed and must not record a service error.
+func TestHandleSocks5ConnSelfTargetRefusalIsNotAServiceError(t *testing.T) {
+	t.Parallel()
+
+	server, client := net.Pipe()
+	defer client.Close()
+
+	r := newTestRouter()
+	r.SetSelfProxyAddrs("100.64.1.1:80")
+	stats := newTestStats(t)
+	go handleSocks5Conn(server, r, stats)
+
+	if _, err := client.Write([]byte{0x05, 0x01, 0x00}); err != nil {
+		t.Fatalf("write auth request: %v", err)
+	}
+	authResp := make([]byte, 2)
+	if _, err := io.ReadFull(client, authResp); err != nil {
+		t.Fatalf("read auth response: %v", err)
+	}
+	if authResp[0] != 0x05 || authResp[1] != 0x00 {
+		t.Fatalf("unexpected auth response: %v", authResp)
+	}
+
+	// CONNECT 100.64.1.1:80, the address this client serves proxy traffic on.
+	req := []byte{0x05, 0x01, 0x00, 0x01, 100, 64, 1, 1, 0x00, 0x50}
+	if _, err := client.Write(req); err != nil {
+		t.Fatalf("write connect request: %v", err)
+	}
+	reply := make([]byte, 10)
+	if _, err := io.ReadFull(client, reply); err != nil {
+		t.Fatalf("read connect reply: %v", err)
+	}
+	if reply[1] != 0x02 {
+		t.Fatalf("connect reply = %#x, want connection-not-allowed (0x02)", reply[1])
+	}
+
+	assertNoProxyServiceErrors(t, stats)
+}
+
+// The SOCKS5 listener also accepts HTTP proxy requests (non-0x05 first byte);
+// a refused self target there is answered 403 and is not a service error.
+func TestHandleSocks5ConnHTTPSelfTargetRefusalIsNotAServiceError(t *testing.T) {
+	t.Parallel()
+
+	server, client := net.Pipe()
+	defer client.Close()
+
+	r := newTestRouter()
+	r.SetSelfProxyAddrs("100.64.1.1:80")
+	stats := newTestStats(t)
+	go handleSocks5Conn(server, r, stats)
+
+	_ = client.SetDeadline(time.Now().Add(2 * time.Second))
+	if _, err := io.WriteString(client, "GET http://100.64.1.1/ HTTP/1.1\r\nHost: 100.64.1.1\r\n\r\n"); err != nil {
+		t.Fatalf("write proxy request: %v", err)
+	}
+	response, err := io.ReadAll(client)
+	if err != nil {
+		t.Fatalf("read refusal response: %v", err)
+	}
+	if !strings.HasPrefix(string(response), "HTTP/1.1 403 Forbidden") {
+		t.Fatalf("refusal response = %q, want a 403 status", response)
+	}
+
+	assertNoProxyServiceErrors(t, stats)
+}
+
+// The suppression must not swallow real dial failures: they still feed the
+// service alert.
+func TestHandleHTTPConnCountsRealDialFailure(t *testing.T) {
+	t.Parallel()
+
+	downstreamServer, downstreamClient := net.Pipe()
+	defer downstreamClient.Close()
+	t.Cleanup(func() { _ = downstreamServer.Close() })
+
+	r := &router.Router{
+		BlockRule:  router.NewRuleSet(),
+		DirectRule: router.NewRuleSet(),
+		ProxyRule:  router.NewRuleSet(),
+		ProxyDial: func(_, _ string, _ uint16) (net.Conn, error) {
+			return nil, errors.New("dial tcp: i/o timeout")
+		},
+	}
+	stats := newTestStats(t)
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		handleHTTPConn(downstreamServer, r, stats)
+	}()
+
+	if _, err := downstreamClient.Write([]byte("GET http://example.com/ HTTP/1.1\r\nHost: example.com\r\n\r\n")); err != nil {
+		t.Fatalf("write downstream request: %v", err)
+	}
+	_ = downstreamClient.SetReadDeadline(time.Now().Add(2 * time.Second))
+	response, err := io.ReadAll(downstreamClient)
+	if err != nil {
+		t.Fatalf("read failure response: %v", err)
+	}
+	if !strings.HasPrefix(string(response), "HTTP/1.1 502 Bad Gateway") {
+		t.Fatalf("failure response = %q, want a 502 status", response)
+	}
+
+	waitForHandler(t, &wg)
+	snap := stats.Snapshot(admin.DomainSortBytes, admin.SourceAll, "")
+	if snap.Errors.Dial != 1 {
+		t.Fatalf("dial errors = %d, want 1 for a real dial failure", snap.Errors.Dial)
+	}
+	if len(snap.Events) != 1 {
+		t.Fatalf("error events = %d, want 1 for a real dial failure", len(snap.Events))
+	}
+}
+
+func TestIsPolicyRefusal(t *testing.T) {
+	t.Parallel()
+
+	for _, err := range []error{
+		router.ErrBlocked,
+		router.ErrSelfProxyTarget,
+		fmt.Errorf("proxy dial 100.64.1.1:80: %w", router.ErrSelfProxyTarget),
+	} {
+		if !isPolicyRefusal(err) {
+			t.Fatalf("isPolicyRefusal(%v) = false, want true", err)
+		}
+	}
+	if isPolicyRefusal(errors.New("dial tcp: i/o timeout")) {
+		t.Fatal("isPolicyRefusal(network error) = true, want false")
+	}
+}
+
+// assertNoProxyServiceErrors reports whether a policy refusal leaked into the
+// console's service-failure counters or event ring.
+func assertNoProxyServiceErrors(t *testing.T, stats *admin.Stats) {
+	t.Helper()
+
+	snap := stats.Snapshot(admin.DomainSortBytes, admin.SourceAll, "")
+	if snap.Errors.Dial != 0 || snap.Errors.DNS != 0 || snap.Errors.Accept != 0 {
+		t.Fatalf("policy refusal counted as a proxy failure: %+v", snap.Errors)
+	}
+	if len(snap.Events) != 0 {
+		t.Fatalf("policy refusal entered the error ring: %+v", snap.Events)
+	}
 }

@@ -133,6 +133,15 @@ func splitHostPort(addr string, defPort uint16) (string, uint16) {
 	return host, uint16(p)
 }
 
+// isPolicyRefusal reports whether a dial error is the proxy answering a policy
+// refusal rather than failing to reach a target: a blocked target, or one that
+// resolves into this client's own listener and would re-enter the proxy. Both
+// are deliberate routing decisions, so they must not feed the proxy-error
+// statistics or the console's service alert.
+func isPolicyRefusal(err error) bool {
+	return stderrors.Is(err, router.ErrBlocked) || stderrors.Is(err, router.ErrSelfProxyTarget)
+}
+
 func upstreamDialAddr(addr, defaultPort string) (string, error) {
 	if host, port, err := net.SplitHostPort(addr); err == nil {
 		if host == "" || port == "" {
@@ -217,7 +226,7 @@ func handleHTTPConn(conn net.Conn, r *router.Router, stats *admin.Stats) {
 	rc, err := r.DialProxyOnly("tcp", host, port)
 	if err != nil {
 		slog.Error("dial proxy", "error", err, "host", req.Host, "req", req.URL)
-		if !stderrors.Is(err, router.ErrBlocked) {
+		if !isPolicyRefusal(err) {
 			stats.RecordProxyError("dial", fmt.Sprintf("%s: %v", hostOnly(req.Host), err))
 		}
 		// Answer the refusal: a client that only sees the connection close cannot
@@ -277,7 +286,9 @@ func handleHTTPSConn(conn net.Conn, r *router.Router, stats *admin.Stats) {
 	rc, err := r.DialProxyOnly("tcp", domain, 443)
 	if err != nil {
 		slog.Error("dial proxy", "error", err, "host", domain)
-		stats.RecordProxyError("dial", fmt.Sprintf("%s: %v", domain, err))
+		if !isPolicyRefusal(err) {
+			stats.RecordProxyError("dial", fmt.Sprintf("%s: %v", domain, err))
+		}
 		return
 	}
 	defer rc.Close()
@@ -375,7 +386,7 @@ func handleSocks5Conn(conn net.Conn, r *router.Router, stats *admin.Stats) {
 		stats.BindConn(conn, host)
 		rc, err := r.DialSmart("tcp", host, port)
 		if err != nil {
-			if !stderrors.Is(err, router.ErrBlocked) {
+			if !isPolicyRefusal(err) {
 				stats.RecordProxyError("dial", fmt.Sprintf("%s: %v", host, err))
 			}
 			if replyErr := server.WriteReply(rereadConn, routeSocks5ReplyCode(err)); replyErr != nil {
@@ -411,7 +422,7 @@ func handleSocks5Conn(conn net.Conn, r *router.Router, stats *admin.Stats) {
 	stats.BindConn(conn, host)
 	rc, err := r.DialSmart("tcp", host, port)
 	if err != nil {
-		if !stderrors.Is(err, router.ErrBlocked) {
+		if !isPolicyRefusal(err) {
 			stats.RecordProxyError("dial", fmt.Sprintf("%s: %v", host, err))
 		}
 		writeHTTPProxyError(rereadConn.Stop(), err)
@@ -466,8 +477,7 @@ func wrapAcceptErr(ctx context.Context, protocol string, err error) error {
 
 func writeHTTPProxyError(conn net.Conn, err error) {
 	status := "502 Bad Gateway"
-	switch {
-	case stderrors.Is(err, router.ErrBlocked), stderrors.Is(err, router.ErrSelfProxyTarget):
+	if isPolicyRefusal(err) {
 		// A refused request: blocked by a rule, or aimed at a name this proxy
 		// itself serves, which cannot be forwarded without re-entering it.
 		status = "403 Forbidden"
@@ -478,7 +488,7 @@ func writeHTTPProxyError(conn net.Conn, err error) {
 }
 
 func routeSocks5ReplyCode(err error) byte {
-	if stderrors.Is(err, router.ErrBlocked) || stderrors.Is(err, router.ErrSelfProxyTarget) {
+	if isPolicyRefusal(err) {
 		return socks5.RepConnectionNotAllowed
 	}
 	return socks5.RepGeneralFailure

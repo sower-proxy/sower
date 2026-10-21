@@ -134,9 +134,10 @@ type TrafficSnapshot struct {
 		Direct uint64 `json:"direct"`
 		Proxy  uint64 `json:"proxy"`
 	} `json:"ruleHits"`
-	// Errors aggregates from-start proxy-side failures by kind. Blocked
-	// connections are deliberate routing decisions and are never counted
-	// here; only dial, DNS, and accept failures are.
+	// Errors aggregates from-start proxy-side failures by kind. Policy
+	// refusals — a blocked target, or one that resolves into this client's own
+	// listener — are deliberate routing decisions and are never counted here;
+	// only dial, DNS, and accept failures are.
 	Errors struct {
 		Dial   uint64 `json:"dial"`
 		DNS    uint64 `json:"dns"`
@@ -348,10 +349,11 @@ func (s *Stats) recentErrorEvents() []ErrorEvent {
 }
 
 // RecordProxyError counts one proxy-side failure of the given kind (dial,
-// dns, or accept) and appends it to the console event ring. Blocked
-// connections must not call this: a block is a routing decision, not a
-// failure. detail is a short human-readable context (host, DNS server); it
-// is truncated and must never carry query strings or credentials.
+// dns, or accept) and appends it to the console event ring. Policy refusals
+// must not call this: a blocked target, or one that resolves into this
+// client's own listener, is a routing decision, not a failure. detail is a
+// short human-readable context (host, DNS server); it is truncated and must
+// never carry query strings or credentials.
 func (s *Stats) RecordProxyError(kind string, detail string) {
 	switch kind {
 	case "dial":
