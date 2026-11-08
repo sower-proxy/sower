@@ -142,24 +142,20 @@ func isPolicyRefusal(err error) bool {
 	return stderrors.Is(err, router.ErrBlocked) || stderrors.Is(err, router.ErrSelfProxyTarget)
 }
 
-// logDialError logs a failed proxy dial at the level it deserves: a policy
-// refusal is the proxy's intended answer (the client gets 403/0x02), so it is
-// debug-level diagnostics rather than an error; a real dial failure stays an
-// error so an outage is still visible.
-func logDialError(protocol, host string, err error, attrs ...any) {
+// recordDialFailure classifies one failed proxy dial. A policy refusal — a
+// blocked target, or one that resolves into this client's own listener — is
+// the proxy's intended answer: it is logged at debug level, kept out of the
+// error counters and the console alert, and a refused self-target additionally
+// feeds the dedicated refusal metric so the loop stays observable. A real dial
+// failure stays an error so an outage remains visible.
+func recordDialFailure(stats *admin.Stats, protocol, host string, err error, attrs ...any) {
 	args := append([]any{"protocol", protocol, "error", err, "host", host}, attrs...)
-	if isPolicyRefusal(err) {
-		slog.Debug("dial refused", args...)
+	if !isPolicyRefusal(err) {
+		slog.Error("dial proxy", args...)
+		stats.RecordProxyError("dial", fmt.Sprintf("%s: %v", host, err))
 		return
 	}
-	slog.Error("dial proxy", args...)
-}
-
-// recordSelfRefusal keeps a refused self-target observable without turning it
-// into a service failure: the refusal stays out of the error counters and the
-// console alert, and only this dedicated metric counts it. A blocked target is
-// already visible through the rule-hit metric, so it is not counted here.
-func recordSelfRefusal(stats *admin.Stats, protocol string, err error) {
+	slog.Debug("dial refused", args...)
 	if stderrors.Is(err, router.ErrSelfProxyTarget) {
 		stats.RecordSelfRefusal(protocol)
 	}
@@ -251,11 +247,7 @@ func handleHTTPConn(conn net.Conn, r *router.Router, stats *admin.Stats) {
 	rc, err := r.DialProxyOnly("tcp", host, port)
 	if err != nil {
 		// The path, not the URL: a query string can carry credentials.
-		logDialError("http", req.Host, err, "path", req.URL.Path)
-		recordSelfRefusal(stats, "http", err)
-		if !isPolicyRefusal(err) {
-			stats.RecordProxyError("dial", fmt.Sprintf("%s: %v", hostOnly(req.Host), err))
-		}
+		recordDialFailure(stats, "http", hostOnly(req.Host), err, "path", req.URL.Path)
 		// Answer the refusal: a client that only sees the connection close cannot
 		// tell a policy refusal (blocked target, this proxy's own listener) from
 		// a broken proxy.
@@ -312,11 +304,7 @@ func handleHTTPSConn(conn net.Conn, r *router.Router, stats *admin.Stats) {
 	stats.BindConn(conn, domain)
 	rc, err := r.DialProxyOnly("tcp", domain, 443)
 	if err != nil {
-		logDialError("https", domain, err)
-		recordSelfRefusal(stats, "https", err)
-		if !isPolicyRefusal(err) {
-			stats.RecordProxyError("dial", fmt.Sprintf("%s: %v", domain, err))
-		}
+		recordDialFailure(stats, "https", domain, err)
 		return
 	}
 	defer rc.Close()
@@ -416,11 +404,7 @@ func handleSocks5Conn(conn net.Conn, r *router.Router, stats *admin.Stats) {
 		stats.BindConn(conn, host)
 		rc, err := r.DialSmart("tcp", host, port)
 		if err != nil {
-			logDialError("socks5", host, err, "port", port)
-			recordSelfRefusal(stats, "socks5", err)
-			if !isPolicyRefusal(err) {
-				stats.RecordProxyError("dial", fmt.Sprintf("%s: %v", host, err))
-			}
+			recordDialFailure(stats, "socks5", host, err, "port", port)
 			if replyErr := server.WriteReply(rereadConn, routeSocks5ReplyCode(err)); replyErr != nil {
 				slog.Debug("write socks5 failure reply", "error", replyErr, "host", host, "port", port)
 			}
@@ -454,11 +438,7 @@ func handleSocks5Conn(conn net.Conn, r *router.Router, stats *admin.Stats) {
 	stats.BindConn(conn, host)
 	rc, err := r.DialSmart("tcp", host, port)
 	if err != nil {
-		logDialError("socks5", host, err, "port", port)
-		recordSelfRefusal(stats, "socks5", err)
-		if !isPolicyRefusal(err) {
-			stats.RecordProxyError("dial", fmt.Sprintf("%s: %v", host, err))
-		}
+		recordDialFailure(stats, "socks5", host, err, "port", port)
 		writeHTTPProxyError(rereadConn.Stop(), err)
 		return
 	}
