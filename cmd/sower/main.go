@@ -484,6 +484,9 @@ func startDNSListeners(ctx context.Context, wg *sync.WaitGroup, cfg config.Sower
 		if err := startDNSUDPListener(ctx, wg, ip, r, stats, errCh); err != nil {
 			return err
 		}
+		if err := startDNSTCPListener(ctx, wg, ip, r, stats, errCh); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -557,9 +560,11 @@ func startDNSUDPListener(ctx context.Context, wg *sync.WaitGroup, ip string, r *
 		return fmt.Errorf("listen dns proxy on %s: %w", addr, err)
 	}
 
+	// A response larger than the requester's UDP payload size must be trimmed
+	// with TC set, or the client never learns it has to retry over TCP.
 	server := &dns.Server{
 		PacketConn: pc,
-		Handler:    dnsStatsHandler{Handler: r, stats: stats},
+		Handler:    dnsStatsHandler{Handler: udpTruncatingHandler{next: r}, stats: stats},
 	}
 	slog.Info("service listening", "service", "dns proxy", "network", "udp", "addr", addr)
 	wg.Add(1)
@@ -570,6 +575,55 @@ func startDNSUDPListener(ctx context.Context, wg *sync.WaitGroup, ip string, r *
 		}
 	}()
 	return nil
+}
+
+func startDNSTCPListener(ctx context.Context, wg *sync.WaitGroup, ip string, r *router.Router, stats *admin.Stats, errCh chan<- error) error {
+	addr := net.JoinHostPort(ip, "53")
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("listen dns proxy on %s: %w", addr, err)
+	}
+
+	server := &dns.Server{
+		Listener: ln,
+		Handler:  dnsStatsHandler{Handler: r, stats: stats},
+	}
+	slog.Info("service listening", "service", "dns proxy", "network", "tcp", "addr", addr)
+	wg.Add(1)
+	go shutdownDNSServerOnDone(ctx, wg, server)
+	go func() {
+		if err := server.ActivateAndServe(); err != nil && !errors.Is(err, net.ErrClosed) {
+			reportServeError(errCh, "dns proxy", fmt.Errorf("serve on %s: %w", addr, err))
+		}
+	}()
+	return nil
+}
+
+// udpTruncatingHandler fits each UDP response into the payload size the
+// requester advertised (512 bytes without EDNS) and leaves the TC bit set when
+// it had to cut the answer. The TCP listener is not wrapped: a TCP answer must
+// never be truncated.
+type udpTruncatingHandler struct{ next dns.Handler }
+
+func (h udpTruncatingHandler) ServeDNS(w dns.ResponseWriter, req *dns.Msg) {
+	h.next.ServeDNS(udpTruncatingWriter{ResponseWriter: w, size: requestUDPSize(req)}, req)
+}
+
+type udpTruncatingWriter struct {
+	dns.ResponseWriter
+	size int
+}
+
+func (w udpTruncatingWriter) WriteMsg(m *dns.Msg) error {
+	m.Truncate(w.size)
+	return w.ResponseWriter.WriteMsg(m)
+}
+
+func requestUDPSize(req *dns.Msg) int {
+	if opt := req.IsEdns0(); opt != nil && opt.UDPSize() > dns.MinMsgSize {
+		return int(opt.UDPSize())
+	}
+	return dns.MinMsgSize
 }
 
 func startSocks5Listener(ctx context.Context, wg *sync.WaitGroup, cfg config.SowerConfig, r *router.Router, stats *admin.Stats, errCh chan<- error) error {
